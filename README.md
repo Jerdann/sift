@@ -55,11 +55,11 @@ pnpm make
 
 The packaged application directory is written to `out/Sift-win32-x64`. Package verification requires the app executable, asar resources, and unpacked native SQLite binding, and rejects development files, source maps, environment files, and known privacy canaries.
 
-`pnpm make` creates a no-admin Squirrel.Windows installer and update artifacts in `out/make/squirrel.windows/x64`, plus a portable ZIP in `out/make/zip/win32/x64`. The installer is the recommended build because it receives automatic updates.
+`pnpm make` creates a no-admin Squirrel.Windows installer and update artifacts in `out/make/squirrel.windows/x64`. The installer is the recommended build because it receives automatic updates. `pnpm package` creates the unpacked application directory for local verification; Sift does not currently publish a portable ZIP.
 
 ## Releases
 
-Pushing a semantic-version tag such as `v0.3.0` runs the Windows release workflow. It verifies the project, builds the Squirrel installer, and publishes `Sift-Setup.exe`, the full update package, and the `RELEASES` manifest to GitHub Releases. The public Electron update service discovers only complete, non-draft releases.
+Every public feature release updates the version in `package.json` and adds the matching section to `CHANGELOG.md`. Pushing the same semantic-version tag—such as `v0.4.0`—runs the Windows release workflow. It rejects mismatched version metadata, runs the source/privacy/type/unit/Electron/package/runtime checks, builds the Squirrel installer, and publishes `Sift-Setup.exe`, the full update package, and the `RELEASES` manifest to GitHub Releases. The public Electron update service discovers only complete, non-draft releases.
 
 ## First-run setup
 

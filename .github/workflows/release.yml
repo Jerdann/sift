@@ -27,14 +27,32 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify source
-        run: pnpm audit:public && pnpm test
+      - name: Verify release metadata
+        shell: pwsh
+        env:
+          SIFT_RELEASE_TAG: ${{ github.ref_name }}
+        run: pnpm verify:release
+
+      - name: Audit public source
+        run: pnpm audit:public
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Run unit tests
+        run: pnpm test:unit
+
+      - name: Run Electron end-to-end tests
+        run: pnpm test:e2e
 
       - name: Build installer and update feed
         run: pnpm make
 
       - name: Verify packaged runtime
         run: pnpm verify:package
+
+      - name: Smoke-test packaged runtime
+        run: pnpm smoke:package
 
       - name: Publish GitHub release
         shell: pwsh

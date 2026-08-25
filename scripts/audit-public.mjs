@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
 const gitPrefix = ['-c', `safe.directory=${process.cwd()}`];
-const trackedFiles = execFileSync('git', [...gitPrefix, 'ls-files', '-z'], {
+const publicFiles = execFileSync('git', [...gitPrefix, 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
   encoding: 'utf8',
 }).split('\0').filter(Boolean);
 
@@ -38,7 +38,7 @@ const allowedEmailDomain = (domain) =>
   domain === 'forward.protonmail.ch';
 
 const failures = [];
-for (const file of trackedFiles) {
+for (const file of publicFiles) {
   const normalized = file.replaceAll('\\', '/');
   if (forbiddenPaths.test(normalized)) {
     failures.push(`${normalized}: internal-only path is tracked`);
@@ -81,4 +81,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(`Public-source privacy audit passed for ${trackedFiles.length} tracked files.`);
+console.log(`Public-source privacy audit passed for ${publicFiles.length} tracked or publishable files.`);
