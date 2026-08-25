@@ -139,6 +139,22 @@ describe('Gmail OAuth connection', () => {
     const recovered = await new GmailOrganizationRunner(repository, organization, jobs, actionFetch as typeof fetch).run(retried.job!.id);
     expect(recovered.state).toBe('completed');
     expect(actionFetch.mock.calls.filter((call) => String(call[0]).endsWith('/messages/batchModify'))).toHaveLength(modifyCount);
+
+    const trashRepository = new GmailOrganizationRepository(profile.database, jobs, profileId, { now: () => '2027-03-01T00:00:00.000Z' });
+    const trashPlan = trashRepository.generate(repository.get()!, {
+      kind: 'trash', senderDomains: ['news.example', 'store.example'], olderThanDays: 180,
+    });
+    expect(trashPlan).toMatchObject({ kind: 'trash', state: 'draft', impactCount: 1, existingMessageCount: 1 });
+    expect(trashPlan.impacts[0]).toMatchObject({ sourceCategory: 'subscriptions', targetLabel: 'TRASH', trash: true });
+    expect(trashPlan.impacts.some((impact) => impact.sourceCategory === 'transactions')).toBe(false);
+    const trashApproved = trashRepository.approve(repository.get()!.id, trashPlan.id, trashPlan.revision);
+    const trashCompleted = await new GmailOrganizationRunner(repository, trashRepository, jobs, actionFetch as typeof fetch).run(trashApproved.job!.id);
+    expect(trashCompleted.state).toBe('completed');
+    expect(providerLabels.get('gmail-2')).toContain('TRASH');
+    const trashUndo = trashRepository.prepareUndo(trashCompleted.id);
+    const trashUndone = await new GmailOrganizationRunner(repository, trashRepository, jobs, actionFetch as typeof fetch).undo(trashUndo.undoJob!.id);
+    expect(trashUndone.undoJob?.state).toBe('succeeded');
+    expect(providerLabels.get('gmail-2')).not.toContain('TRASH');
     profile.database.close();
   });
 });

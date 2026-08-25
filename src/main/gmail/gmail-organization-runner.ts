@@ -42,11 +42,12 @@ export class GmailOrganizationRunner {
       this.#plans.markBatch(batch.id, 'running');
       try {
         const token = await this.#token(batch.connectionId, tokens);
-        const targetLabelId = batch.spam ? 'SPAM' : await this.#labelId(token, batch.targetLabel, labels);
+        const targetLabelId = batch.trash ? 'TRASH' : batch.spam ? 'SPAM' : await this.#labelId(token, batch.targetLabel, labels);
         const desired = Object.fromEntries(batch.messageIds.map((id) => {
           const next = new Set(batch.priorLabels[id] ?? []);
           next.add(targetLabelId);
-          if (batch.archive || batch.spam) next.delete('INBOX');
+          if (batch.archive || batch.spam || batch.trash) next.delete('INBOX');
+          if (batch.trash) next.delete('SPAM');
           if (batch.markRead) next.delete('UNREAD');
           return [id, [...next].sort()];
         }));
@@ -54,12 +55,14 @@ export class GmailOrganizationRunner {
         if (!mapMatches(current, desired, batch.messageIds)) {
           if (!mapMatches(current, batch.priorLabels, batch.messageIds)) throw new Error('provider_verification_mismatch');
           await this.#batchModify(token, batch.messageIds, [targetLabelId], [
-            ...((batch.archive || batch.spam) ? ['INBOX'] : []),
+            ...((batch.archive || batch.spam || batch.trash) ? ['INBOX'] : []),
+            ...(batch.trash ? ['SPAM'] : []),
             ...(batch.markRead ? ['UNREAD'] : []),
           ]);
         }
         const verified = await this.#readLabels(token, batch.messageIds);
         if (!mapMatches(verified, desired, batch.messageIds)) throw new Error('provider_verification_mismatch');
+        this.#plans.syncIndexedLabels(batch.connectionId, verified);
         this.#plans.markBatch(batch.id, 'succeeded', null, verified);
         this.#jobs.transitionItem(item.id, 'succeeded', { result: { operation: 'gmail-history-batch', verified: true } });
       } catch (error) {
@@ -100,6 +103,7 @@ export class GmailOrganizationRunner {
         for (const group of groups.values()) await this.#batchModify(token, group.ids, group.add, group.remove);
         const verified = await this.#readLabels(token, batch.messageIds);
         if (!mapMatches(verified, batch.priorLabels, batch.messageIds)) throw new Error('provider_verification_mismatch');
+        this.#plans.syncIndexedLabels(batch.connectionId, verified);
         this.#plans.markUndo(batch.id, 'succeeded');
         this.#jobs.transitionItem(item.id, 'succeeded', { result: { operation: 'gmail-history-batch', verified: true } });
       } catch (error) {

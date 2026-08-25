@@ -5,10 +5,11 @@ import { jobProgressSchema } from './jobs';
 export const gmailHistoryImpactSchema = z.object({
   id: z.uuid(), scopeAddress: z.email().nullable(), sourceCategory: mailCategorySchema, category: mailCategorySchema,
   targetLabel: z.string(), markRead: z.boolean(), archive: z.boolean(), spam: z.boolean(), existingMessages: z.number().int().nonnegative(), confidence: z.number().min(0).max(1), state: z.enum(['pending','running','succeeded','failed','verification_mismatch']),
+  trash: z.boolean(),
 });
 export const gmailOrganizationPlanSchema = z.object({
-  id: z.uuid(), revision: z.string(), state: z.enum(['draft','approved','running','completed','failed']),
-  proposalId: z.uuid(), proposalRevision: z.string().length(64), impactCount: z.number().int().nonnegative(), batchCount: z.number().int().nonnegative(),
+  id: z.uuid(), kind: z.enum(['organize','trash']), revision: z.string(), state: z.enum(['draft','approved','running','completed','failed']),
+  proposalId: z.uuid().nullable(), proposalRevision: z.string().length(64).nullable(), impactCount: z.number().int().nonnegative(), batchCount: z.number().int().nonnegative(),
   existingMessageCount: z.number().int().nonnegative(), skippedAmbiguousStreams: z.number().int().nonnegative(), impacts: z.array(gmailHistoryImpactSchema),
   job: jobProgressSchema.nullable(), undoJob: jobProgressSchema.nullable(),
   failedBatches: z.array(z.object({ id: z.uuid(), targetLabel: z.string(), state: z.enum(['failed','verification_mismatch']), errorCode: z.string().nullable() })),
@@ -17,7 +18,12 @@ export const gmailOrganizationPlanSchema = z.object({
 export const approveGmailOrganizationInputSchema = z.object({ planId: z.uuid(), revision: z.string().length(64) }).strict();
 export const retryGmailOrganizationInputSchema = z.object({ planId: z.uuid(), batchIds: z.array(z.uuid()).min(1).max(5_000) }).strict();
 export const undoGmailOrganizationInputSchema = z.object({ planId: z.uuid() }).strict();
+export const generateGmailDeletionInputSchema = z.object({
+  senderDomains: z.array(z.string().trim().min(1).max(253)).min(1).max(500),
+  olderThanDays: z.number().int().min(30).max(3_650).default(180),
+}).strict();
 export type GmailOrganizationPlan = z.infer<typeof gmailOrganizationPlanSchema>;
 export type ApproveGmailOrganizationInput = z.infer<typeof approveGmailOrganizationInputSchema>;
 export type RetryGmailOrganizationInput = z.infer<typeof retryGmailOrganizationInputSchema>;
 export type UndoGmailOrganizationInput = z.infer<typeof undoGmailOrganizationInputSchema>;
+export type GenerateGmailDeletionInput = z.infer<typeof generateGmailDeletionInputSchema>;

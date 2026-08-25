@@ -23,7 +23,7 @@ import type { ApproveCleanupInput, CleanupPlan, CleanupProgress, GenerateCleanup
 import type { RetryUnsubscribeInput, StartUnsubscribeInput, SubscriptionDashboard, UnsubscribeJobInput, UnsubscribeProgress } from './contracts/unsubscribe';
 import type { ExportRulePackInput, ExportRulePackResult } from './contracts/rules';
 import type { GmailAuditSummary, GmailConnectionSummary, GmailDisconnectInput, GmailOAuthInput } from './contracts/gmail';
-import type { ApproveGmailOrganizationInput, GmailOrganizationPlan, RetryGmailOrganizationInput, UndoGmailOrganizationInput } from './contracts/gmail-organize';
+import type { ApproveGmailOrganizationInput, GenerateGmailDeletionInput, GmailOrganizationPlan, RetryGmailOrganizationInput, UndoGmailOrganizationInput } from './contracts/gmail-organize';
 import type {
   AccountIdentityListInput,
   AccountIdentitySummary,
@@ -87,6 +87,8 @@ export const IPC_CHANNELS = Object.freeze({
   gmailOrganizeRetry: 'gmail-organize:retry',
   gmailOrganizeUndo: 'gmail-organize:undo',
   gmailOrganizeProgress: 'gmail-organize:progress',
+  gmailDeletionGet: 'gmail-deletion:get',
+  gmailDeletionGenerate: 'gmail-deletion:generate',
   gmailUnsubscribeGet: 'gmail-unsubscribe:get',
   gmailUnsubscribeScan: 'gmail-unsubscribe:scan',
   gmailUnsubscribeStart: 'gmail-unsubscribe:start',
@@ -161,6 +163,8 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   'retryGmailOrganizationPlan',
   'undoGmailOrganizationPlan',
   'onGmailOrganizationProgress',
+  'getGmailDeletionPlan',
+  'generateGmailDeletionPlan',
   'getGmailSubscriptionDashboard',
   'scanGmailSubscriptions',
   'startGmailBulkUnsubscribe',
@@ -235,6 +239,8 @@ export interface EmailOrganizerBridge {
   retryGmailOrganizationPlan(input: RetryGmailOrganizationInput): Promise<GmailOrganizationPlan>;
   undoGmailOrganizationPlan(input: UndoGmailOrganizationInput): Promise<GmailOrganizationPlan>;
   onGmailOrganizationProgress(listener: (progress: { profileId: string; plan: GmailOrganizationPlan }) => void): () => void;
+  getGmailDeletionPlan(): Promise<GmailOrganizationPlan | null>;
+  generateGmailDeletionPlan(input: GenerateGmailDeletionInput): Promise<GmailOrganizationPlan>;
   getGmailSubscriptionDashboard(): Promise<SubscriptionDashboard | null>;
   scanGmailSubscriptions(): Promise<SubscriptionDashboard>;
   startGmailBulkUnsubscribe(input: StartUnsubscribeInput): Promise<SubscriptionDashboard>;

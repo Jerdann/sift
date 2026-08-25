@@ -17,6 +17,8 @@ interface ProposalItemRow {
 
 interface MessageRow {
   gmail_message_id: string;
+  sender_domain: string;
+  received_at: string | null;
   source_category: MailCategory;
   confidence: number;
   receiving_addresses_json: string;
@@ -31,6 +33,7 @@ export interface GmailHistoryBatchRecord {
   markRead: boolean;
   archive: boolean;
   spam: boolean;
+  trash: boolean;
   messageIds: string[];
   priorLabels: Record<string, string[]>;
   resultingLabels: Record<string, string[]> | null;
@@ -67,21 +70,29 @@ export class GmailOrganizationRepository {
     this.#createId = options.createId ?? randomUUID;
   }
 
-  generate(connection: GmailConnectionSummary): GmailOrganizationPlan {
-    const proposal = this.#database.prepare("SELECT * FROM organization_proposals WHERE profile_id=? AND provider='gmail' AND connection_id=? AND state='draft' ORDER BY updated_at DESC,rowid DESC LIMIT 1")
-      .get(this.#profileId, connection.id) as Record<string, unknown> | undefined;
-    if (!proposal) throw new Error('organization_proposal_required');
-    const items = this.#database.prepare('SELECT * FROM organization_proposal_items WHERE proposal_id=? ORDER BY scope_address,source_category')
-      .all(proposal.id) as ProposalItemRow[];
+  generate(connection: GmailConnectionSummary, input: { kind?: 'organize' | 'trash'; senderDomains?: readonly string[]; olderThanDays?: number } = {}): GmailOrganizationPlan {
+    const kind = input.kind ?? 'organize';
+    const proposal = kind === 'organize'
+      ? this.#database.prepare("SELECT * FROM organization_proposals WHERE profile_id=? AND provider='gmail' AND connection_id=? AND state='draft' ORDER BY updated_at DESC,rowid DESC LIMIT 1")
+        .get(this.#profileId, connection.id) as Record<string, unknown> | undefined
+      : undefined;
+    if (kind === 'organize' && !proposal) throw new Error('organization_proposal_required');
+    const analysis = proposal ?? this.#database.prepare('SELECT id analysis_id FROM gmail_mailbox_analyses WHERE profile_id=? AND connection_id=?').get(this.#profileId, connection.id) as Record<string, unknown> | undefined;
+    if (!analysis) throw new Error('gmail_analysis_required');
+    const items = proposal ? this.#database.prepare('SELECT * FROM organization_proposal_items WHERE proposal_id=? ORDER BY scope_address,source_category')
+      .all(proposal.id) as ProposalItemRow[] : [];
     const bySource = new Map<string, ProposalItemRow[]>();
     for (const item of items) bySource.set(item.source_category, [...(bySource.get(item.source_category) ?? []), item]);
     const messages = this.#database.prepare(`
-      SELECT gim.gmail_message_id,gmc.category source_category,gmc.confidence,
+      SELECT gim.gmail_message_id,gmc.sender_domain,gim.received_at,gmc.category source_category,gmc.confidence,
         gmc.receiving_addresses_json,gim.label_ids_json
       FROM gmail_message_classifications gmc
       JOIN gmail_indexed_messages gim ON gim.id=gmc.message_row_id
       WHERE gmc.analysis_id=? ORDER BY gim.gmail_message_id
-    `).all(proposal.analysis_id) as MessageRow[];
+    `).all(analysis.analysis_id) as MessageRow[];
+    const trashDomains = new Set((input.senderDomains ?? []).map((domain) => domain.toLowerCase()));
+    const trashCutoff = Date.parse(this.#now()) - (input.olderThanDays ?? 180) * 86_400_000;
+    const trashProtected = new Set<MailCategory>(['security', 'accounts', 'transactions', 'finance', 'personal', 'suspicious']);
     const selected = new Map<string, { item: ProposalItemRow; message: MessageRow }>();
     let skipped = 0;
     for (const message of messages) {
@@ -89,8 +100,16 @@ export class GmailOrganizationRepository {
       const candidates = (bySource.get(message.source_category) ?? [])
         .filter((item) => !item.scope_address || addresses.has(item.scope_address.toLowerCase()))
         .sort((left, right) => Number(Boolean(right.scope_address)) - Number(Boolean(left.scope_address)) || (left.scope_address ?? '').localeCompare(right.scope_address ?? ''));
-      const item = candidates[0];
-      if (!item || !item.enabled || message.confidence < 0.7 || ['other', 'personal', 'suspicious'].includes(item.category)) {
+      const item = kind === 'trash'
+        ? trashDomains.has(message.sender_domain.toLowerCase())
+          && !trashProtected.has(message.source_category)
+          && Boolean(message.received_at)
+          && Date.parse(message.received_at!) < trashCutoff
+          && !strings(message.label_ids_json).some((label) => label === 'TRASH' || label === 'SPAM')
+          ? { id: `trash\0${message.sender_domain}\0${[...addresses].sort()[0] ?? ''}\0${message.source_category}`, scope_address: [...addresses].sort()[0] ?? null, source_category: message.source_category, category: message.source_category, target_path: 'TRASH', enabled: 1, confidence: message.confidence }
+          : undefined
+        : candidates[0];
+      if (!item || !item.enabled || message.confidence < 0.7 || (kind === 'organize' && ['other', 'personal', 'suspicious'].includes(item.category))) {
         skipped += 1;
         continue;
       }
@@ -108,19 +127,21 @@ export class GmailOrganizationRepository {
     const normalized = [...groups.values()].map((group) => ({ item: group.item, messages: group.messages.sort((left, right) => left.gmail_message_id.localeCompare(right.gmail_message_id)) }))
       .sort((left, right) => left.item.id.localeCompare(right.item.id));
     const revision = createHash('sha256').update(JSON.stringify({
-      proposalRevision: proposal.revision,
+      kind,
+      olderThanDays: kind === 'trash' ? input.olderThanDays ?? 180 : null,
+      proposalRevision: proposal?.revision ?? null,
       groups: normalized.map((group) => [group.item.id, group.item.category, group.item.target_path, group.messages.map((message) => [message.gmail_message_id, strings(message.label_ids_json)])]),
     })).digest('hex');
     this.#database.transaction(() => {
-      this.#database.prepare('DELETE FROM gmail_organization_plans WHERE connection_id=?').run(connection.id);
+      this.#database.prepare('DELETE FROM gmail_organization_plans WHERE connection_id=? AND plan_kind=?').run(connection.id, kind);
       this.#database.prepare(`
         INSERT INTO gmail_organization_plans(
-          id,connection_id,analysis_id,revision,state,skipped_ambiguous_streams,created_at,proposal_id,proposal_revision
-        ) VALUES (?,?,?,?,'draft',?,?,?,?)
-      `).run(planId, connection.id, proposal.analysis_id, revision, skipped, now, proposal.id, proposal.revision);
+          id,connection_id,analysis_id,revision,state,skipped_ambiguous_streams,created_at,proposal_id,proposal_revision,plan_kind
+        ) VALUES (?,?,?,?,'draft',?,?,?,?,?)
+      `).run(planId, connection.id, analysis.analysis_id, revision, skipped, now, proposal?.id ?? null, proposal?.revision ?? null, kind);
       const insertImpact = this.#database.prepare(`
-        INSERT INTO gmail_history_impacts(id,plan_id,scope_address,source_category,category,target_label,mark_read,archive,spam,confidence,existing_messages)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        INSERT INTO gmail_history_impacts(id,plan_id,scope_address,source_category,category,target_label,mark_read,archive,spam,confidence,existing_messages,trash)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
       `);
       const insertBatch = this.#database.prepare(`
         INSERT INTO gmail_history_batches(id,plan_id,impact_id,message_ids_json,prior_labels_json,state,updated_at)
@@ -128,12 +149,12 @@ export class GmailOrganizationRepository {
       `);
       for (const group of normalized) {
         const impactId = this.#createId();
-        const spam = group.item.category === 'spam';
+        const spam = kind !== 'trash' && group.item.category === 'spam';
         const security = group.item.category === 'security';
         insertImpact.run(
           impactId, planId, group.item.scope_address, group.item.source_category, group.item.category,
-          spam ? 'SPAM' : group.item.target_path, security ? 0 : 1, security ? 0 : 1, spam ? 1 : 0,
-          group.item.confidence, group.messages.length,
+          kind === 'trash' ? 'TRASH' : spam ? 'SPAM' : group.item.target_path, kind === 'trash' || !security ? 1 : 0, kind === 'trash' || !security ? 1 : 0, spam ? 1 : 0,
+          group.item.confidence, group.messages.length, kind === 'trash' ? 1 : 0,
         );
         for (let offset = 0; offset < group.messages.length; offset += 100) {
           const batch = group.messages.slice(offset, offset + 100);
@@ -146,15 +167,15 @@ export class GmailOrganizationRepository {
         }
       }
     })();
-    return this.get(connection.id)!;
+    return this.get(connection.id, kind)!;
   }
 
-  get(connectionId: string): GmailOrganizationPlan | null {
+  get(connectionId: string, kind: GmailOrganizationPlan['kind'] = 'organize'): GmailOrganizationPlan | null {
     const row = this.#database.prepare(`
       SELECT gop.* FROM gmail_organization_plans gop
       JOIN gmail_connections gc ON gc.id=gop.connection_id
-      WHERE gop.connection_id=? AND gc.profile_id=? ORDER BY gop.rowid DESC LIMIT 1
-    `).get(connectionId, this.#profileId) as Record<string, unknown> | undefined;
+      WHERE gop.connection_id=? AND gc.profile_id=? AND gop.plan_kind=? ORDER BY gop.rowid DESC LIMIT 1
+    `).get(connectionId, this.#profileId, kind) as Record<string, unknown> | undefined;
     return row ? this.#plan(row) : null;
   }
 
@@ -170,9 +191,11 @@ export class GmailOrganizationRepository {
   approve(connectionId: string, planId: string, revision: string): GmailOrganizationPlan {
     const plan = this.getById(planId);
     if (plan.state !== 'draft' || plan.revision !== revision) throw new Error('gmail_plan_stale');
-    const currentProposal = this.#database.prepare("SELECT id,revision FROM organization_proposals WHERE profile_id=? AND provider='gmail' AND connection_id=? AND state='draft' ORDER BY updated_at DESC,rowid DESC LIMIT 1")
-      .get(this.#profileId, connectionId) as { id: string; revision: string } | undefined;
-    if (!currentProposal || currentProposal.id !== plan.proposalId || currentProposal.revision !== plan.proposalRevision) throw new Error('gmail_plan_stale');
+    if (plan.kind === 'organize') {
+      const currentProposal = this.#database.prepare("SELECT id,revision FROM organization_proposals WHERE profile_id=? AND provider='gmail' AND connection_id=? AND state='draft' ORDER BY updated_at DESC,rowid DESC LIMIT 1")
+        .get(this.#profileId, connectionId) as { id: string; revision: string } | undefined;
+      if (!currentProposal || currentProposal.id !== plan.proposalId || currentProposal.revision !== plan.proposalRevision) throw new Error('gmail_plan_stale');
+    }
     const batches = this.#database.prepare('SELECT id FROM gmail_history_batches WHERE plan_id=? ORDER BY rowid').all(planId) as Array<{ id: string }>;
     const job = this.#jobs.createJob({ profileId: this.#profileId, kind: 'gmail-history', idempotencyKey: `gmail-history:${planId}:${revision}`, itemKeys: batches.map((batch) => batch.id) });
     this.#database.prepare("UPDATE gmail_organization_plans SET state='approved',approved_at=?,job_id=? WHERE id=? AND connection_id=?")
@@ -188,7 +211,7 @@ export class GmailOrganizationRepository {
 
   batch(batchId: string): GmailHistoryBatchRecord {
     const row = this.#database.prepare(`
-      SELECT ghb.*,ghi.target_label,ghi.mark_read,ghi.archive,ghi.spam,gop.connection_id
+      SELECT ghb.*,ghi.target_label,ghi.mark_read,ghi.archive,ghi.spam,ghi.trash,gop.connection_id
       FROM gmail_history_batches ghb JOIN gmail_history_impacts ghi ON ghi.id=ghb.impact_id
       JOIN gmail_organization_plans gop ON gop.id=ghb.plan_id JOIN gmail_connections gc ON gc.id=gop.connection_id
       WHERE ghb.id=? AND gc.profile_id=?
@@ -196,7 +219,7 @@ export class GmailOrganizationRepository {
     if (!row) throw new Error('gmail_history_batch_not_found');
     return {
       id: String(row.id), planId: String(row.plan_id), connectionId: String(row.connection_id), targetLabel: String(row.target_label),
-      markRead: Boolean(row.mark_read), archive: Boolean(row.archive), spam: Boolean(row.spam),
+      markRead: Boolean(row.mark_read), archive: Boolean(row.archive), spam: Boolean(row.spam), trash: Boolean(row.trash),
       messageIds: strings(String(row.message_ids_json)), priorLabels: labelMap(String(row.prior_labels_json)) ?? {},
       resultingLabels: labelMap(row.resulting_labels_json ? String(row.resulting_labels_json) : null),
     };
@@ -205,6 +228,13 @@ export class GmailOrganizationRepository {
   markBatch(batchId: string, state: 'running' | 'succeeded' | 'failed' | 'verification_mismatch', errorCode: string | null = null, resultingLabels?: Record<string, string[]>): void {
     this.#database.prepare('UPDATE gmail_history_batches SET state=?,error_code=?,resulting_labels_json=COALESCE(?,resulting_labels_json),updated_at=? WHERE id=?')
       .run(state, errorCode, resultingLabels ? JSON.stringify(resultingLabels) : null, this.#now(), batchId);
+  }
+
+  syncIndexedLabels(connectionId: string, labels: Readonly<Record<string, readonly string[]>>): void {
+    const update = this.#database.prepare('UPDATE gmail_indexed_messages SET label_ids_json=? WHERE connection_id=? AND gmail_message_id=?');
+    this.#database.transaction(() => {
+      for (const [messageId, messageLabels] of Object.entries(labels)) update.run(JSON.stringify([...messageLabels].sort()), connectionId, messageId);
+    })();
   }
 
   retry(planId: string, batchIds: readonly string[]): GmailOrganizationPlan {
@@ -257,13 +287,14 @@ export class GmailOrganizationRepository {
       return 'pending';
     };
     return gmailOrganizationPlanSchema.parse({
-      id: row.id, revision: row.revision, state: row.state, proposalId: row.proposal_id, proposalRevision: row.proposal_revision,
+      id: row.id, kind: row.plan_kind, revision: row.revision, state: row.state, proposalId: row.proposal_id, proposalRevision: row.proposal_revision,
       impactCount: impacts.length, batchCount: batches.length,
       existingMessageCount: impacts.reduce((sum, impact) => sum + Number(impact.existing_messages), 0),
       skippedAmbiguousStreams: row.skipped_ambiguous_streams,
       impacts: impacts.map((impact) => ({
         id: impact.id, scopeAddress: impact.scope_address, sourceCategory: impact.source_category, category: impact.category,
         targetLabel: impact.target_label, markRead: Boolean(impact.mark_read), archive: Boolean(impact.archive), spam: Boolean(impact.spam),
+        trash: Boolean(impact.trash),
         existingMessages: impact.existing_messages, confidence: impact.confidence, state: impactState(String(impact.id)),
       })),
       job: row.job_id ? this.#jobs.getProgress(String(row.job_id)) : null,

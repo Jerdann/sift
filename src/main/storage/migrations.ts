@@ -768,6 +768,13 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       CREATE INDEX unsubscribe_ledger_scope_idx ON unsubscribe_ledger(profile_id,provider,connection_id,requested_at DESC);
     `,
   },
+  {
+    version: 21,
+    statements: `
+      ALTER TABLE gmail_organization_plans ADD COLUMN plan_kind TEXT NOT NULL DEFAULT 'organize' CHECK(plan_kind IN ('organize','trash'));
+      ALTER TABLE gmail_history_impacts ADD COLUMN trash INTEGER NOT NULL DEFAULT 0 CHECK(trash IN (0,1));
+    `,
+  },
 ]);
 
 export const applyMigrations = (

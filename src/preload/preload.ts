@@ -28,7 +28,7 @@ import {
 import { mailboxAnalysisSummarySchema } from '../shared/contracts/analysis';
 import { type ExportRulePackInput, exportRulePackInputSchema, exportRulePackResultSchema } from '../shared/contracts/rules';
 import { type GmailAuditSummary, type GmailDisconnectInput, type GmailOAuthInput, gmailAuditSummarySchema, gmailConnectionSummarySchema, gmailDisconnectInputSchema, gmailOAuthInputSchema } from '../shared/contracts/gmail';
-import { type ApproveGmailOrganizationInput, type RetryGmailOrganizationInput, type UndoGmailOrganizationInput, approveGmailOrganizationInputSchema, gmailOrganizationPlanSchema, retryGmailOrganizationInputSchema, undoGmailOrganizationInputSchema } from '../shared/contracts/gmail-organize';
+import { type ApproveGmailOrganizationInput, type GenerateGmailDeletionInput, type RetryGmailOrganizationInput, type UndoGmailOrganizationInput, approveGmailOrganizationInputSchema, generateGmailDeletionInputSchema, gmailOrganizationPlanSchema, retryGmailOrganizationInputSchema, undoGmailOrganizationInputSchema } from '../shared/contracts/gmail-organize';
 import {
   type ApproveCleanupInput,
   type CleanupProgress,
@@ -320,6 +320,8 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
     ipcRenderer.on(IPC_CHANNELS.gmailOrganizeProgress, wrapped);
     return () => ipcRenderer.removeListener(IPC_CHANNELS.gmailOrganizeProgress, wrapped);
   },
+  getGmailDeletionPlan: async () => gmailOrganizationPlanSchema.nullable().parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailDeletionGet)),
+  generateGmailDeletionPlan: async (input: GenerateGmailDeletionInput) => gmailOrganizationPlanSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailDeletionGenerate, generateGmailDeletionInputSchema.parse(input))),
   getGmailSubscriptionDashboard: async () => subscriptionDashboardSchema.nullable().parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeGet)),
   scanGmailSubscriptions: async () => subscriptionDashboardSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeScan)),
   startGmailBulkUnsubscribe: async (input: StartUnsubscribeInput) => subscriptionDashboardSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeStart, startUnsubscribeInputSchema.parse(input))),
