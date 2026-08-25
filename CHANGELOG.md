@@ -6,9 +6,30 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ### Planned
 
-- Durable unsubscribe retry, provider-aware throttling, and clearer manual-action queues.
-- A unified age-aware stale-history planner across providers.
+- A provider-neutral guided workflow with one clear action per page.
 - Outlook and Hotmail account support.
+
+## [0.7.0] - 2026-08-25
+
+### Added
+
+- Durable Gmail and Proton bulk-unsubscribe jobs with streamed progress, crash recovery, selective retry, verified outcomes, and a recurrence ledger that identifies lists which continue sending afterward.
+- Provider-neutral subscription ranking using delivery frequency, recency, receiving address, read rate, accumulated volume, and low-value category signals.
+- Separate manual-action, protected-mail, and spam-blocked unsubscribe queues.
+- A shared stale-stream review that shows alias scope, newest activity, removable volume, and protected volume before approval.
+- Native Gmail Trash batches with immutable age-bounded plans, live label preconditions, post-move verification, selective retry, and exact-label Undo.
+
+### Changed
+
+- One-click requests are paced per destination host and run only for explicitly selected authenticated RFC 8058 HTTPS endpoints.
+- Gmail and Proton stale-history review now uses the same six-month default and the same protected critical categories.
+- Gmail's local audit index is synchronized after verified history changes and Undo so later pruning plans cannot rely on stale label state.
+
+### Security
+
+- Suspected spam is never contacted during unsubscribe; it remains isolated for provider-native Spam handling.
+- Trash proposals exclude security, account, transaction, finance, personal, suspicious, recent, already-spam, and already-trashed Gmail messages.
+- No deletion path bypasses provider Trash, and every supported move retains the exact prior provider state needed for verified recovery.
 
 ## [0.6.0] - 2026-08-25
 
@@ -72,7 +93,8 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 - Arbitrary message participants can no longer become user-owned identities merely by appearing in From, To, Cc, Bcc, Reply-To, or group-recipient fields.
 - Account and identity operations remain restricted to the active local profile through validated IPC contracts.
 
-[Unreleased]: https://github.com/Jerdann/sift/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Jerdann/sift/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Jerdann/sift/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Jerdann/sift/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Jerdann/sift/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Jerdann/sift/compare/v0.4.0...v0.5.0
