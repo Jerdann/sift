@@ -20,7 +20,7 @@ import type {
 } from './contracts/proton-audit';
 import type { MailboxAnalysisSummary } from './contracts/analysis';
 import type { ApproveCleanupInput, CleanupPlan, CleanupProgress, GenerateCleanupInput, GetCleanupInput, RetryCleanupInput, UndoCleanupInput } from './contracts/cleanup';
-import type { StartUnsubscribeInput, SubscriptionDashboard, UnsubscribeJobInput, UnsubscribeProgress } from './contracts/unsubscribe';
+import type { RetryUnsubscribeInput, StartUnsubscribeInput, SubscriptionDashboard, UnsubscribeJobInput, UnsubscribeProgress } from './contracts/unsubscribe';
 import type { ExportRulePackInput, ExportRulePackResult } from './contracts/rules';
 import type { GmailAuditSummary, GmailConnectionSummary, GmailDisconnectInput, GmailOAuthInput } from './contracts/gmail';
 import type { ApproveGmailOrganizationInput, GmailOrganizationPlan, RetryGmailOrganizationInput, UndoGmailOrganizationInput } from './contracts/gmail-organize';
@@ -90,6 +90,9 @@ export const IPC_CHANNELS = Object.freeze({
   gmailUnsubscribeGet: 'gmail-unsubscribe:get',
   gmailUnsubscribeScan: 'gmail-unsubscribe:scan',
   gmailUnsubscribeStart: 'gmail-unsubscribe:start',
+  gmailUnsubscribeResume: 'gmail-unsubscribe:resume',
+  gmailUnsubscribeRetry: 'gmail-unsubscribe:retry',
+  gmailUnsubscribeProgress: 'gmail-unsubscribe:progress',
   cleanupApprove: 'cleanup:approve',
   cleanupGenerate: 'cleanup:generate',
   cleanupGet: 'cleanup:get',
@@ -102,6 +105,7 @@ export const IPC_CHANNELS = Object.freeze({
   unsubscribeResume: 'unsubscribe:resume',
   unsubscribeScan: 'unsubscribe:scan',
   unsubscribeStart: 'unsubscribe:start',
+  unsubscribeRetry: 'unsubscribe:retry',
 } as const);
 
 export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
@@ -160,6 +164,9 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   'getGmailSubscriptionDashboard',
   'scanGmailSubscriptions',
   'startGmailBulkUnsubscribe',
+  'resumeGmailBulkUnsubscribe',
+  'retryGmailBulkUnsubscribe',
+  'onGmailUnsubscribeProgress',
   'getCleanupPlan',
   'generateCleanupPlan',
   'approveCleanupPlan',
@@ -171,6 +178,7 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   'scanSubscriptions',
   'startBulkUnsubscribe',
   'resumeBulkUnsubscribe',
+  'retryBulkUnsubscribe',
   'onUnsubscribeProgress',
 ] as const);
 
@@ -230,6 +238,9 @@ export interface EmailOrganizerBridge {
   getGmailSubscriptionDashboard(): Promise<SubscriptionDashboard | null>;
   scanGmailSubscriptions(): Promise<SubscriptionDashboard>;
   startGmailBulkUnsubscribe(input: StartUnsubscribeInput): Promise<SubscriptionDashboard>;
+  resumeGmailBulkUnsubscribe(input: UnsubscribeJobInput): Promise<SubscriptionDashboard>;
+  retryGmailBulkUnsubscribe(input: RetryUnsubscribeInput): Promise<SubscriptionDashboard>;
+  onGmailUnsubscribeProgress(listener: (progress: UnsubscribeProgress) => void): () => void;
   getCleanupPlan(input: GetCleanupInput): Promise<CleanupPlan | null>;
   generateCleanupPlan(input: GenerateCleanupInput): Promise<CleanupPlan>;
   approveCleanupPlan(input: ApproveCleanupInput): Promise<CleanupProgress>;
@@ -241,6 +252,7 @@ export interface EmailOrganizerBridge {
   scanSubscriptions(): Promise<SubscriptionDashboard>;
   startBulkUnsubscribe(input: StartUnsubscribeInput): Promise<UnsubscribeProgress>;
   resumeBulkUnsubscribe(input: UnsubscribeJobInput): Promise<UnsubscribeProgress>;
+  retryBulkUnsubscribe(input: RetryUnsubscribeInput): Promise<UnsubscribeProgress>;
   onUnsubscribeProgress(listener: (progress: UnsubscribeProgress) => void): () => void;
 }
 

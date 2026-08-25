@@ -1,10 +1,17 @@
 import type { UnsubscribeProgress } from '../../shared/contracts/unsubscribe';
 import type { JobRepository } from '../jobs/job-repository';
-import type { SubscriptionRepository } from './subscription-repository';
 import { lookup } from 'node:dns/promises';
 
 export type HttpFetchPort = (url: string, init: RequestInit) => Promise<Pick<Response, 'status' | 'headers'>>;
 export type ResolveHostPort = (hostname: string) => Promise<readonly string[]>;
+
+export interface SubscriptionRunnerPort {
+  readonly profileId: string;
+  scanIdForJob(jobId: string): string;
+  action(candidateId: string): { id: string; endpoint: string; eligibility: 'eligible' };
+  mark(candidateId: string, status: 'unsubscribed' | 'failed'): void;
+  getByScan(scanId: string): UnsubscribeProgress['dashboard'];
+}
 
 const privateAddress = (address: string): boolean => {
   const normalized = address.toLowerCase();
@@ -58,13 +65,13 @@ export const postOneClickUnsubscribe = async (
 
 export class UnsubscribeRunner {
   readonly #jobs: JobRepository;
-  readonly #subscriptions: SubscriptionRepository;
+  readonly #subscriptions: SubscriptionRunnerPort;
   readonly #post: (endpoint: string) => Promise<boolean>;
   readonly #listeners = new Set<(progress: UnsubscribeProgress) => void>();
 
   constructor(
     jobs: JobRepository,
-    subscriptions: SubscriptionRepository,
+    subscriptions: SubscriptionRunnerPort,
     post: (endpoint: string) => Promise<boolean> = postOneClickUnsubscribe,
   ) {
     this.#jobs = jobs;

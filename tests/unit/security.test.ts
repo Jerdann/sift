@@ -166,6 +166,9 @@ describe('desktop security boundary', () => {
       'getGmailSubscriptionDashboard',
       'scanGmailSubscriptions',
       'startGmailBulkUnsubscribe',
+      'resumeGmailBulkUnsubscribe',
+      'retryGmailBulkUnsubscribe',
+      'onGmailUnsubscribeProgress',
       'getCleanupPlan',
       'generateCleanupPlan',
       'approveCleanupPlan',
@@ -177,6 +180,7 @@ describe('desktop security boundary', () => {
       'scanSubscriptions',
       'startBulkUnsubscribe',
       'resumeBulkUnsubscribe',
+      'retryBulkUnsubscribe',
       'onUnsubscribeProgress',
     ]);
 

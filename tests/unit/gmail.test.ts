@@ -14,6 +14,7 @@ import { JobRepository } from '../../src/main/jobs/job-repository';
 import { OrganizationProposalRepository } from '../../src/main/organization/organization-proposal-repository';
 import { ProfileRepository } from '../../src/main/profiles/profile-repository';
 import { SafeStorageVault, type SafeStoragePort } from '../../src/main/secrets/safe-storage-vault';
+import { UnsubscribeRunner } from '../../src/main/unsubscribe/unsubscribe-runner';
 import type { GmailAuditSummary } from '../../src/shared/contracts/gmail';
 
 const roots: string[] = [];
@@ -78,11 +79,13 @@ describe('Gmail OAuth connection', () => {
     expect(analysis.uniqueMessages).toBe(2);
     expect(analysis.categories).toEqual(expect.arrayContaining([expect.objectContaining({ category: 'transactions', proposedFolder: 'Money/Receipts' }), expect.objectContaining({ category: 'subscriptions', proposedFolder: 'Subscriptions' })]));
     expect(analysis.addresses[0]).toMatchObject({ address: 'owner@example.test', recommendation: 'retain' });
+    const jobs = new JobRepository(profile.database);
     const unsubscribePost = vi.fn(async () => true);
-    const gmailSubscriptions = new GmailSubscriptionService(profile.database, profileId, { post: unsubscribePost });
+    const gmailSubscriptions = new GmailSubscriptionService(profile.database, jobs, profileId);
     const subscriptionScan = gmailSubscriptions.scan(repository.get()!.id);
     const eligibleSubscription = subscriptionScan.candidates.find((candidate) => candidate.eligibility === 'eligible')!;
-    const unsubscribed = await gmailSubscriptions.start([eligibleSubscription.id]);
+    const started = gmailSubscriptions.start([eligibleSubscription.id]);
+    const unsubscribed = (await new UnsubscribeRunner(jobs, gmailSubscriptions, unsubscribePost).run(started.job!.id)).dashboard;
     expect(unsubscribed.candidates.find((candidate) => candidate.id === eligibleSubscription.id)?.status).toBe('unsubscribed');
     expect(unsubscribePost).toHaveBeenCalledWith('https://news.example/unsubscribe/opaque');
     new AccountIdentityRepository(profile.database, profileId).sync('gmail', repository.get()!.id, [{
@@ -90,7 +93,6 @@ describe('Gmail OAuth connection', () => {
       providerEvidence: true, lastSeenAt: '2026-08-24T12:00:00.000Z',
     }]);
     new OrganizationProposalRepository(profile.database, profileId).generate('gmail', repository.get()!.id);
-    const jobs = new JobRepository(profile.database);
     const organization = new GmailOrganizationRepository(profile.database, jobs, profileId);
     const plan = organization.generate(repository.get()!);
     expect(plan).toMatchObject({ state: 'draft', impactCount: 2, existingMessageCount: 2, batchCount: 2 });

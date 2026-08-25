@@ -46,9 +46,11 @@ import {
 } from '../shared/contracts/cleanup';
 import {
   type StartUnsubscribeInput,
+  type RetryUnsubscribeInput,
   type UnsubscribeJobInput,
   type UnsubscribeProgress,
   startUnsubscribeInputSchema,
+  retryUnsubscribeInputSchema,
   subscriptionDashboardSchema,
   unsubscribeJobInputSchema,
   unsubscribeProgressSchema,
@@ -321,6 +323,13 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
   getGmailSubscriptionDashboard: async () => subscriptionDashboardSchema.nullable().parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeGet)),
   scanGmailSubscriptions: async () => subscriptionDashboardSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeScan)),
   startGmailBulkUnsubscribe: async (input: StartUnsubscribeInput) => subscriptionDashboardSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeStart, startUnsubscribeInputSchema.parse(input))),
+  resumeGmailBulkUnsubscribe: async (input: UnsubscribeJobInput) => subscriptionDashboardSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeResume, unsubscribeJobInputSchema.parse(input))),
+  retryGmailBulkUnsubscribe: async (input: RetryUnsubscribeInput) => subscriptionDashboardSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeRetry, retryUnsubscribeInputSchema.parse(input))),
+  onGmailUnsubscribeProgress: (listener: (progress: UnsubscribeProgress) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(unsubscribeProgressSchema.parse(payload));
+    ipcRenderer.on(IPC_CHANNELS.gmailUnsubscribeProgress, wrapped);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.gmailUnsubscribeProgress, wrapped);
+  },
   getCleanupPlan: async (input: GetCleanupInput) =>
     cleanupPlanSchema.nullable().parse(await ipcRenderer.invoke(IPC_CHANNELS.cleanupGet, getCleanupInputSchema.parse(input))),
   generateCleanupPlan: async (input: GenerateCleanupInput) =>
@@ -346,6 +355,8 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
     unsubscribeProgressSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.unsubscribeStart, startUnsubscribeInputSchema.parse(input))),
   resumeBulkUnsubscribe: async (input: UnsubscribeJobInput) =>
     unsubscribeProgressSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.unsubscribeResume, unsubscribeJobInputSchema.parse(input))),
+  retryBulkUnsubscribe: async (input: RetryUnsubscribeInput) =>
+    unsubscribeProgressSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.unsubscribeRetry, retryUnsubscribeInputSchema.parse(input))),
   onUnsubscribeProgress: (listener: (progress: UnsubscribeProgress) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(unsubscribeProgressSchema.parse(payload));
     ipcRenderer.on(IPC_CHANNELS.unsubscribeProgress, wrapped);

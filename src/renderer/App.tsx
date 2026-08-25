@@ -254,6 +254,7 @@ interface AppShellProps {
   onScanSubscriptions(): Promise<void>;
   onStartUnsubscribe(candidateIds: string[]): Promise<void>;
   onResumeUnsubscribe(jobId: string): Promise<void>;
+  onRetryUnsubscribe(jobId: string, candidateIds: string[]): Promise<void>;
   gmailConnection: GmailConnectionSummary | null;
   onConnectGmail(clientId: string, clientSecret?: string): Promise<void>;
   onDisconnectGmail(connectionId: string): Promise<void>;
@@ -269,6 +270,8 @@ interface AppShellProps {
   gmailSubscriptions:SubscriptionDashboard|null;
   onScanGmailSubscriptions():Promise<void>;
   onStartGmailUnsubscribe(candidateIds:string[]):Promise<void>;
+  onResumeGmailUnsubscribe(jobId:string):Promise<void>;
+  onRetryGmailUnsubscribe(jobId:string,candidateIds:string[]):Promise<void>;
 }
 
 interface ProtonConnectionPanelProps {
@@ -868,6 +871,7 @@ const UnsubscribePanel = ({
   onScan,
   onStart,
   onResume,
+  onRetry,
   provider = 'proton',
 }: {
   analysis: MailboxAnalysisSummary | null;
@@ -875,6 +879,7 @@ const UnsubscribePanel = ({
   onScan(): Promise<void>;
   onStart(candidateIds: string[]): Promise<void>;
   onResume(jobId: string): Promise<void>;
+  onRetry(jobId: string, candidateIds: string[]): Promise<void>;
   provider?: 'proton'|'gmail';
 }) => {
   const [selected, setSelected] = useState<string[]>([]);
@@ -892,6 +897,7 @@ const UnsubscribePanel = ({
   const protectedCount = dashboard?.candidates.filter((candidate) => candidate.eligibility === 'protected').length ?? 0;
   const spamCount = dashboard?.candidates.filter((candidate) => candidate.eligibility === 'spam_skipped').length ?? 0;
   const runActive = dashboard?.job?.state === 'pending' || dashboard?.job?.state === 'running';
+  const failed = dashboard?.candidates.filter((candidate) => candidate.status === 'failed') ?? [];
   return (
     <section className="readiness-panel unsubscribe-panel" aria-labelledby={`${provider}-unsubscribe-title`}>
       <div className="panel-header"><div><p className="eyebrow">{provider.toUpperCase()} BULK UNSUBSCRIBE</p><h2 id={`${provider}-unsubscribe-title`}>Stop legitimate junk without confirming spam</h2></div><span className="secured-label"><ShieldCheck size={14} /> Authenticated one-click only</span></div>
@@ -902,13 +908,13 @@ const UnsubscribePanel = ({
           <div className="unsubscribe-summary"><span><b>{eligible.length}</b> safe one-click candidates</span><span><b>{protectedCount}</b> protected lists</span><span><b>{spamCount}</b> spam contacts blocked</span><button className="secondary-button" type="button" disabled={busy || runActive} onClick={() => void act(async () => { await onScan(); setSelected([]); setConsent(false); })}>Refresh</button></div>
           <div className="unsubscribe-list">
             {eligible.map((candidate) => (
-              <label key={candidate.id}><input type="checkbox" checked={selected.includes(candidate.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, candidate.id] : current.filter((id) => id !== candidate.id))} /><span><strong>{candidate.senderDomain}</strong><small>{candidate.messageCount.toLocaleString()} messages → {candidate.receivingAddress} · {candidate.sampleSubjects[0] ?? candidate.listId}</small></span><b>SAFE</b></label>
+              <label key={candidate.id}><input type="checkbox" checked={selected.includes(candidate.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, candidate.id] : current.filter((id) => id !== candidate.id))} /><span><strong>{candidate.senderDomain}</strong><small>{candidate.messageCount.toLocaleString()} messages → {candidate.receivingAddress} · {candidate.sampleSubjects[0] ?? candidate.listId}</small></span><b>{candidate.recurrence === 'recurring' ? 'RECURRING' : `SCORE ${Math.round(candidate.priorityScore)}`}</b></label>
             ))}
             {!eligible.length ? <p>No pending authenticated one-click subscriptions remain.</p> : null}
           </div>
           {eligible.length ? <div className="unsubscribe-select"><button className="secondary-button" type="button" onClick={() => setSelected(selected.length === eligible.length ? [] : eligible.map((candidate) => candidate.id))}>{selected.length === eligible.length ? 'Clear selection' : 'Select all safe candidates'}</button><span>{selected.length} selected</span></div> : null}
           {selected.length ? <div className="unsubscribe-consent"><label><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span><strong>I authorize {selected.length} one-click unsubscribe request{selected.length === 1 ? '' : 's'}</strong><small>HTTPS POST only, no cookies or account credentials, public hosts only, and no requests to anything classified as spam, suspicious, transactional, security, account, or finance mail.</small></span></label><button className="primary-button" type="button" disabled={!consent || busy} onClick={() => void act(() => onStart(selected))}>{busy ? 'Sending approved requests…' : `Unsubscribe from ${selected.length} selected list${selected.length === 1 ? '' : 's'}`}</button></div> : null}
-          {dashboard.job ? <div className="cleanup-execution"><div><span><strong>{dashboard.job.state === 'succeeded' ? 'Bulk unsubscribe complete' : dashboard.job.state === 'running' ? 'Sending approved one-click requests' : dashboard.job.state === 'failed' ? 'Finished with retryable failures' : 'Unsubscribe run paused'}</strong><small>{dashboard.job.completedItems} / {dashboard.job.totalItems} requests processed</small></span><b>{dashboard.job.percent}%</b></div><progress max={100} value={dashboard.job.percent} />{dashboard.job.state === 'pending' ? <button className="primary-button compact" type="button" disabled={busy} onClick={() => void act(() => onResume(dashboard.job!.id))}>Resume unsubscribe run</button> : null}</div> : null}
+          {dashboard.job ? <div className="cleanup-execution"><div><span><strong>{dashboard.job.state === 'succeeded' ? 'Bulk unsubscribe complete' : dashboard.job.state === 'running' ? 'Sending approved one-click requests' : dashboard.job.state === 'failed' ? 'Finished with retryable failures' : 'Unsubscribe run paused'}</strong><small>{dashboard.job.completedItems} / {dashboard.job.totalItems} requests processed</small></span><b>{dashboard.job.percent}%</b></div><progress max={100} value={dashboard.job.percent} /><div className="cleanup-job-actions">{dashboard.job.state === 'pending' ? <button className="primary-button compact" type="button" disabled={busy} onClick={() => void act(() => onResume(dashboard.job!.id))}>Resume unsubscribe run</button> : null}{failed.length ? <button className="primary-button compact" type="button" disabled={busy} onClick={() => void act(() => onRetry(dashboard.job!.id, failed.map((candidate) => candidate.id)))}>Retry {failed.length} failed</button> : null}</div></div> : null}
           <details className="unsubscribe-exclusions"><summary>Review protected, manual, and spam-skipped senders</summary><ul>{dashboard.candidates.filter((candidate) => candidate.eligibility !== 'eligible').slice(0, 100).map((candidate) => <li key={candidate.id}><span><strong>{candidate.senderDomain}</strong><small>{candidate.reason}</small></span><b>{candidate.eligibility.replace('_', ' ')}</b></li>)}</ul></details>
         </div>
       )}
@@ -1152,6 +1158,7 @@ const AppShell = ({
   onScanSubscriptions,
   onStartUnsubscribe,
   onResumeUnsubscribe,
+  onRetryUnsubscribe,
   gmailConnection,
   onConnectGmail,
   onDisconnectGmail,
@@ -1167,6 +1174,8 @@ const AppShell = ({
   gmailSubscriptions,
   onScanGmailSubscriptions,
   onStartGmailUnsubscribe,
+  onResumeGmailUnsubscribe,
+  onRetryGmailUnsubscribe,
 }: AppShellProps) => {
   const [activePage, setActivePage] = useState<PageId>('overview');
   const connectedCount = accounts.length;
@@ -1216,7 +1225,7 @@ const AppShell = ({
 
           {activePage === 'rules' ? <>{taskIntro('Keep the new system working automatically.', 'Inventory existing provider rules first, protect anything Sift does not own, then approve a deterministic create, replace, adopt, or remove plan.')}{selectedAccounts.some((account) => proposals[account.id]) ? <>{selectedAccounts.map((account) => <RuleReconciliationPanel key={account.id} account={account} inventory={ruleInventories[account.id] ?? null} plan={rulePlans[account.id] ?? null} onRefresh={onRefreshRuleInventory} onGenerate={onGenerateRulePlan} onApprove={onApproveRulePlan} onRetry={onRetryRulePlan} onUndo={onUndoRulePlan} onExportProton={onExportProtonRulePlan}/>)}</> : prerequisite('Finish an organization proposal first', 'Rules are derived from the corrected address-scoped filing plan, never directly from a generic template.', scannedCount ? 'organize' : 'audit', scannedCount ? 'Open organize' : 'Open scan')}</> : null}
 
-          {activePage === 'unsubscribe' ? <>{taskIntro('Stop the mail you never wanted to keep.', 'Find authenticated mailing lists, protect receipts and account notices, and send approved one-click unsubscribe requests without confirming your address to suspected spam.')}{!analysis && !gmailAnalysis ? prerequisite('Build an organization proposal first', 'Sift needs classified sender streams to separate safe subscriptions from protected and suspicious mail.', emptyAccounts ? 'accounts' : scannedCount ? 'organize' : 'audit', emptyAccounts ? 'Connect an account' : scannedCount ? 'Open organize' : 'Open scan') : <><UnsubscribePanel provider="gmail" analysis={gmailAnalysis} dashboard={gmailSubscriptions} onScan={onScanGmailSubscriptions} onStart={onStartGmailUnsubscribe} onResume={async()=>undefined}/><UnsubscribePanel analysis={analysis} dashboard={subscriptions} onScan={onScanSubscriptions} onStart={onStartUnsubscribe} onResume={onResumeUnsubscribe}/>{analysis ? <section className="next-action"><span><strong>Finish with stale history</strong><small>Unsubscribing stops future mail. The last pass identifies old, non-critical sender history that can move to recoverable Trash.</small></span><button className="primary-button compact" type="button" onClick={() => setActivePage('delete')}>Continue to Trash review</button></section> : null}</>}</> : null}
+          {activePage === 'unsubscribe' ? <>{taskIntro('Stop the mail you never wanted to keep.', 'Find authenticated mailing lists, protect receipts and account notices, and send approved one-click unsubscribe requests without confirming your address to suspected spam.')}{!analysis && !gmailAnalysis ? prerequisite('Build an organization proposal first', 'Sift needs classified sender streams to separate safe subscriptions from protected and suspicious mail.', emptyAccounts ? 'accounts' : scannedCount ? 'organize' : 'audit', emptyAccounts ? 'Connect an account' : scannedCount ? 'Open organize' : 'Open scan') : <><UnsubscribePanel provider="gmail" analysis={gmailAnalysis} dashboard={gmailSubscriptions} onScan={onScanGmailSubscriptions} onStart={onStartGmailUnsubscribe} onResume={onResumeGmailUnsubscribe} onRetry={onRetryGmailUnsubscribe}/><UnsubscribePanel analysis={analysis} dashboard={subscriptions} onScan={onScanSubscriptions} onStart={onStartUnsubscribe} onResume={onResumeUnsubscribe} onRetry={onRetryUnsubscribe}/>{analysis ? <section className="next-action"><span><strong>Finish with stale history</strong><small>Unsubscribing stops future mail. The last pass identifies old, non-critical sender history that can move to recoverable Trash.</small></span><button className="primary-button compact" type="button" onClick={() => setActivePage('delete')}>Continue to Trash review</button></section> : null}</>}</> : null}
 
           {activePage === 'delete' ? <>{taskIntro('Delete last, when the broad cleanup work is already done.', 'Review stale sender history by volume and last activity, protect critical classifications, then move only the exact approved messages into the provider’s recoverable Trash.')}{!analysis ? prerequisite('Build the Proton organization proposal first', 'The final deletion pass depends on proven aliases and classified sender history.', protonAudit?.indexedMessages ? 'organize' : 'audit', protonAudit?.indexedMessages ? 'Open organize' : 'Open scan') : <TrashReviewPanel analysis={analysis} plan={deletionPlan} onGenerate={onGenerateDeletion} onApprove={onApproveDeletion} onResume={onResumeDeletion} onRetry={onRetryDeletion} onUndo={onUndoDeletion} />}</> : null}
         </main>
@@ -1314,6 +1323,9 @@ export const App = () => {
   }), [activeProfile?.id]);
   useEffect(() => window.emailOrganizer.onGmailAuditProgress((progress) => {
     if (progress.profileId === activeProfile?.id) setGmailAudit(progress.summary);
+  }), [activeProfile?.id]);
+  useEffect(() => window.emailOrganizer.onGmailUnsubscribeProgress((progress) => {
+    if (progress.profileId === activeProfile?.id) setGmailSubscriptions(progress.dashboard);
   }), [activeProfile?.id]);
 
   const createProfile = async (displayName: string) => {
@@ -1427,6 +1439,10 @@ export const App = () => {
     setProposals((current) => ({ ...current, [account.id]: null }));
     setRulePlans((current) => ({ ...current, [account.id]: null }));
   };
+  const retryUnsubscribe = async (jobId: string, candidateIds: string[]) => {
+    const progress = await window.emailOrganizer.retryBulkUnsubscribe({ jobId, candidateIds });
+    setSubscriptions(progress.dashboard);
+  };
   const updateIdentity = async (input: AccountIdentityUpdateInput) => {
     const updated = await window.emailOrganizer.updateAccountIdentity(input);
     setIdentities((current) => ({
@@ -1498,6 +1514,8 @@ export const App = () => {
   const undoGmailOrganization=async(planId:string)=>setGmailOrganization(await window.emailOrganizer.undoGmailOrganizationPlan({planId}));
   const scanGmailSubscriptions=async()=>setGmailSubscriptions(await window.emailOrganizer.scanGmailSubscriptions());
   const startGmailUnsubscribe=async(candidateIds:string[])=>setGmailSubscriptions(await window.emailOrganizer.startGmailBulkUnsubscribe({candidateIds}));
+  const resumeGmailUnsubscribe=async(jobId:string)=>setGmailSubscriptions(await window.emailOrganizer.resumeGmailBulkUnsubscribe({jobId}));
+  const retryGmailUnsubscribe=async(jobId:string,candidateIds:string[])=>setGmailSubscriptions(await window.emailOrganizer.retryGmailBulkUnsubscribe({jobId,candidateIds}));
 
   if (loading) {
     return <main className="loading-screen" aria-live="polite"><BrandMark /><span>Preparing local workspace…</span></main>;
@@ -1551,6 +1569,7 @@ export const App = () => {
       onScanSubscriptions={scanSubscriptions}
       onStartUnsubscribe={startUnsubscribe}
       onResumeUnsubscribe={resumeUnsubscribe}
+      onRetryUnsubscribe={retryUnsubscribe}
       gmailConnection={gmailConnection}
       onConnectGmail={connectGmail}
       onDisconnectGmail={disconnectGmail}
@@ -1566,6 +1585,8 @@ export const App = () => {
       gmailSubscriptions={gmailSubscriptions}
       onScanGmailSubscriptions={scanGmailSubscriptions}
       onStartGmailUnsubscribe={startGmailUnsubscribe}
+      onResumeGmailUnsubscribe={resumeGmailUnsubscribe}
+      onRetryGmailUnsubscribe={retryGmailUnsubscribe}
     />
   ) : (
     <ProfilePicker profiles={profiles} loadError={loadError} onCreate={createProfile} onOpen={openProfile} />

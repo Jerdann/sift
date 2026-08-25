@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { MailCategory } from '../../shared/contracts/analysis';
 import { type SubscriptionDashboard, subscriptionDashboardSchema } from '../../shared/contracts/unsubscribe';
 import type { JobRepository } from '../jobs/job-repository';
+import { subscriptionPriorityScore } from '../../core/pruning/subscription-ranking';
 
 interface EvidenceRow {
   analysis_id: string;
@@ -175,25 +176,36 @@ export class SubscriptionRepository {
   getByScan(scanId: string): SubscriptionDashboard {
     const scan = this.#database.prepare('SELECT * FROM subscription_scans WHERE id = ? AND profile_id = ?').get(scanId, this.#profileId) as { id: string; analysis_id: string; generated_at: string } | undefined;
     if (!scan) throw new Error('Subscription scan was not found');
-    const rows = this.#database.prepare('SELECT * FROM subscription_candidates WHERE scan_id = ? ORDER BY message_count DESC, sender_domain').all(scanId) as Array<Record<string, unknown>>;
+    const rows = this.#database.prepare('SELECT * FROM subscription_candidates WHERE scan_id = ?').all(scanId) as Array<Record<string, unknown>>;
+    const connection = this.#database.prepare('SELECT ma.connection_id FROM subscription_scans ss JOIN mailbox_analyses ma ON ma.id=ss.analysis_id WHERE ss.id=?').get(scanId) as { connection_id: string };
+    const ledgerRows = this.#database.prepare("SELECT list_id,receiving_address,requested_at FROM unsubscribe_ledger WHERE profile_id=? AND provider='proton' AND connection_id=?")
+      .all(this.#profileId, connection.connection_id) as Array<{ list_id: string; receiving_address: string; requested_at: string }>;
+    const ledger = new Map(ledgerRows.map((row) => [`${row.list_id}\0${row.receiving_address}`, row]));
     const jobRow = this.#database.prepare('SELECT job_id FROM unsubscribe_runs WHERE scan_id = ? ORDER BY rowid DESC LIMIT 1').get(scanId) as { job_id: string } | undefined;
     return subscriptionDashboardSchema.parse({
       analysisId: scan.analysis_id,
       generatedAt: scan.generated_at,
-      candidates: rows.map((row) => ({
-        id: row.id,
-        senderDomain: row.sender_domain,
-        listId: row.list_id,
-        receivingAddress: row.receiving_address,
+      candidates: rows.map((row) => {
+        const categories = JSON.parse(String(row.categories_json)) as MailCategory[];
+        const prior = ledger.get(`${row.list_id}\0${row.receiving_address}`);
+        const recurrence = prior ? row.latest_at && String(row.latest_at) > prior.requested_at ? 'recurring' : 'quiet' : 'never_requested';
+        return {
+        id: String(row.id),
+        senderDomain: String(row.sender_domain),
+        listId: String(row.list_id),
+        receivingAddress: String(row.receiving_address),
         eligibility: row.eligibility,
         authenticated: Boolean(row.authenticated),
-        messageCount: row.message_count,
-        latestAt: row.latest_at,
-        categories: JSON.parse(String(row.categories_json)),
+        messageCount: Number(row.message_count),
+        latestAt: row.latest_at ? String(row.latest_at) : null,
+        priorityScore: subscriptionPriorityScore(Number(row.message_count), row.latest_at ? String(row.latest_at) : null, categories),
+        requestedAt: prior?.requested_at ?? null,
+        recurrence,
+        categories,
         sampleSubjects: JSON.parse(String(row.sample_subjects_json)),
         status: row.status,
-        reason: row.reason,
-      })),
+        reason: recurrence === 'recurring' ? `${row.reason} New mail arrived after the last verified request.` : row.reason,
+      }; }).sort((left, right) => right.priorityScore - left.priorityScore || right.messageCount - left.messageCount || left.senderDomain.localeCompare(right.senderDomain)),
       job: jobRow ? this.#jobs.getProgress(jobRow.job_id) : null,
     });
   }
@@ -231,7 +243,31 @@ export class SubscriptionRepository {
   }
 
   mark(candidateId: string, status: 'unsubscribed' | 'failed'): void {
-    this.#database.prepare('UPDATE subscription_candidates SET status = ? WHERE id = ?').run(status, candidateId);
+    this.#database.transaction(() => {
+      this.#database.prepare('UPDATE subscription_candidates SET status = ? WHERE id = ?').run(status, candidateId);
+      if (status !== 'unsubscribed') return;
+      const row = this.#database.prepare(`
+        SELECT sc.list_id,sc.receiving_address,sc.latest_at,ma.connection_id
+        FROM subscription_candidates sc JOIN subscription_scans ss ON ss.id=sc.scan_id
+        JOIN mailbox_analyses ma ON ma.id=ss.analysis_id WHERE sc.id=? AND ss.profile_id=?
+      `).get(candidateId, this.#profileId) as { list_id: string; receiving_address: string; latest_at: string | null; connection_id: string } | undefined;
+      if (!row) throw new Error('unsubscribe_candidate_missing');
+      this.#database.prepare(`
+        INSERT INTO unsubscribe_ledger(id,profile_id,provider,connection_id,list_id,receiving_address,requested_at,latest_seen_at_request,updated_at)
+        VALUES (?,?,'proton',?,?,?,?,?,?)
+        ON CONFLICT(profile_id,provider,connection_id,list_id,receiving_address) DO UPDATE SET
+          recurrence_count=unsubscribe_ledger.recurrence_count + CASE WHEN excluded.latest_seen_at_request > unsubscribe_ledger.requested_at THEN 1 ELSE 0 END,
+          requested_at=excluded.requested_at,latest_seen_at_request=excluded.latest_seen_at_request,updated_at=excluded.updated_at
+      `).run(this.#createId(), this.#profileId, row.connection_id, row.list_id, row.receiving_address, this.#now(), row.latest_at, this.#now());
+    })();
+  }
+
+  retry(jobId: string, candidateIds: readonly string[]): SubscriptionDashboard {
+    const scanId = this.scanIdForJob(jobId);
+    this.#jobs.retryItems(jobId, candidateIds);
+    const placeholders = candidateIds.map(() => '?').join(',');
+    this.#database.prepare(`UPDATE subscription_candidates SET status='pending' WHERE scan_id=? AND id IN (${placeholders})`).run(scanId, ...candidateIds);
+    return this.getByScan(scanId);
   }
 
   scanIdForJob(jobId: string): string {

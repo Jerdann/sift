@@ -11,6 +11,9 @@ export const subscriptionCandidateSchema = z.object({
   authenticated: z.boolean(),
   messageCount: z.number().int().positive(),
   latestAt: z.iso.datetime().nullable(),
+  priorityScore: z.number().nonnegative(),
+  requestedAt: z.iso.datetime().nullable(),
+  recurrence: z.enum(['never_requested', 'quiet', 'recurring']),
   categories: z.array(mailCategorySchema),
   sampleSubjects: z.array(z.string()),
   status: z.enum(['pending', 'unsubscribed', 'failed', 'manual', 'spam_skipped']),
@@ -29,6 +32,7 @@ export const startUnsubscribeInputSchema = z.object({
 });
 
 export const unsubscribeJobInputSchema = z.object({ jobId: z.uuid() });
+export const retryUnsubscribeInputSchema = z.object({ jobId: z.uuid(), candidateIds: z.array(z.uuid()).min(1).max(500) }).strict();
 
 export const unsubscribeProgressSchema = z.object({
   profileId: z.uuid(),
@@ -38,4 +42,5 @@ export const unsubscribeProgressSchema = z.object({
 export type SubscriptionDashboard = z.infer<typeof subscriptionDashboardSchema>;
 export type StartUnsubscribeInput = z.infer<typeof startUnsubscribeInputSchema>;
 export type UnsubscribeJobInput = z.infer<typeof unsubscribeJobInputSchema>;
+export type RetryUnsubscribeInput = z.infer<typeof retryUnsubscribeInputSchema>;
 export type UnsubscribeProgress = z.infer<typeof unsubscribeProgressSchema>;

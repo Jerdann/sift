@@ -743,6 +743,31 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       ALTER TABLE cleanup_plans ADD COLUMN proposal_revision TEXT;
     `,
   },
+  {
+    version: 20,
+    statements: `
+      CREATE TABLE gmail_unsubscribe_runs (
+        job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+        scan_id TEXT NOT NULL REFERENCES gmail_subscription_scans(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE unsubscribe_ledger (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton','gmail')),
+        connection_id TEXT NOT NULL,
+        list_id TEXT NOT NULL,
+        receiving_address TEXT NOT NULL,
+        requested_at TEXT NOT NULL,
+        latest_seen_at_request TEXT,
+        recurrence_count INTEGER NOT NULL DEFAULT 0 CHECK(recurrence_count >= 0),
+        updated_at TEXT NOT NULL,
+        UNIQUE(profile_id,provider,connection_id,list_id,receiving_address)
+      );
+      CREATE INDEX unsubscribe_ledger_scope_idx ON unsubscribe_ledger(profile_id,provider,connection_id,requested_at DESC);
+    `,
+  },
 ]);
 
 export const applyMigrations = (

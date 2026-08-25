@@ -1,6 +1,7 @@
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
 import {
   startUnsubscribeInputSchema,
+  retryUnsubscribeInputSchema,
   subscriptionDashboardSchema,
   unsubscribeJobInputSchema,
   unsubscribeProgressSchema,
@@ -82,7 +83,16 @@ export const registerUnsubscribeHandlers = ({
     run(event, jobId, current);
     return unsubscribeProgressSchema.parse(current.runner.progress(scanId));
   });
+  ipcMain.handle(IPC_CHANNELS.unsubscribeRetry, (event, rawInput: unknown) => {
+    trust(event);
+    const input = retryUnsubscribeInputSchema.parse(rawInput);
+    const current = services();
+    current.subscriptions.retry(input.jobId, input.candidateIds);
+    const scanId = current.subscriptions.scanIdForJob(input.jobId);
+    run(event, input.jobId, current);
+    return unsubscribeProgressSchema.parse(current.runner.progress(scanId));
+  });
   return () => {
-    for (const channel of [IPC_CHANNELS.unsubscribeGet, IPC_CHANNELS.unsubscribeScan, IPC_CHANNELS.unsubscribeStart, IPC_CHANNELS.unsubscribeResume]) ipcMain.removeHandler(channel);
+    for (const channel of [IPC_CHANNELS.unsubscribeGet, IPC_CHANNELS.unsubscribeScan, IPC_CHANNELS.unsubscribeStart, IPC_CHANNELS.unsubscribeResume, IPC_CHANNELS.unsubscribeRetry]) ipcMain.removeHandler(channel);
   };
 };
