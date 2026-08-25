@@ -9,6 +9,9 @@ import { GmailAnalysisService } from '../../src/main/gmail/gmail-analysis-servic
 import { GmailOrganizationRepository } from '../../src/main/gmail/gmail-organization-repository';
 import { GmailOrganizationRunner } from '../../src/main/gmail/gmail-organization-runner';
 import { GmailSubscriptionService } from '../../src/main/gmail/gmail-subscription-service';
+import { AccountIdentityRepository } from '../../src/main/identity/account-identity-repository';
+import { JobRepository } from '../../src/main/jobs/job-repository';
+import { OrganizationProposalRepository } from '../../src/main/organization/organization-proposal-repository';
 import { ProfileRepository } from '../../src/main/profiles/profile-repository';
 import { SafeStorageVault, type SafeStoragePort } from '../../src/main/secrets/safe-storage-vault';
 import type { GmailAuditSummary } from '../../src/shared/contracts/gmail';
@@ -82,25 +85,58 @@ describe('Gmail OAuth connection', () => {
     const unsubscribed = await gmailSubscriptions.start([eligibleSubscription.id]);
     expect(unsubscribed.candidates.find((candidate) => candidate.id === eligibleSubscription.id)?.status).toBe('unsubscribed');
     expect(unsubscribePost).toHaveBeenCalledWith('https://news.example/unsubscribe/opaque');
-    const organization = new GmailOrganizationRepository(profile.database, new GmailAnalysisService(profile.database, profileId), profileId);
+    new AccountIdentityRepository(profile.database, profileId).sync('gmail', repository.get()!.id, [{
+      address: 'owner@example.test', evidence: ['provider_primary'], sentFromCount: 0, deliveredToCount: 2,
+      providerEvidence: true, lastSeenAt: '2026-08-24T12:00:00.000Z',
+    }]);
+    new OrganizationProposalRepository(profile.database, profileId).generate('gmail', repository.get()!.id);
+    const jobs = new JobRepository(profile.database);
+    const organization = new GmailOrganizationRepository(profile.database, jobs, profileId);
     const plan = organization.generate(repository.get()!);
-    expect(plan).toMatchObject({ state: 'draft', ruleCount: 2, existingMessageCount: 2 });
-    organization.approve(repository.get()!.id, plan.id, plan.revision);
+    expect(plan).toMatchObject({ state: 'draft', impactCount: 2, existingMessageCount: 2, batchCount: 2 });
+    const approved = organization.approve(repository.get()!.id, plan.id, plan.revision);
+    const providerLabels = new Map<string, string[]>([['gmail-1', ['INBOX', 'UNREAD']], ['gmail-2', ['INBOX', 'UNREAD']]]);
+    let failAfterNextModify = false;
     const actionFetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       const value = String(url);
       if (value.includes('oauth2.googleapis.com/token')) return new Response(JSON.stringify({ access_token: 'access', expires_in: 3600, token_type: 'Bearer' }), { status: 200 });
       if (value.endsWith('/labels') && !init?.method) return new Response(JSON.stringify({ labels: [] }), { status: 200 });
-      if (value.endsWith('/filters') && !init?.method) return new Response(JSON.stringify({ filter: [] }), { status: 200 });
       if (value.endsWith('/labels')) return new Response(JSON.stringify({ id: 'Label_123' }), { status: 200 });
-      if (value.endsWith('/filters')) return new Response(JSON.stringify({ id: 'Filter_123' }), { status: 200 });
+      if (value.includes('/messages/') && value.includes('?format=minimal')) {
+        const id = decodeURIComponent(value.split('/messages/')[1]!.split('?')[0]!);
+        return new Response(JSON.stringify({ id, labelIds: providerLabels.get(id) ?? [] }), { status: 200 });
+      }
+      if (value.endsWith('/messages/batchModify')) {
+        const body = JSON.parse(String(init?.body)) as { ids: string[]; addLabelIds: string[]; removeLabelIds: string[] };
+        for (const id of body.ids) providerLabels.set(id, [...new Set([...(providerLabels.get(id) ?? []), ...body.addLabelIds])].filter((label) => !body.removeLabelIds.includes(label)).sort());
+        if (failAfterNextModify) { failAfterNextModify = false; return new Response(null, { status: 500 }); }
+        return new Response(null, { status: 204 });
+      }
       return new Response(null, { status: 204 });
     });
-    await new GmailOrganizationRunner(repository, organization, actionFetch as typeof fetch).run(plan.id);
+    await new GmailOrganizationRunner(repository, organization, jobs, actionFetch as typeof fetch).run(approved.job!.id);
     const completed = organization.get(repository.get()!.id)!;
     expect(completed.state).toBe('completed');
-    expect(completed.rules[0]?.state).toBe('succeeded');
+    expect(completed.impacts[0]?.state).toBe('succeeded');
     const batchCall = actionFetch.mock.calls.find((call) => String(call[0]).endsWith('/messages/batchModify'))!;
     expect(JSON.parse(String(batchCall[1]?.body))).toMatchObject({ addLabelIds: ['Label_123'], removeLabelIds: ['INBOX', 'UNREAD'] });
+    expect(actionFetch.mock.calls.some((call) => String(call[0]).includes('/settings/filters'))).toBe(false);
+    const undoPlan = organization.prepareUndo(completed.id);
+    const undone = await new GmailOrganizationRunner(repository, organization, jobs, actionFetch as typeof fetch).undo(undoPlan.undoJob!.id);
+    expect(undone.undoJob?.state).toBe('succeeded');
+    expect(providerLabels.get('gmail-1')).toEqual(['INBOX', 'UNREAD']);
+    expect(providerLabels.get('gmail-2')).toEqual(['INBOX', 'UNREAD']);
+
+    const crashPlan = organization.generate(repository.get()!);
+    const crashApproved = organization.approve(repository.get()!.id, crashPlan.id, crashPlan.revision);
+    failAfterNextModify = true;
+    const firstAttempt = await new GmailOrganizationRunner(repository, organization, jobs, actionFetch as typeof fetch).run(crashApproved.job!.id);
+    expect(firstAttempt.failedBatches).toHaveLength(1);
+    const modifyCount = actionFetch.mock.calls.filter((call) => String(call[0]).endsWith('/messages/batchModify')).length;
+    const retried = organization.retry(firstAttempt.id, firstAttempt.failedBatches.map((batch) => batch.id));
+    const recovered = await new GmailOrganizationRunner(repository, organization, jobs, actionFetch as typeof fetch).run(retried.job!.id);
+    expect(recovered.state).toBe('completed');
+    expect(actionFetch.mock.calls.filter((call) => String(call[0]).endsWith('/messages/batchModify'))).toHaveLength(modifyCount);
     profile.database.close();
   });
 });

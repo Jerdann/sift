@@ -19,6 +19,14 @@ interface CandidateRow {
   uid: number;
 }
 
+interface ProposalItemRow {
+  scope_address: string | null;
+  source_category: MailCategory;
+  category: MailCategory;
+  target_path: string;
+  enabled: number;
+}
+
 export interface CleanupActionRecord {
   id: string;
   planId: string;
@@ -70,6 +78,20 @@ export class CleanupPlanRepository {
     `).all(connectionId, this.#profileId) as CandidateRow[];
     if (!candidates.length) throw new Error('mailbox_analysis_required');
     const analysisId = candidates[0]!.analysis_id;
+    const proposal = input.kind === 'organize' ? this.#database.prepare("SELECT id,revision FROM organization_proposals WHERE profile_id=? AND provider='proton' AND connection_id=? AND state='draft' ORDER BY updated_at DESC,rowid DESC LIMIT 1")
+      .get(this.#profileId, connectionId) as { id: string; revision: string } | undefined : undefined;
+    if (input.kind === 'organize' && !proposal) throw new Error('organization_proposal_required');
+    const proposalItems = proposal ? this.#database.prepare('SELECT scope_address,source_category,category,target_path,enabled FROM organization_proposal_items WHERE proposal_id=?')
+      .all(proposal.id) as ProposalItemRow[] : [];
+    const proposalBySource = new Map<string, ProposalItemRow[]>();
+    for (const item of proposalItems) proposalBySource.set(item.source_category, [...(proposalBySource.get(item.source_category) ?? []), item]);
+    const proposedItem = (candidate: CandidateRow): ProposalItemRow | null => {
+      if (input.kind !== 'organize') return null;
+      const receiving = new Set((JSON.parse(candidate.receiving_addresses_json) as string[]).map((address) => address.toLowerCase()));
+      return (proposalBySource.get(candidate.category) ?? [])
+        .filter((item) => !item.scope_address || receiving.has(item.scope_address.toLowerCase()))
+        .sort((left, right) => Number(Boolean(right.scope_address)) - Number(Boolean(left.scope_address)) || (left.scope_address ?? '').localeCompare(right.scope_address ?? ''))[0] ?? null;
+    };
     const excludedSpecialUse = new Set(['\\all', '\\sent', '\\drafts', '\\trash', '\\junk']);
     const trashDomains = new Set(input.trashSenderDomains.map((domain) => domain.toLowerCase()));
     const actionable = candidates.filter((candidate) => {
@@ -78,17 +100,19 @@ export class CleanupPlanRepository {
         return trashDomains.has(candidate.sender_domain.toLowerCase()) &&
           !['personal', 'security', 'accounts', 'transactions', 'finance', 'suspicious'].includes(candidate.category);
       }
-      return candidate.confidence >= 0.7 && !['other', 'suspicious', 'personal'].includes(candidate.category);
+      const item = proposedItem(candidate);
+      return Boolean(item?.enabled) && candidate.confidence >= 0.7 && !['other', 'suspicious', 'personal'].includes(item!.category);
     });
     const planId = this.#createId();
     const actionValues = actionable.map((candidate) => {
-      const receivingAddresses = JSON.parse(candidate.receiving_addresses_json) as string[];
-      const container = receivingAddresses.map((address) => input.containers[address]).find(Boolean);
-      const categoryPath = CATEGORY_PRESENTATION[candidate.category].folder;
+      const item = proposedItem(candidate);
+      const effectiveCategory = item?.category ?? candidate.category;
+      const categoryPath = item?.target_path ?? CATEGORY_PRESENTATION[effectiveCategory].folder;
       return {
         ...candidate,
-        targetPath: input.kind === 'trash' ? 'Trash' : candidate.category === 'spam' ? 'Spam' : container ? `${container}/${categoryPath}` : categoryPath,
-        actionKind: input.kind === 'trash' ? 'native_trash' as const : candidate.category === 'spam' ? 'native_spam' as const : 'sort_read_archive' as const,
+        category: effectiveCategory,
+        targetPath: input.kind === 'trash' ? 'Trash' : effectiveCategory === 'spam' ? 'Spam' : categoryPath,
+        actionKind: input.kind === 'trash' ? 'native_trash' as const : effectiveCategory === 'spam' ? 'native_spam' as const : 'sort_read_archive' as const,
       };
     });
     const revision = createHash('sha256').update(JSON.stringify(actionValues.map((action) => [
@@ -99,9 +123,9 @@ export class CleanupPlanRepository {
       this.#database.prepare("DELETE FROM cleanup_plans WHERE connection_id = ? AND plan_kind = ? AND state = 'draft'").run(connectionId, input.kind);
       this.#database.prepare(`
         INSERT INTO cleanup_plans(
-          id, connection_id, analysis_id, revision, state, skipped_count, created_at, plan_kind
-        ) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?)
-      `).run(planId, connectionId, analysisId, revision, candidates.length - actionValues.length, timestamp, input.kind);
+          id, connection_id, analysis_id, revision, state, skipped_count, created_at, plan_kind, proposal_id, proposal_revision
+        ) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)
+      `).run(planId, connectionId, analysisId, revision, candidates.length - actionValues.length, timestamp, input.kind, proposal?.id ?? null, proposal?.revision ?? null);
       const insert = this.#database.prepare(`
         INSERT INTO cleanup_actions(
           id, plan_id, message_row_id, canonical_key, category, source_path,
@@ -180,6 +204,12 @@ export class CleanupPlanRepository {
   approve(planId: string, revision: string): CleanupPlan {
     const plan = this.get(planId);
     if (plan.state !== 'draft' || plan.revision !== revision) throw new Error('cleanup_plan_changed');
+    const planScope = this.#database.prepare('SELECT connection_id,plan_kind,proposal_id,proposal_revision FROM cleanup_plans WHERE id=?').get(planId) as { connection_id: string; plan_kind: CleanupPlan['kind']; proposal_id: string | null; proposal_revision: string | null };
+    if (planScope.plan_kind === 'organize') {
+      const current = this.#database.prepare("SELECT id,revision FROM organization_proposals WHERE profile_id=? AND provider='proton' AND connection_id=? AND state='draft' ORDER BY updated_at DESC,rowid DESC LIMIT 1")
+        .get(this.#profileId, planScope.connection_id) as { id: string; revision: string } | undefined;
+      if (!current || current.id !== planScope.proposal_id || current.revision !== planScope.proposal_revision) throw new Error('cleanup_plan_changed');
+    }
     const actions = this.#database.prepare('SELECT id FROM cleanup_actions WHERE plan_id = ? ORDER BY rowid').all(planId) as Array<{ id: string }>;
     const job = this.#jobs.createJob({
       profileId: this.#profileId,

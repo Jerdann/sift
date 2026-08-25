@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { JOB_STATES } from '../../core/jobs/job-types';
 
 export const jobStateSchema = z.enum(JOB_STATES);
-export const jobKindSchema = z.enum(['synthetic-audit', 'proton-audit', 'proton-cleanup', 'bulk-unsubscribe', 'provider-rules']);
+export const jobKindSchema = z.enum(['synthetic-audit', 'proton-audit', 'proton-cleanup', 'gmail-history', 'bulk-unsubscribe', 'provider-rules']);
 
 export const jobStateCountsSchema = z.object({
   pending: z.number().int().nonnegative(),

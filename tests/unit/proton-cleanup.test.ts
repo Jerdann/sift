@@ -7,6 +7,7 @@ import { AccountIdentityRepository } from '../../src/main/identity/account-ident
 import { CleanupPlanRepository } from '../../src/main/cleanup/cleanup-plan-repository';
 import { CleanupRunner } from '../../src/main/cleanup/cleanup-runner';
 import { JobRepository } from '../../src/main/jobs/job-repository';
+import { OrganizationProposalRepository } from '../../src/main/organization/organization-proposal-repository';
 import { ProfileRepository } from '../../src/main/profiles/profile-repository';
 import { ProtonConnectionRepository } from '../../src/main/proton/proton-connection-repository';
 import { ProtonDiscoveryRepository } from '../../src/main/proton/proton-discovery-repository';
@@ -91,12 +92,31 @@ const setup = () => {
     status: 'confirmed', containerEnabled: true, containerName: 'Primary',
   });
   analyzeMailbox(profile.database, profileId, connection.id);
+  new OrganizationProposalRepository(profile.database, profileId).generate('proton', connection.id);
   const jobs = new JobRepository(profile.database);
   const plans = new CleanupPlanRepository(profile.database, jobs, profileId);
   return { profile, connections, connection, jobs, plans };
 };
 
 describe('approved Proton cleanup', () => {
+  it('uses the corrected address-scoped proposal instead of raw classifier destinations', () => {
+    const current = setup();
+    const proposals = new OrganizationProposalRepository(current.profile.database, current.profile.profile.id);
+    const proposal = proposals.get('proton', current.connection.id)!;
+    const promotion = proposal.items.find((item) => item.category === 'promotions')!;
+    proposals.edit({
+      proposalId: proposal.id,
+      revision: proposal.revision,
+      itemId: promotion.id,
+      category: 'accounts',
+      targetPath: 'Primary/Important/Joint accounts',
+      enabled: true,
+    });
+    const plan = current.plans.generate(current.connection.id, { kind: 'organize', containers: {}, trashSenderDomains: [] });
+    expect(plan.impacts).toContainEqual(expect.objectContaining({ category: 'accounts', targetFolder: 'Primary/Important/Joint accounts', messageCount: 1 }));
+    current.profile.database.close();
+  });
+
   it('previews exact impact, rejects stale approval, then applies only approved actions', async () => {
     const current = setup();
     const plan = current.plans.generate(current.connection.id, { kind: 'organize', containers: { 'owner@pm.test': 'Primary' }, trashSenderDomains: [] });

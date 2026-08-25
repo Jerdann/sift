@@ -6,16 +6,20 @@ import { GmailConnectionRepository } from '../gmail/gmail-connection-repository'
 import { GmailAuditService } from '../gmail/gmail-audit-service';
 import { GmailAnalysisService } from '../gmail/gmail-analysis-service';
 import { mailboxAnalysisSummarySchema } from '../../shared/contracts/analysis';
-import { approveGmailOrganizationInputSchema, gmailOrganizationPlanSchema } from '../../shared/contracts/gmail-organize';
+import { approveGmailOrganizationInputSchema, gmailOrganizationPlanSchema, retryGmailOrganizationInputSchema, undoGmailOrganizationInputSchema } from '../../shared/contracts/gmail-organize';
 import { GmailOrganizationRepository } from '../gmail/gmail-organization-repository';
 import { GmailOrganizationRunner } from '../gmail/gmail-organization-runner';
 import { GmailSubscriptionService } from '../gmail/gmail-subscription-service';
 import { startUnsubscribeInputSchema, subscriptionDashboardSchema } from '../../shared/contracts/unsubscribe';
 import { ProfileSession } from '../profiles/profile-session';
 import { assertTrustedIpcSender } from '../window-security';
+import { JobRepository } from '../jobs/job-repository';
 
 export const registerGmailHandlers = ({ ipcMain, profileSession, developmentServerUrl, fetchPort = fetch }: { ipcMain: IpcMain; profileSession: ProfileSession; developmentServerUrl?: string; fetchPort?: OAuthFetch }): (() => void) => {
   let gmailAuditRunning = false;
+  let organizationProfileId: string | null = null;
+  let organizationJobs: JobRepository | null = null;
+  let organizationRepository: GmailOrganizationRepository | null = null;
   const trust = (event: IpcMainInvokeEvent) => assertTrustedIpcSender(event.senderFrame?.url, developmentServerUrl);
   const repository = () => {
     const context = profileSession.requireActiveContext();
@@ -72,10 +76,12 @@ export const registerGmailHandlers = ({ ipcMain, profileSession, developmentServ
     if (!connection) throw new Error('gmail_not_connected');
     return mailboxAnalysisSummarySchema.parse(new GmailAnalysisService(context.database, context.profile.id).analyze(connection));
   });
-  const organization = () => { const context=profileSession.requireActiveContext(); const analysis=new GmailAnalysisService(context.database,context.profile.id); return { context, repository:new GmailOrganizationRepository(context.database,analysis,context.profile.id), connection:repository() }; };
-  ipcMain.handle(IPC_CHANNELS.gmailOrganizeGet,(event)=>{trust(event);const current=organization();const connection=current.connection.get();if(connection)current.repository.recoverInterrupted(connection.id);return gmailOrganizationPlanSchema.nullable().parse(connection?current.repository.get(connection.id):null);});
+  const organization = () => { const context=profileSession.requireActiveContext();if(organizationProfileId!==context.profile.id||!organizationJobs||!organizationRepository){organizationProfileId=context.profile.id;organizationJobs=new JobRepository(context.database);organizationJobs.recoverInterrupted();organizationRepository=new GmailOrganizationRepository(context.database,organizationJobs,context.profile.id);}return {context,jobs:organizationJobs,repository:organizationRepository,connection:repository()};};
+  ipcMain.handle(IPC_CHANNELS.gmailOrganizeGet,(event)=>{trust(event);const current=organization();const connection=current.connection.get();return gmailOrganizationPlanSchema.nullable().parse(connection?current.repository.get(connection.id):null);});
   ipcMain.handle(IPC_CHANNELS.gmailOrganizeGenerate,(event)=>{trust(event);const current=organization();const connection=current.connection.get();if(!connection)throw new Error('gmail_not_connected');return gmailOrganizationPlanSchema.parse(current.repository.generate(connection));});
-  ipcMain.handle(IPC_CHANNELS.gmailOrganizeApprove,async(event,rawInput)=>{trust(event);const input=approveGmailOrganizationInputSchema.parse(rawInput);const current=organization();const connection=current.connection.get();if(!connection)throw new Error('gmail_not_connected');current.repository.approve(connection.id,input.planId,input.revision);await new GmailOrganizationRunner(current.connection,current.repository,fetchPort).run(input.planId);return gmailOrganizationPlanSchema.parse(current.repository.get(connection.id));});
+  ipcMain.handle(IPC_CHANNELS.gmailOrganizeApprove,async(event,rawInput)=>{trust(event);const input=approveGmailOrganizationInputSchema.parse(rawInput);const current=organization();const connection=current.connection.get();if(!connection)throw new Error('gmail_not_connected');const plan=current.repository.approve(connection.id,input.planId,input.revision);if(!plan.job)throw new Error('gmail_history_job_missing');return gmailOrganizationPlanSchema.parse(await new GmailOrganizationRunner(current.connection,current.repository,current.jobs,fetchPort).run(plan.job.id));});
+  ipcMain.handle(IPC_CHANNELS.gmailOrganizeRetry,async(event,rawInput)=>{trust(event);const input=retryGmailOrganizationInputSchema.parse(rawInput);const current=organization();const plan=current.repository.retry(input.planId,input.batchIds);if(!plan.job)throw new Error('gmail_history_job_missing');return gmailOrganizationPlanSchema.parse(await new GmailOrganizationRunner(current.connection,current.repository,current.jobs,fetchPort).run(plan.job.id));});
+  ipcMain.handle(IPC_CHANNELS.gmailOrganizeUndo,async(event,rawInput)=>{trust(event);const input=undoGmailOrganizationInputSchema.parse(rawInput);const current=organization();const plan=current.repository.prepareUndo(input.planId);if(!plan.undoJob)throw new Error('gmail_history_undo_job_missing');return gmailOrganizationPlanSchema.parse(await new GmailOrganizationRunner(current.connection,current.repository,current.jobs,fetchPort).undo(plan.undoJob.id));});
   const gmailSubscriptions=()=>{const context=profileSession.requireActiveContext();return{context,service:new GmailSubscriptionService(context.database,context.profile.id),connection:repository().get()};};
   ipcMain.handle(IPC_CHANNELS.gmailUnsubscribeGet,(event)=>{trust(event);const current=gmailSubscriptions();return subscriptionDashboardSchema.nullable().parse(current.connection?current.service.getCurrent(current.connection.id):null);});
   ipcMain.handle(IPC_CHANNELS.gmailUnsubscribeScan,(event)=>{trust(event);const current=gmailSubscriptions();if(!current.connection)throw new Error('gmail_not_connected');return subscriptionDashboardSchema.parse(current.service.scan(current.connection.id));});
@@ -91,6 +97,8 @@ export const registerGmailHandlers = ({ ipcMain, profileSession, developmentServ
     ipcMain.removeHandler(IPC_CHANNELS.gmailOrganizeGet);
     ipcMain.removeHandler(IPC_CHANNELS.gmailOrganizeGenerate);
     ipcMain.removeHandler(IPC_CHANNELS.gmailOrganizeApprove);
+    ipcMain.removeHandler(IPC_CHANNELS.gmailOrganizeRetry);
+    ipcMain.removeHandler(IPC_CHANNELS.gmailOrganizeUndo);
     ipcMain.removeHandler(IPC_CHANNELS.gmailUnsubscribeGet);
     ipcMain.removeHandler(IPC_CHANNELS.gmailUnsubscribeScan);
     ipcMain.removeHandler(IPC_CHANNELS.gmailUnsubscribeStart);

@@ -698,6 +698,51 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       ALTER TABLE cleanup_actions ADD COLUMN undo_error_code TEXT;
     `,
   },
+  {
+    version: 18,
+    statements: `
+      ALTER TABLE gmail_organization_plans ADD COLUMN proposal_id TEXT REFERENCES organization_proposals(id) ON DELETE CASCADE;
+      ALTER TABLE gmail_organization_plans ADD COLUMN proposal_revision TEXT;
+      ALTER TABLE gmail_organization_plans ADD COLUMN job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL;
+      ALTER TABLE gmail_organization_plans ADD COLUMN undo_job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL;
+
+      CREATE TABLE gmail_history_impacts (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL REFERENCES gmail_organization_plans(id) ON DELETE CASCADE,
+        scope_address TEXT,
+        source_category TEXT NOT NULL,
+        category TEXT NOT NULL,
+        target_label TEXT NOT NULL,
+        mark_read INTEGER NOT NULL CHECK(mark_read IN (0,1)),
+        archive INTEGER NOT NULL CHECK(archive IN (0,1)),
+        spam INTEGER NOT NULL CHECK(spam IN (0,1)),
+        confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1),
+        existing_messages INTEGER NOT NULL CHECK(existing_messages > 0)
+      );
+
+      CREATE TABLE gmail_history_batches (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL REFERENCES gmail_organization_plans(id) ON DELETE CASCADE,
+        impact_id TEXT NOT NULL REFERENCES gmail_history_impacts(id) ON DELETE CASCADE,
+        message_ids_json TEXT NOT NULL,
+        prior_labels_json TEXT NOT NULL,
+        resulting_labels_json TEXT,
+        state TEXT NOT NULL CHECK(state IN ('pending','running','succeeded','failed','verification_mismatch')),
+        error_code TEXT,
+        undo_state TEXT CHECK(undo_state IN ('pending','running','succeeded','failed','verification_mismatch')),
+        undo_error_code TEXT,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX gmail_history_batches_plan_state_idx ON gmail_history_batches(plan_id,state);
+    `,
+  },
+  {
+    version: 19,
+    statements: `
+      ALTER TABLE cleanup_plans ADD COLUMN proposal_id TEXT REFERENCES organization_proposals(id) ON DELETE CASCADE;
+      ALTER TABLE cleanup_plans ADD COLUMN proposal_revision TEXT;
+    `,
+  },
 ]);
 
 export const applyMigrations = (

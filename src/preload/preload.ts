@@ -28,7 +28,7 @@ import {
 import { mailboxAnalysisSummarySchema } from '../shared/contracts/analysis';
 import { type ExportRulePackInput, exportRulePackInputSchema, exportRulePackResultSchema } from '../shared/contracts/rules';
 import { type GmailAuditSummary, type GmailDisconnectInput, type GmailOAuthInput, gmailAuditSummarySchema, gmailConnectionSummarySchema, gmailDisconnectInputSchema, gmailOAuthInputSchema } from '../shared/contracts/gmail';
-import { type ApproveGmailOrganizationInput, approveGmailOrganizationInputSchema, gmailOrganizationPlanSchema } from '../shared/contracts/gmail-organize';
+import { type ApproveGmailOrganizationInput, type RetryGmailOrganizationInput, type UndoGmailOrganizationInput, approveGmailOrganizationInputSchema, gmailOrganizationPlanSchema, retryGmailOrganizationInputSchema, undoGmailOrganizationInputSchema } from '../shared/contracts/gmail-organize';
 import {
   type ApproveCleanupInput,
   type CleanupProgress,
@@ -311,6 +311,8 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
   getGmailOrganizationPlan: async () => gmailOrganizationPlanSchema.nullable().parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailOrganizeGet)),
   generateGmailOrganizationPlan: async () => gmailOrganizationPlanSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailOrganizeGenerate)),
   approveGmailOrganizationPlan: async (input: ApproveGmailOrganizationInput) => gmailOrganizationPlanSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailOrganizeApprove, approveGmailOrganizationInputSchema.parse(input))),
+  retryGmailOrganizationPlan: async (input: RetryGmailOrganizationInput) => gmailOrganizationPlanSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailOrganizeRetry, retryGmailOrganizationInputSchema.parse(input))),
+  undoGmailOrganizationPlan: async (input: UndoGmailOrganizationInput) => gmailOrganizationPlanSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailOrganizeUndo, undoGmailOrganizationInputSchema.parse(input))),
   getGmailSubscriptionDashboard: async () => subscriptionDashboardSchema.nullable().parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeGet)),
   scanGmailSubscriptions: async () => subscriptionDashboardSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeScan)),
   startGmailBulkUnsubscribe: async (input: StartUnsubscribeInput) => subscriptionDashboardSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeStart, startUnsubscribeInputSchema.parse(input))),
