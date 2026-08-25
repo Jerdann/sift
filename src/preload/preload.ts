@@ -34,11 +34,15 @@ import {
   type CleanupProgress,
   type GenerateCleanupInput,
   type GetCleanupInput,
+  type RetryCleanupInput,
+  type UndoCleanupInput,
   approveCleanupInputSchema,
   cleanupPlanSchema,
   cleanupProgressSchema,
   generateCleanupInputSchema,
   getCleanupInputSchema,
+  retryCleanupInputSchema,
+  undoCleanupInputSchema,
 } from '../shared/contracts/cleanup';
 import {
   type StartUnsubscribeInput,
@@ -318,6 +322,10 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
     cleanupProgressSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.cleanupApprove, approveCleanupInputSchema.parse(input))),
   resumeCleanupPlan: async (input: ApproveCleanupInput) =>
     cleanupProgressSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.cleanupResume, approveCleanupInputSchema.parse(input))),
+  retryCleanupPlan: async (input: RetryCleanupInput) =>
+    cleanupProgressSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.cleanupRetry, retryCleanupInputSchema.parse(input))),
+  undoCleanupPlan: async (input: UndoCleanupInput) =>
+    cleanupProgressSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.cleanupUndo, undoCleanupInputSchema.parse(input))),
   onCleanupProgress: (listener: (progress: CleanupProgress) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(cleanupProgressSchema.parse(payload));
     ipcRenderer.on(IPC_CHANNELS.cleanupProgress, wrapped);

@@ -1,5 +1,5 @@
 import type { IpcMain, IpcMainInvokeEvent } from 'electron';
-import { approveCleanupInputSchema, cleanupPlanSchema, cleanupProgressSchema, generateCleanupInputSchema, getCleanupInputSchema } from '../../shared/contracts/cleanup';
+import { approveCleanupInputSchema, cleanupPlanSchema, cleanupProgressSchema, generateCleanupInputSchema, getCleanupInputSchema, retryCleanupInputSchema, undoCleanupInputSchema } from '../../shared/contracts/cleanup';
 import { IPC_CHANNELS } from '../../shared/ipc';
 import { CleanupPlanRepository } from '../cleanup/cleanup-plan-repository';
 import { CleanupRunner } from '../cleanup/cleanup-runner';
@@ -39,18 +39,20 @@ export const registerCleanupHandlers = ({
     const connection = new ProtonConnectionRepository(context.database, profileSession.requireSecretVault(), context.profile.id).get();
     return { context, connection, jobs, plans, runner };
   };
-  const run = (event: IpcMainInvokeEvent, jobId: string, planId: string, current: ReturnType<typeof services>) => {
+  const run = (event: IpcMainInvokeEvent, jobId: string, planId: string, current: ReturnType<typeof services>, undo = false) => {
     const unsubscribe = current.runner.subscribe((progress) => {
       if (progress.plan.id !== planId) return;
       if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.cleanupProgress, cleanupProgressSchema.parse(progress));
-      if (progress.plan.job && ['succeeded', 'failed', 'verification_mismatch'].includes(progress.plan.job.state)) {
+      const activeJob = undo ? progress.plan.undoJob : progress.plan.job;
+      if (activeJob && ['succeeded', 'failed', 'verification_mismatch'].includes(activeJob.state)) {
         unsubscribe();
         running.delete(jobId);
       }
     });
     if (!running.has(jobId)) {
       running.add(jobId);
-      void current.runner.run(jobId).catch(() => {
+      const task = undo ? current.runner.undo(jobId) : current.runner.run(jobId);
+      void task.catch(() => {
         unsubscribe();
         running.delete(jobId);
       });
@@ -88,7 +90,25 @@ export const registerCleanupHandlers = ({
     run(event, plan.job.id, plan.id, current);
     return cleanupProgressSchema.parse(current.runner.progress(plan.id));
   });
+  ipcMain.handle(IPC_CHANNELS.cleanupRetry, (event, rawInput: unknown) => {
+    trust(event);
+    const input = retryCleanupInputSchema.parse(rawInput);
+    const current = services();
+    const plan = current.plans.retry(input.planId, input.actionIds);
+    if (!plan.job) throw new Error('cleanup_job_missing');
+    run(event, plan.job.id, plan.id, current);
+    return cleanupProgressSchema.parse(current.runner.progress(plan.id));
+  });
+  ipcMain.handle(IPC_CHANNELS.cleanupUndo, (event, rawInput: unknown) => {
+    trust(event);
+    const input = undoCleanupInputSchema.parse(rawInput);
+    const current = services();
+    const plan = current.plans.prepareUndo(input.planId);
+    if (!plan.undoJob) throw new Error('cleanup_undo_job_missing');
+    run(event, plan.undoJob.id, plan.id, current, true);
+    return cleanupProgressSchema.parse(current.runner.progress(plan.id));
+  });
   return () => {
-    for (const channel of [IPC_CHANNELS.cleanupGet, IPC_CHANNELS.cleanupGenerate, IPC_CHANNELS.cleanupApprove, IPC_CHANNELS.cleanupResume]) ipcMain.removeHandler(channel);
+    for (const channel of [IPC_CHANNELS.cleanupGet, IPC_CHANNELS.cleanupGenerate, IPC_CHANNELS.cleanupApprove, IPC_CHANNELS.cleanupResume, IPC_CHANNELS.cleanupRetry, IPC_CHANNELS.cleanupUndo]) ipcMain.removeHandler(channel);
   };
 };

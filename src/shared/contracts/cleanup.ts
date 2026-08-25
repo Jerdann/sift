@@ -23,6 +23,13 @@ export const cleanupPlanSchema = z.object({
   skippedCount: z.number().int().nonnegative(),
   impacts: z.array(cleanupImpactSchema),
   job: jobProgressSchema.nullable(),
+  undoJob: jobProgressSchema.nullable(),
+  failedActions: z.array(z.object({
+    id: z.uuid(),
+    targetPath: z.string(),
+    state: z.enum(['failed', 'verification_mismatch']),
+    errorCode: z.string().nullable(),
+  })),
 });
 
 export const approveCleanupInputSchema = z.object({
@@ -43,6 +50,13 @@ export const getCleanupInputSchema = z.object({
   kind: z.enum(['organize', 'trash']).default('organize'),
 });
 
+export const retryCleanupInputSchema = z.object({
+  planId: z.uuid(),
+  actionIds: z.array(z.uuid()).min(1).max(5_000),
+}).strict();
+
+export const undoCleanupInputSchema = z.object({ planId: z.uuid() }).strict();
+
 export const cleanupProgressSchema = z.object({
   profileId: z.uuid(),
   plan: cleanupPlanSchema,
@@ -53,4 +67,6 @@ export type CleanupPlan = z.infer<typeof cleanupPlanSchema>;
 export type GenerateCleanupInput = z.infer<typeof generateCleanupInputSchema>;
 export type GetCleanupInput = z.infer<typeof getCleanupInputSchema>;
 export type ApproveCleanupInput = z.infer<typeof approveCleanupInputSchema>;
+export type RetryCleanupInput = z.infer<typeof retryCleanupInputSchema>;
+export type UndoCleanupInput = z.infer<typeof undoCleanupInputSchema>;
 export type CleanupProgress = z.infer<typeof cleanupProgressSchema>;

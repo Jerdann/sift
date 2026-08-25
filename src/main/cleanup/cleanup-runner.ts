@@ -66,14 +66,57 @@ export class CleanupRunner {
             targets.set(targetKey, target);
           }
           const applied = await client.apply(action.sourcePath, action.uid, target);
-          if (!applied) throw new Error('provider_verification_failed');
-          this.#plans.markResult(action.id, 'succeeded');
+          if (!applied || applied.path !== target) throw new Error('provider_verification_failed');
+          this.#plans.markResult(action.id, 'succeeded', null, applied);
           this.#jobs.transitionItem(item.id, 'succeeded', {
             result: { operation: 'proton-cleanup-action', verified: true },
           });
         } catch {
           this.#plans.markResult(action.id, 'failed', 'provider_action_failed');
           this.#jobs.transitionItem(item.id, 'failed', { errorCode: 'provider_action_failed' });
+        }
+        this.#emit(planId);
+      }
+    } finally {
+      this.#currentTarget = null;
+      await client.close().catch(() => undefined);
+    }
+    return this.progress(planId);
+  }
+
+  async undo(jobId: string): Promise<CleanupProgress> {
+    const credentials = this.#connections.getCredentials();
+    if (!credentials) throw new Error('proton_not_connected');
+    const planId = this.#plans.planIdForJob(jobId);
+    const client = await this.#createClient(credentials);
+    try {
+      await client.connect();
+      for (;;) {
+        const item = this.#jobs.claimNextPending(jobId);
+        if (!item) break;
+        const actionId = item.itemKey.startsWith('undo:') ? item.itemKey.slice(5) : '';
+        const action = this.#plans.action(actionId);
+        this.#currentTarget = action.sourcePath;
+        this.#plans.markUndo(action.id, 'running');
+        this.#emit(planId);
+        try {
+          if (!action.resultingPath || !action.resultingUidValidity || !action.resultingUid) throw new Error('cleanup_undo_receipt_missing');
+          const current = await client.inspect(action.resultingPath, action.resultingUid);
+          if (!current || current.uidValidity !== action.resultingUidValidity) {
+            this.#plans.markUndo(action.id, 'verification_mismatch', 'destination_message_changed');
+            this.#jobs.transitionItem(item.id, 'verification_mismatch', { errorCode: 'destination_message_changed' });
+            continue;
+          }
+          const restored = await client.restore(action.resultingPath, action.resultingUid, action.sourcePath, action.priorFlags);
+          const expectedFlags = [...action.priorFlags].sort();
+          if (!restored || restored.path !== action.sourcePath || JSON.stringify(restored.flags) !== JSON.stringify(expectedFlags)) {
+            throw new Error('provider_undo_verification_failed');
+          }
+          this.#plans.markUndo(action.id, 'succeeded');
+          this.#jobs.transitionItem(item.id, 'succeeded', { result: { operation: 'proton-cleanup-action', verified: true } });
+        } catch {
+          this.#plans.markUndo(action.id, 'failed', 'provider_undo_failed');
+          this.#jobs.transitionItem(item.id, 'failed', { errorCode: 'provider_undo_failed' });
         }
         this.#emit(planId);
       }

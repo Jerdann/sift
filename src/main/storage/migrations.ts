@@ -686,6 +686,18 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       );
     `,
   },
+  {
+    version: 17,
+    statements: `
+      ALTER TABLE cleanup_plans ADD COLUMN undo_job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL;
+      ALTER TABLE cleanup_actions ADD COLUMN resulting_path TEXT;
+      ALTER TABLE cleanup_actions ADD COLUMN resulting_uid_validity TEXT;
+      ALTER TABLE cleanup_actions ADD COLUMN resulting_uid INTEGER;
+      ALTER TABLE cleanup_actions ADD COLUMN resulting_flags_json TEXT;
+      ALTER TABLE cleanup_actions ADD COLUMN undo_state TEXT CHECK(undo_state IN ('pending', 'running', 'succeeded', 'failed', 'verification_mismatch'));
+      ALTER TABLE cleanup_actions ADD COLUMN undo_error_code TEXT;
+    `,
+  },
 ]);
 
 export const applyMigrations = (

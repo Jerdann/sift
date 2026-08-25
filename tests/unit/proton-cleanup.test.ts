@@ -26,18 +26,38 @@ const storage: SafeStoragePort = {
 class FakeMutationClient implements ProtonMutationClientPort {
   readonly prepared: Array<[string, boolean, boolean]> = [];
   readonly applied: Array<[string, number, string]> = [];
+  readonly restored: Array<[string, number, string, string[]]> = [];
+  readonly messages = new Map<string, { uidValidity: string; flags: string[] }>();
   closed = false;
-  constructor(private readonly validity = '1') {}
+  constructor(private readonly validity = '1') {
+    for (let uid = 1; uid <= 3; uid += 1) this.messages.set(`INBOX:${uid}`, { uidValidity: validity, flags: ['\\Flagged'] });
+  }
   async connect() {}
   async close() { this.closed = true; }
   async prepareTarget(path: string, spam: boolean, trash = false) {
     this.prepared.push([path, spam, trash]);
     return spam ? 'Proton Spam' : trash ? 'Proton Trash' : path;
   }
-  async inspect(_path: string, _uid: number) { return { uidValidity: this.validity, flags: ['\\Flagged'] }; }
+  async inspect(path: string, uid: number) { return this.messages.get(`${path}:${uid}`) ?? null; }
   async apply(path: string, uid: number, target: string) {
     this.applied.push([path, uid, target]);
-    return true;
+    const current = this.messages.get(`${path}:${uid}`);
+    if (!current) return null;
+    this.messages.delete(`${path}:${uid}`);
+    const targetUid = uid + 1_000;
+    const receipt = { path: target, uid: targetUid, uidValidity: '2', flags: [...new Set([...current.flags, '\\Seen'])].sort() };
+    this.messages.set(`${target}:${targetUid}`, { uidValidity: receipt.uidValidity, flags: receipt.flags });
+    return receipt;
+  }
+  async restore(target: string, uid: number, source: string, priorFlags: readonly string[]) {
+    this.restored.push([target, uid, source, [...priorFlags]]);
+    const current = this.messages.get(`${target}:${uid}`);
+    if (!current) return null;
+    this.messages.delete(`${target}:${uid}`);
+    const sourceUid = uid + 1_000;
+    const receipt = { path: source, uid: sourceUid, uidValidity: '3', flags: [...priorFlags].sort() };
+    this.messages.set(`${source}:${sourceUid}`, { uidValidity: receipt.uidValidity, flags: receipt.flags });
+    return receipt;
   }
 }
 
@@ -95,7 +115,43 @@ describe('approved Proton cleanup', () => {
     expect(client.applied.some(([, , target]) => target === 'Primary/Important/Security')).toBe(true);
     expect(client.applied.some(([, , target]) => target === 'Primary/Promotions')).toBe(true);
     expect((current.profile.database.prepare("SELECT COUNT(*) AS count FROM cleanup_actions WHERE prior_flags_json = '[\"\\\\Flagged\"]' AND state = 'succeeded'").get() as { count: number }).count).toBe(3);
+    expect((current.profile.database.prepare("SELECT COUNT(*) AS count FROM cleanup_actions WHERE resulting_uid IS NOT NULL AND resulting_uid_validity = '2'").get() as { count: number }).count).toBe(3);
     expect(client.closed).toBe(true);
+    current.profile.database.close();
+  });
+
+  it('undoes verified moves in reverse order and restores the exact prior flags', async () => {
+    const current = setup();
+    const plan = current.plans.generate(current.connection.id, { kind: 'organize', containers: {}, trashSenderDomains: [] });
+    const approved = current.plans.approve(plan.id, plan.revision);
+    const client = new FakeMutationClient();
+    const runner = new CleanupRunner(current.jobs, current.plans, current.connections, () => client);
+    const applied = await runner.run(approved.job!.id);
+    const undoPlan = current.plans.prepareUndo(applied.plan.id);
+    const undone = await runner.undo(undoPlan.undoJob!.id);
+    expect(undone.plan.undoJob?.state).toBe('succeeded');
+    expect(client.restored).toHaveLength(3);
+    expect(client.restored.every(([, , , flags]) => JSON.stringify(flags) === JSON.stringify(['\\Flagged']))).toBe(true);
+    expect((current.profile.database.prepare("SELECT COUNT(*) AS count FROM cleanup_actions WHERE undo_state = 'succeeded'").get() as { count: number }).count).toBe(3);
+    current.profile.database.close();
+  });
+
+  it('selectively retries a failed provider action from its durable checkpoint', async () => {
+    const current = setup();
+    const plan = current.plans.generate(current.connection.id, { kind: 'organize', containers: {}, trashSenderDomains: [] });
+    const approved = current.plans.approve(plan.id, plan.revision);
+    const client = new FakeMutationClient();
+    client.messages.delete('INBOX:2');
+    const runner = new CleanupRunner(current.jobs, current.plans, current.connections, () => client);
+    const first = await runner.run(approved.job!.id);
+    expect(first.plan.failedActions).toHaveLength(1);
+    const failed = first.plan.failedActions[0]!;
+    client.messages.set('INBOX:2', { uidValidity: '1', flags: ['\\Flagged'] });
+    const retried = current.plans.retry(plan.id, [failed.id]);
+    expect(retried.job?.counts.pending).toBe(1);
+    const completed = await runner.run(retried.job!.id);
+    expect(completed.plan.job?.state).toBe('succeeded');
+    expect(completed.plan.failedActions).toHaveLength(0);
     current.profile.database.close();
   });
 

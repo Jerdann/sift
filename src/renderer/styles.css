@@ -745,6 +745,7 @@ select:focus-visible {
 .cleanup-execution progress { width: 100%; height: 3px; margin: 12px 0 14px; display: block; appearance: none; border: 0; }
 .cleanup-execution progress::-webkit-progress-bar { background: #242c35; }
 .cleanup-execution progress::-webkit-progress-value { background: #7de2c3; }
+.cleanup-execution .cleanup-job-actions { display: flex; justify-content: flex-start; gap: 8px; }
 .cleanup-warning { margin: 17px 0 0; color: #6f7a78; font-size: 10px; line-height: 1.5; }
 
 .unsubscribe-panel { margin-top: 20px; }

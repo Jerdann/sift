@@ -19,7 +19,7 @@ import type {
   StartProtonAuditInput,
 } from './contracts/proton-audit';
 import type { MailboxAnalysisSummary } from './contracts/analysis';
-import type { ApproveCleanupInput, CleanupPlan, CleanupProgress, GenerateCleanupInput, GetCleanupInput } from './contracts/cleanup';
+import type { ApproveCleanupInput, CleanupPlan, CleanupProgress, GenerateCleanupInput, GetCleanupInput, RetryCleanupInput, UndoCleanupInput } from './contracts/cleanup';
 import type { StartUnsubscribeInput, SubscriptionDashboard, UnsubscribeJobInput, UnsubscribeProgress } from './contracts/unsubscribe';
 import type { ExportRulePackInput, ExportRulePackResult } from './contracts/rules';
 import type { GmailAuditSummary, GmailConnectionSummary, GmailDisconnectInput, GmailOAuthInput } from './contracts/gmail';
@@ -92,6 +92,8 @@ export const IPC_CHANNELS = Object.freeze({
   cleanupGet: 'cleanup:get',
   cleanupProgress: 'cleanup:progress',
   cleanupResume: 'cleanup:resume',
+  cleanupRetry: 'cleanup:retry',
+  cleanupUndo: 'cleanup:undo',
   unsubscribeGet: 'unsubscribe:get',
   unsubscribeProgress: 'unsubscribe:progress',
   unsubscribeResume: 'unsubscribe:resume',
@@ -156,6 +158,8 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   'generateCleanupPlan',
   'approveCleanupPlan',
   'resumeCleanupPlan',
+  'retryCleanupPlan',
+  'undoCleanupPlan',
   'onCleanupProgress',
   'getSubscriptionDashboard',
   'scanSubscriptions',
@@ -221,6 +225,8 @@ export interface EmailOrganizerBridge {
   generateCleanupPlan(input: GenerateCleanupInput): Promise<CleanupPlan>;
   approveCleanupPlan(input: ApproveCleanupInput): Promise<CleanupProgress>;
   resumeCleanupPlan(input: ApproveCleanupInput): Promise<CleanupProgress>;
+  retryCleanupPlan(input: RetryCleanupInput): Promise<CleanupProgress>;
+  undoCleanupPlan(input: UndoCleanupInput): Promise<CleanupProgress>;
   onCleanupProgress(listener: (progress: CleanupProgress) => void): () => void;
   getSubscriptionDashboard(): Promise<SubscriptionDashboard | null>;
   scanSubscriptions(): Promise<SubscriptionDashboard>;

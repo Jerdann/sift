@@ -28,6 +28,10 @@ export interface CleanupActionRecord {
   uid: number;
   targetPath: string;
   actionKind: 'sort_read_archive' | 'native_spam' | 'native_trash';
+  priorFlags: string[];
+  resultingPath: string | null;
+  resultingUidValidity: string | null;
+  resultingUid: number | null;
 }
 
 export class CleanupPlanRepository {
@@ -120,7 +124,7 @@ export class CleanupPlanRepository {
   }
 
   planIdForJob(jobId: string): string {
-    const row = this.#database.prepare('SELECT id FROM cleanup_plans WHERE job_id = ?').get(jobId) as { id: string } | undefined;
+    const row = this.#database.prepare('SELECT id FROM cleanup_plans WHERE job_id = ? OR undo_job_id = ?').get(jobId, jobId) as { id: string } | undefined;
     if (!row) throw new Error('Cleanup plan was not found');
     return row.id;
   }
@@ -132,7 +136,7 @@ export class CleanupPlanRepository {
       WHERE cleanup_plans.id = ? AND pc.profile_id = ?
     `).get(planId, this.#profileId) as {
       id: string; connection_id: string; revision: string; state: CleanupPlan['state']; plan_kind: CleanupPlan['kind'];
-      skipped_count: number; job_id: string | null; created_at: string; approved_at: string | null;
+      skipped_count: number; job_id: string | null; undo_job_id: string | null; created_at: string; approved_at: string | null;
     } | undefined;
     if (!row) throw new Error('Cleanup plan was not found');
     const impacts = this.#database.prepare(`
@@ -160,6 +164,16 @@ export class CleanupPlanRepository {
         messageCount: impact.message_count,
       })),
       job: row.job_id ? this.#jobs.getProgress(row.job_id) : null,
+      undoJob: row.undo_job_id ? this.#jobs.getProgress(row.undo_job_id) : null,
+      failedActions: (this.#database.prepare(`
+        SELECT id,target_path,state,error_code FROM cleanup_actions
+        WHERE plan_id=? AND state IN ('failed','verification_mismatch') ORDER BY rowid
+      `).all(planId) as Array<{ id: string; target_path: string; state: 'failed' | 'verification_mismatch'; error_code: string | null }>).map((action) => ({
+        id: action.id,
+        targetPath: action.target_path,
+        state: action.state,
+        errorCode: action.error_code,
+      })),
     });
   }
 
@@ -196,6 +210,10 @@ export class CleanupPlanRepository {
       uid: Number(row.uid),
       targetPath: String(row.target_path),
       actionKind: row.action_kind as CleanupActionRecord['actionKind'],
+      priorFlags: row.prior_flags_json ? JSON.parse(String(row.prior_flags_json)) as string[] : [],
+      resultingPath: row.resulting_path ? String(row.resulting_path) : null,
+      resultingUidValidity: row.resulting_uid_validity ? String(row.resulting_uid_validity) : null,
+      resultingUid: row.resulting_uid ? Number(row.resulting_uid) : null,
     };
   }
 
@@ -205,8 +223,58 @@ export class CleanupPlanRepository {
     `).run(JSON.stringify(priorFlags), this.#now(), actionId);
   }
 
-  markResult(actionId: string, state: 'succeeded' | 'failed' | 'verification_mismatch', errorCode: string | null = null): void {
-    this.#database.prepare('UPDATE cleanup_actions SET state = ?, error_code = ?, updated_at = ? WHERE id = ?')
+  markResult(
+    actionId: string,
+    state: 'succeeded' | 'failed' | 'verification_mismatch',
+    errorCode: string | null = null,
+    receipt?: { path: string; uidValidity: string; uid: number; flags: readonly string[] },
+  ): void {
+    this.#database.prepare(`
+      UPDATE cleanup_actions SET state=?,error_code=?,resulting_path=?,resulting_uid_validity=?,
+        resulting_uid=?,resulting_flags_json=?,updated_at=? WHERE id=?
+    `).run(
+      state, errorCode, receipt?.path ?? null, receipt?.uidValidity ?? null, receipt?.uid ?? null,
+      receipt ? JSON.stringify([...receipt.flags].sort()) : null, this.#now(), actionId,
+    );
+  }
+
+  retry(planId: string, actionIds: readonly string[]): CleanupPlan {
+    const plan = this.get(planId);
+    if (!plan.job) throw new Error('cleanup_job_missing');
+    this.#jobs.retryItems(plan.job.id, actionIds);
+    const placeholders = actionIds.map(() => '?').join(',');
+    this.#database.prepare(`
+      UPDATE cleanup_actions SET state='pending',error_code=NULL,updated_at=?
+      WHERE plan_id=? AND id IN (${placeholders})
+    `).run(this.#now(), planId, ...actionIds);
+    this.#database.prepare("UPDATE cleanup_plans SET state='approved' WHERE id=?").run(planId);
+    return this.get(planId);
+  }
+
+  prepareUndo(planId: string): CleanupPlan {
+    const plan = this.get(planId);
+    if (plan.job?.state !== 'succeeded') throw new Error('cleanup_undo_not_ready');
+    const actions = this.#database.prepare(`
+      SELECT id FROM cleanup_actions WHERE plan_id=? AND state='succeeded'
+        AND resulting_path IS NOT NULL AND resulting_uid_validity IS NOT NULL AND resulting_uid IS NOT NULL
+      ORDER BY rowid DESC
+    `).all(planId) as Array<{ id: string }>;
+    if (!actions.length) throw new Error('cleanup_undo_receipts_missing');
+    const job = this.#jobs.createJob({
+      profileId: this.#profileId,
+      kind: 'proton-cleanup',
+      idempotencyKey: `cleanup-undo:${planId}:${plan.revision}`,
+      itemKeys: actions.map((action) => `undo:${action.id}`),
+    });
+    this.#database.transaction(() => {
+      this.#database.prepare('UPDATE cleanup_plans SET undo_job_id=? WHERE id=?').run(job.id, planId);
+      this.#database.prepare("UPDATE cleanup_actions SET undo_state='pending',undo_error_code=NULL WHERE plan_id=? AND state='succeeded'").run(planId);
+    })();
+    return this.get(planId);
+  }
+
+  markUndo(actionId: string, state: 'running' | 'succeeded' | 'failed' | 'verification_mismatch', errorCode: string | null = null): void {
+    this.#database.prepare('UPDATE cleanup_actions SET undo_state=?,undo_error_code=?,updated_at=? WHERE id=?')
       .run(state, errorCode, this.#now(), actionId);
   }
 

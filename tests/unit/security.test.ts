@@ -167,6 +167,8 @@ describe('desktop security boundary', () => {
       'generateCleanupPlan',
       'approveCleanupPlan',
       'resumeCleanupPlan',
+      'retryCleanupPlan',
+      'undoCleanupPlan',
       'onCleanupProgress',
       'getSubscriptionDashboard',
       'scanSubscriptions',

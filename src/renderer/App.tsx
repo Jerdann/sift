@@ -242,10 +242,14 @@ interface AppShellProps {
   onGenerateCleanup(containers: Record<string, string>): Promise<void>;
   onApproveCleanup(planId: string, revision: string): Promise<void>;
   onResumeCleanup(planId: string, revision: string): Promise<void>;
+  onRetryCleanup(planId: string, actionIds: string[]): Promise<void>;
+  onUndoCleanup(planId: string): Promise<void>;
   deletionPlan: CleanupPlan | null;
   onGenerateDeletion(senderDomains: string[]): Promise<void>;
   onApproveDeletion(planId: string, revision: string): Promise<void>;
   onResumeDeletion(planId: string, revision: string): Promise<void>;
+  onRetryDeletion(planId: string, actionIds: string[]): Promise<void>;
+  onUndoDeletion(planId: string): Promise<void>;
   subscriptions: SubscriptionDashboard | null;
   onScanSubscriptions(): Promise<void>;
   onStartUnsubscribe(candidateIds: string[]): Promise<void>;
@@ -682,6 +686,8 @@ const ProtonOrganizationFlow = ({
   onGenerateCleanup,
   onApproveCleanup,
   onResumeCleanup,
+  onRetryCleanup,
+  onUndoCleanup,
   onContinue,
 }: {
   audit: ProtonAuditProgress | null;
@@ -691,6 +697,8 @@ const ProtonOrganizationFlow = ({
   onGenerateCleanup(containers: Record<string, string>): Promise<void>;
   onApproveCleanup(planId: string, revision: string): Promise<void>;
   onResumeCleanup(planId: string, revision: string): Promise<void>;
+  onRetryCleanup(planId: string, actionIds: string[]): Promise<void>;
+  onUndoCleanup(planId: string): Promise<void>;
   onContinue(): void;
 }) => {
   const [stage, setStage] = useState<OrganizationStage>('senders');
@@ -735,7 +743,7 @@ const ProtonOrganizationFlow = ({
 
       <div className="organization-flow-actions"><button className="secondary-button" type="button" disabled={stageIndex === 0} onClick={() => setStage(organizationStages[stageIndex - 1]!.id)}>Back</button>{stageIndex < organizationStages.length - 1 ? <button className="primary-button compact" type="button" onClick={() => setStage(organizationStages[stageIndex + 1]!.id)}>Continue to {organizationStages[stageIndex + 1]!.label.toLowerCase()}</button> : <button className="primary-button compact" type="button" onClick={onContinue}>Continue to unsubscribe</button>}</div>
     </section>
-    {stage === 'apply' ? <CleanupPanel analysis={analysis} plan={cleanupPlan} onGenerate={() => onGenerateCleanup(containers)} onApprove={onApproveCleanup} onResume={onResumeCleanup} /> : null}
+    {stage === 'apply' ? <CleanupPanel analysis={analysis} plan={cleanupPlan} onGenerate={() => onGenerateCleanup(containers)} onApprove={onApproveCleanup} onResume={onResumeCleanup} onRetry={onRetryCleanup} onUndo={onUndoCleanup} /> : null}
   </>;
 };
 
@@ -745,6 +753,8 @@ const CleanupPanel = ({
   onGenerate,
   onApprove,
   onResume,
+  onRetry,
+  onUndo,
   mode = 'organize',
   canGenerate = true,
 }: {
@@ -753,6 +763,8 @@ const CleanupPanel = ({
   onGenerate(): Promise<void>;
   onApprove(planId: string, revision: string): Promise<void>;
   onResume(planId: string, revision: string): Promise<void>;
+  onRetry(planId: string, actionIds: string[]): Promise<void>;
+  onUndo(planId: string): Promise<void>;
   mode?: 'organize' | 'trash';
   canGenerate?: boolean;
 }) => {
@@ -768,6 +780,8 @@ const CleanupPanel = ({
   };
   const running = plan?.job?.state === 'running';
   const resumable = plan?.job?.state === 'pending' && plan.state !== 'draft';
+  const retryable = plan?.failedActions ?? [];
+  const canUndo = plan?.job?.state === 'succeeded' && !plan.undoJob;
   const trash = mode === 'trash';
   return (
     <section className="readiness-panel cleanup-panel" aria-labelledby="cleanup-title">
@@ -791,7 +805,7 @@ const CleanupPanel = ({
             </div>
           ) : null}
           {plan.job ? (
-            <div className="cleanup-execution" aria-live="polite"><div><span><strong>{plan.state === 'completed' ? 'Cleanup completed and recorded' : running ? 'Applying approved cleanup' : plan.state === 'failed' ? 'Cleanup finished with recoverable failures' : 'Cleanup paused at a checkpoint'}</strong><small>{plan.job.completedItems.toLocaleString()} / {plan.job.totalItems.toLocaleString()} actions processed</small></span><b>{plan.job.percent}%</b></div><progress max={100} value={plan.job.percent} />{resumable ? <button className="primary-button compact" type="button" disabled={busy} onClick={() => void act(() => onResume(plan.id, plan.revision))}>{busy ? 'Resuming…' : 'Resume cleanup'}</button> : null}</div>
+            <div className="cleanup-execution" aria-live="polite"><div><span><strong>{plan.undoJob?.state === 'succeeded' ? 'Original mailbox state restored' : plan.state === 'completed' ? 'Cleanup completed and recorded' : running ? 'Applying approved cleanup' : plan.state === 'failed' ? 'Cleanup finished with recoverable failures' : 'Cleanup paused at a checkpoint'}</strong><small>{plan.undoJob ? `${plan.undoJob.completedItems.toLocaleString()} / ${plan.undoJob.totalItems.toLocaleString()} restore actions verified` : `${plan.job.completedItems.toLocaleString()} / ${plan.job.totalItems.toLocaleString()} actions processed`}</small></span><b>{plan.undoJob?.percent ?? plan.job.percent}%</b></div><progress max={100} value={plan.undoJob?.percent ?? plan.job.percent} /><div className="cleanup-job-actions">{resumable ? <button className="primary-button compact" type="button" disabled={busy} onClick={() => void act(() => onResume(plan.id, plan.revision))}>{busy ? 'Resuming…' : 'Resume cleanup'}</button> : null}{retryable.length ? <button className="primary-button compact" type="button" disabled={busy} onClick={() => void act(() => onRetry(plan.id, retryable.map((action) => action.id)))}>{busy ? 'Retrying…' : `Retry ${retryable.length} failed`}</button> : null}{canUndo ? <button className="secondary-button danger" type="button" disabled={busy} onClick={() => void act(() => onUndo(plan.id))}>{busy ? 'Restoring…' : 'Undo verified moves'}</button> : null}</div></div>
           ) : null}
           <p className="cleanup-warning">No permanent deletion is used. {trash ? 'The selected history moves to Proton’s native Trash and remains recoverable under the provider’s retention policy.' : 'Messages excluded as personal, suspicious, low-confidence, or uncategorized remain where they are.'}</p>
         </div>
@@ -807,12 +821,16 @@ const TrashReviewPanel = ({
   onGenerate,
   onApprove,
   onResume,
+  onRetry,
+  onUndo,
 }: {
   analysis: MailboxAnalysisSummary | null;
   plan: CleanupPlan | null;
   onGenerate(senderDomains: string[]): Promise<void>;
   onApprove(planId: string, revision: string): Promise<void>;
   onResume(planId: string, revision: string): Promise<void>;
+  onRetry(planId: string, actionIds: string[]): Promise<void>;
+  onUndo(planId: string): Promise<void>;
 }) => {
   const [selected, setSelected] = useState<string[]>([]);
   if (!analysis) return null;
@@ -838,7 +856,7 @@ const TrashReviewPanel = ({
       {!candidates.length ? <p className="analysis-empty-note">No non-critical sender stream is old enough for the stale-history pass.</p> : null}
       {candidates.length ? <div className="trash-selection"><button className="secondary-button" type="button" onClick={() => setSelected(selected.length === candidates.length ? [] : candidates.map((candidate) => candidate.domain))}>{selected.length === candidates.length ? 'Clear selection' : 'Select all stale senders'}</button><span>{selected.length} sender{selected.length === 1 ? '' : 's'} selected</span></div> : null}
     </section>
-    <CleanupPanel analysis={analysis} plan={plan} onGenerate={() => onGenerate(selected)} onApprove={onApprove} onResume={onResume} mode="trash" canGenerate={selected.length > 0} />
+    <CleanupPanel analysis={analysis} plan={plan} onGenerate={() => onGenerate(selected)} onApprove={onApprove} onResume={onResume} onRetry={onRetry} onUndo={onUndo} mode="trash" canGenerate={selected.length > 0} />
   </>;
 };
 
@@ -1120,10 +1138,14 @@ const AppShell = ({
   onGenerateCleanup,
   onApproveCleanup,
   onResumeCleanup,
+  onRetryCleanup,
+  onUndoCleanup,
   deletionPlan,
   onGenerateDeletion,
   onApproveDeletion,
   onResumeDeletion,
+  onRetryDeletion,
+  onUndoDeletion,
   subscriptions,
   onScanSubscriptions,
   onStartUnsubscribe,
@@ -1186,13 +1208,13 @@ const AppShell = ({
 
           {activePage === 'audit' ? <>{taskIntro('Map the mailbox before you prune it.', 'Scan message history into a private inventory of senders, dates, folders, and bounded text evidence. A scan changes nothing in the mailbox and can resume after interruption.')}{emptyAccounts ? prerequisite('Connect an account first', 'Sift needs a mailbox connection before it can build an inventory.', 'accounts', 'Open accounts') : <><GmailConnectionPanel connection={gmailConnection} audit={gmailAudit} onConnect={onConnectGmail} onDisconnect={onDisconnectGmail} onAudit={onStartGmailAudit}/><ProtonAuditPanel discovery={protonDiscovery} audit={protonAudit} onStart={onStartProtonAudit} onPause={onPauseProtonAudit} onResume={onResumeProtonAudit}/></>}</> : null}
 
-          {activePage === 'organize' ? <>{taskIntro('Turn mailbox history into a durable system.', 'Confirm your real addresses first, then correct the address-scoped filing plan before Sift builds any provider rules or moves a message.')}{!protonAudit?.indexedMessages && !gmailAudit?.indexedMessages ? prerequisite('Scan at least one mailbox', 'Organization proposals are learned from the message inventory, not from a generic template.', emptyAccounts ? 'accounts' : 'audit', emptyAccounts ? 'Connect an account' : 'Open scan') : <>{selectedAccounts.map((account) => <div className="account-organization-sequence" key={account.id}><IdentityReview account={account} identities={identities[account.id] ?? []} onRefresh={onRefreshIdentities} onUpdate={onUpdateIdentity}/><OrganizationProposalEditor account={account} proposal={proposals[account.id] ?? null} onGenerate={onGenerateProposal} onEdit={onEditProposal}/></div>)}<ProtonOrganizationFlow audit={protonAudit} analysis={analysis} cleanupPlan={cleanupPlan} onAnalyze={onAnalyzeMailbox} onGenerateCleanup={onGenerateCleanup} onApproveCleanup={onApproveCleanup} onResumeCleanup={onResumeCleanup} onContinue={() => setActivePage('rules')} /></>}</> : null}
+          {activePage === 'organize' ? <>{taskIntro('Turn mailbox history into a durable system.', 'Confirm your real addresses first, then correct the address-scoped filing plan before Sift builds any provider rules or moves a message.')}{!protonAudit?.indexedMessages && !gmailAudit?.indexedMessages ? prerequisite('Scan at least one mailbox', 'Organization proposals are learned from the message inventory, not from a generic template.', emptyAccounts ? 'accounts' : 'audit', emptyAccounts ? 'Connect an account' : 'Open scan') : <>{selectedAccounts.map((account) => <div className="account-organization-sequence" key={account.id}><IdentityReview account={account} identities={identities[account.id] ?? []} onRefresh={onRefreshIdentities} onUpdate={onUpdateIdentity}/><OrganizationProposalEditor account={account} proposal={proposals[account.id] ?? null} onGenerate={onGenerateProposal} onEdit={onEditProposal}/></div>)}<ProtonOrganizationFlow audit={protonAudit} analysis={analysis} cleanupPlan={cleanupPlan} onAnalyze={onAnalyzeMailbox} onGenerateCleanup={onGenerateCleanup} onApproveCleanup={onApproveCleanup} onResumeCleanup={onResumeCleanup} onRetryCleanup={onRetryCleanup} onUndoCleanup={onUndoCleanup} onContinue={() => setActivePage('rules')} /></>}</> : null}
 
           {activePage === 'rules' ? <>{taskIntro('Keep the new system working automatically.', 'Inventory existing provider rules first, protect anything Sift does not own, then approve a deterministic create, replace, adopt, or remove plan.')}{selectedAccounts.some((account) => proposals[account.id]) ? <>{selectedAccounts.map((account) => <RuleReconciliationPanel key={account.id} account={account} inventory={ruleInventories[account.id] ?? null} plan={rulePlans[account.id] ?? null} onRefresh={onRefreshRuleInventory} onGenerate={onGenerateRulePlan} onApprove={onApproveRulePlan} onRetry={onRetryRulePlan} onUndo={onUndoRulePlan} onExportProton={onExportProtonRulePlan}/>)}</> : prerequisite('Finish an organization proposal first', 'Rules are derived from the corrected address-scoped filing plan, never directly from a generic template.', scannedCount ? 'organize' : 'audit', scannedCount ? 'Open organize' : 'Open scan')}</> : null}
 
           {activePage === 'unsubscribe' ? <>{taskIntro('Stop the mail you never wanted to keep.', 'Find authenticated mailing lists, protect receipts and account notices, and send approved one-click unsubscribe requests without confirming your address to suspected spam.')}{!analysis && !gmailAnalysis ? prerequisite('Build an organization proposal first', 'Sift needs classified sender streams to separate safe subscriptions from protected and suspicious mail.', emptyAccounts ? 'accounts' : scannedCount ? 'organize' : 'audit', emptyAccounts ? 'Connect an account' : scannedCount ? 'Open organize' : 'Open scan') : <><UnsubscribePanel provider="gmail" analysis={gmailAnalysis} dashboard={gmailSubscriptions} onScan={onScanGmailSubscriptions} onStart={onStartGmailUnsubscribe} onResume={async()=>undefined}/><UnsubscribePanel analysis={analysis} dashboard={subscriptions} onScan={onScanSubscriptions} onStart={onStartUnsubscribe} onResume={onResumeUnsubscribe}/>{analysis ? <section className="next-action"><span><strong>Finish with stale history</strong><small>Unsubscribing stops future mail. The last pass identifies old, non-critical sender history that can move to recoverable Trash.</small></span><button className="primary-button compact" type="button" onClick={() => setActivePage('delete')}>Continue to Trash review</button></section> : null}</>}</> : null}
 
-          {activePage === 'delete' ? <>{taskIntro('Delete last, when the broad cleanup work is already done.', 'Review stale sender history by volume and last activity, protect critical classifications, then move only the exact approved messages into the provider’s recoverable Trash.')}{!analysis ? prerequisite('Build the Proton organization proposal first', 'The final deletion pass depends on proven aliases and classified sender history.', protonAudit?.indexedMessages ? 'organize' : 'audit', protonAudit?.indexedMessages ? 'Open organize' : 'Open scan') : <TrashReviewPanel analysis={analysis} plan={deletionPlan} onGenerate={onGenerateDeletion} onApprove={onApproveDeletion} onResume={onResumeDeletion} />}</> : null}
+          {activePage === 'delete' ? <>{taskIntro('Delete last, when the broad cleanup work is already done.', 'Review stale sender history by volume and last activity, protect critical classifications, then move only the exact approved messages into the provider’s recoverable Trash.')}{!analysis ? prerequisite('Build the Proton organization proposal first', 'The final deletion pass depends on proven aliases and classified sender history.', protonAudit?.indexedMessages ? 'organize' : 'audit', protonAudit?.indexedMessages ? 'Open organize' : 'Open scan') : <TrashReviewPanel analysis={analysis} plan={deletionPlan} onGenerate={onGenerateDeletion} onApprove={onApproveDeletion} onResume={onResumeDeletion} onRetry={onRetryDeletion} onUndo={onUndoDeletion} />}</> : null}
         </main>
       </div>
     </div>
@@ -1346,6 +1368,14 @@ export const App = () => {
     const progress = await window.emailOrganizer.resumeCleanupPlan({ planId, revision });
     setCleanupPlan(progress.plan);
   };
+  const retryCleanup = async (planId: string, actionIds: string[]) => {
+    const progress = await window.emailOrganizer.retryCleanupPlan({ planId, actionIds });
+    setCleanupPlan(progress.plan);
+  };
+  const undoCleanup = async (planId: string) => {
+    const progress = await window.emailOrganizer.undoCleanupPlan({ planId });
+    setCleanupPlan(progress.plan);
+  };
   const generateDeletion = async (senderDomains: string[]) => setDeletionPlan(await window.emailOrganizer.generateCleanupPlan({ kind: 'trash', containers: {}, trashSenderDomains: senderDomains }));
   const approveDeletion = async (planId: string, revision: string) => {
     const progress = await window.emailOrganizer.approveCleanupPlan({ planId, revision });
@@ -1353,6 +1383,14 @@ export const App = () => {
   };
   const resumeDeletion = async (planId: string, revision: string) => {
     const progress = await window.emailOrganizer.resumeCleanupPlan({ planId, revision });
+    setDeletionPlan(progress.plan);
+  };
+  const retryDeletion = async (planId: string, actionIds: string[]) => {
+    const progress = await window.emailOrganizer.retryCleanupPlan({ planId, actionIds });
+    setDeletionPlan(progress.plan);
+  };
+  const undoDeletion = async (planId: string) => {
+    const progress = await window.emailOrganizer.undoCleanupPlan({ planId });
     setDeletionPlan(progress.plan);
   };
   const scanSubscriptions = async () => setSubscriptions(await window.emailOrganizer.scanSubscriptions());
@@ -1486,10 +1524,14 @@ export const App = () => {
       onGenerateCleanup={generateCleanup}
       onApproveCleanup={approveCleanup}
       onResumeCleanup={resumeCleanup}
+      onRetryCleanup={retryCleanup}
+      onUndoCleanup={undoCleanup}
       deletionPlan={deletionPlan}
       onGenerateDeletion={generateDeletion}
       onApproveDeletion={approveDeletion}
       onResumeDeletion={resumeDeletion}
+      onRetryDeletion={retryDeletion}
+      onUndoDeletion={undoDeletion}
       subscriptions={subscriptions}
       onScanSubscriptions={scanSubscriptions}
       onStartUnsubscribe={startUnsubscribe}

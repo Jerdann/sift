@@ -7,7 +7,15 @@ export interface ProtonMutationClientPort {
   close(): Promise<void>;
   prepareTarget(path: string, nativeSpam: boolean, nativeTrash?: boolean): Promise<string>;
   inspect(sourcePath: string, uid: number): Promise<{ uidValidity: string; flags: string[] } | null>;
-  apply(sourcePath: string, uid: number, targetPath: string): Promise<boolean>;
+  apply(sourcePath: string, uid: number, targetPath: string): Promise<ProtonMoveReceipt | null>;
+  restore(targetPath: string, uid: number, sourcePath: string, priorFlags: readonly string[]): Promise<ProtonMoveReceipt | null>;
+}
+
+export interface ProtonMoveReceipt {
+  path: string;
+  uidValidity: string;
+  uid: number;
+  flags: string[];
 }
 
 export type ProtonMutationClientFactory = (
@@ -61,13 +69,35 @@ class ImapFlowMutationClient implements ProtonMutationClientPort {
     } finally { lock.release(); }
   }
 
-  async apply(sourcePath: string, uid: number, targetPath: string): Promise<boolean> {
+  async apply(sourcePath: string, uid: number, targetPath: string): Promise<ProtonMoveReceipt | null> {
+    let targetUid: number | undefined;
     const lock = await this.#client.getMailboxLock(sourcePath, { description: 'Sift approved cleanup' });
     try {
       const seen = await this.#client.messageFlagsAdd(uid, ['\\Seen'], { uid: true });
-      if (!seen) return false;
-      return Boolean(await this.#client.messageMove(uid, targetPath, { uid: true }));
+      if (!seen) return null;
+      const moved = await this.#client.messageMove(uid, targetPath, { uid: true });
+      targetUid = moved ? moved.uidMap?.get(uid) : undefined;
     } finally { lock.release(); }
+    if (!targetUid) return null;
+    const resulting = await this.inspect(targetPath, targetUid);
+    return resulting ? { path: targetPath, uid: targetUid, ...resulting } : null;
+  }
+
+  async restore(targetPath: string, uid: number, sourcePath: string, priorFlags: readonly string[]): Promise<ProtonMoveReceipt | null> {
+    let sourceUid: number | undefined;
+    const targetLock = await this.#client.getMailboxLock(targetPath, { description: 'Sift cleanup undo' });
+    try {
+      const moved = await this.#client.messageMove(uid, sourcePath, { uid: true });
+      sourceUid = moved ? moved.uidMap?.get(uid) : undefined;
+    } finally { targetLock.release(); }
+    if (!sourceUid) return null;
+    const sourceLock = await this.#client.getMailboxLock(sourcePath, { description: 'Sift cleanup flag restore' });
+    try {
+      const restored = await this.#client.messageFlagsSet(sourceUid, [...priorFlags], { uid: true });
+      if (!restored) return null;
+    } finally { sourceLock.release(); }
+    const resulting = await this.inspect(sourcePath, sourceUid);
+    return resulting ? { path: sourcePath, uid: sourceUid, ...resulting } : null;
   }
 }
 
