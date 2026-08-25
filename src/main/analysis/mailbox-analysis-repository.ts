@@ -6,9 +6,8 @@ import {
   mailboxAnalysisSummarySchema,
 } from '../../shared/contracts/analysis';
 import { CATEGORY_PRESENTATION } from '../../core/classification/mail-classifier';
-
-const emailAddressPattern = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}$/i;
-const embeddedEmailPattern = /[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
+import { AccountIdentityRepository } from '../identity/account-identity-repository';
+import { protonIdentityEvidence } from '../identity/ownership-evidence';
 
 export interface OwnedAddressEvidence {
   address: string;
@@ -21,55 +20,12 @@ export const ownedAddressEvidence = (
   database: BetterSqlite3.Database,
   connectionId: string,
 ): OwnedAddressEvidence[] => {
-  const rows = database.prepare(`
-    SELECT indexed_messages.sender_json, indexed_messages.headers_json,
-           indexed_messages.received_at, mail_containers.special_use
-    FROM indexed_messages
-    JOIN mail_containers ON mail_containers.id = indexed_messages.container_id
-    WHERE indexed_messages.connection_id = ?
-  `).all(connectionId) as Array<{
-    sender_json: string;
-    headers_json: string;
-    received_at: string | null;
-    special_use: string | null;
-  }>;
-  const addresses = new Map<string, OwnedAddressEvidence>();
-  const add = (address: string, kind: 'sent' | 'delivered', seenAt: string | null) => {
-    const normalized = address.trim().toLowerCase();
-    if (!emailAddressPattern.test(normalized)) return;
-    // Proton uses this internal route while forwarding between addresses. It is
-    // transport metadata, not an identity the mailbox owner can manage.
-    if (normalized.endsWith('@forward.protonmail.ch')) return;
-    const current = addresses.get(normalized) ?? {
-      address: normalized,
-      sentFromCount: 0,
-      deliveredToCount: 0,
-      lastSeenAt: null,
-    };
-    if (kind === 'sent') current.sentFromCount += 1;
-    else current.deliveredToCount += 1;
-    if (seenAt && (!current.lastSeenAt || seenAt > current.lastSeenAt)) current.lastSeenAt = seenAt;
-    addresses.set(normalized, current);
-  };
-  for (const row of rows) {
-    const sent = row.special_use?.toLowerCase() === '\\sent';
-    if (sent) {
-      let senders: unknown;
-      try { senders = JSON.parse(row.sender_json); } catch { continue; }
-      if (!Array.isArray(senders)) continue;
-      for (const sender of senders) if (typeof sender === 'string') add(sender, 'sent', row.received_at);
-      continue;
-    }
-    let headers: unknown;
-    try { headers = JSON.parse(row.headers_json); } catch { continue; }
-    if (!headers || typeof headers !== 'object' || Array.isArray(headers)) continue;
-    for (const key of ['delivered-to', 'x-original-to']) {
-      const value = (headers as Record<string, unknown>)[key];
-      if (typeof value !== 'string') continue;
-      for (const address of value.match(embeddedEmailPattern) ?? []) add(address, 'delivered', row.received_at);
-    }
-  }
-  return [...addresses.values()].sort((left, right) => left.address.localeCompare(right.address));
+  return protonIdentityEvidence(database, connectionId).map((identity) => ({
+    address: identity.address,
+    sentFromCount: identity.sentFromCount,
+    deliveredToCount: identity.deliveredToCount,
+    lastSeenAt: identity.lastSeenAt,
+  }));
 };
 
 export interface StoredClassification {
@@ -207,7 +163,12 @@ export class MailboxAnalysisRepository {
       sender_domain: string; category: MailCategory; receiving_address: string; message_count: number;
       latest_at: string | null; confidence: number; evidence_json: string;
     }>;
-    const ownership = ownedAddressEvidence(this.#database, connectionId);
+    const identityRepository = new AccountIdentityRepository(this.#database, this.#profileId);
+    let identities = identityRepository.list('proton', connectionId);
+    if (!identities.length) {
+      identities = identityRepository.sync('proton', connectionId, protonIdentityEvidence(this.#database, connectionId));
+    }
+    const ownership = identities.filter((identity) => identity.status !== 'rejected');
     const verifiedAddresses = new Set(ownership.map((item) => item.address));
     const serviceRows = (this.#database.prepare(`
       SELECT * FROM address_service_evidence WHERE analysis_id = ?
@@ -247,10 +208,15 @@ export class MailboxAnalysisRepository {
         address,
         ownershipEvidence: identity.sentFromCount && identity.deliveredToCount
           ? 'sent_and_received' as const
-          : identity.sentFromCount ? 'sent' as const : 'received' as const,
+          : identity.sentFromCount ? 'sent' as const
+            : identity.providerEvidence ? 'provider_account' as const : 'received' as const,
         canRetire: identity.sentFromCount > 0,
         sentFromCount: identity.sentFromCount,
         deliveredToCount: identity.deliveredToCount,
+        evidence: identity.evidence,
+        status: identity.status,
+        containerEnabled: identity.containerEnabled,
+        containerName: identity.containerName,
         recommendation, messageCount, latestAt, importantCount,
         services: rows.slice(0, 25).map((row) => ({
           domain: row.sender_domain,

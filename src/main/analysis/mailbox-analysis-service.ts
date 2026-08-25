@@ -7,8 +7,9 @@ import {
 } from '../../core/classification/mail-classifier';
 import {
   MailboxAnalysisRepository,
-  ownedAddressEvidence,
 } from './mailbox-analysis-repository';
+import { AccountIdentityRepository } from '../identity/account-identity-repository';
+import { protonIdentityEvidence } from '../identity/ownership-evidence';
 
 interface IndexedRow {
   id: string;
@@ -44,9 +45,14 @@ export const analyzeMailbox = (
       indexed_messages.uid DESC
   `).all(connectionId) as IndexedRow[];
   if (!rows.length) throw new Error('proton_audit_required');
-  const ownership = ownedAddressEvidence(database, connectionId);
-  const ownedAddresses = new Set(ownership.map((identity) => identity.address));
-  const sendingAddresses = new Set(ownership.filter((identity) => identity.sentFromCount > 0).map((identity) => identity.address));
+  const ownership = new AccountIdentityRepository(database, profileId).sync(
+    'proton',
+    connectionId,
+    protonIdentityEvidence(database, connectionId),
+  );
+  const activeOwnership = ownership.filter((identity) => identity.status !== 'rejected');
+  const ownedAddresses = new Set(activeOwnership.map((identity) => identity.address));
+  const sendingAddresses = new Set(activeOwnership.filter((identity) => identity.sentFromCount > 0).map((identity) => identity.address));
   const seen = new Set<string>();
   const classifications = [];
   for (const row of rows) {

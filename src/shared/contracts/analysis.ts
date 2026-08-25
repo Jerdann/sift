@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { accountIdentityStatusSchema, identityEvidenceSourceSchema } from './accounts';
 
 export const mailCategorySchema = z.enum([
   'personal', 'security', 'accounts', 'transactions', 'finance', 'shopping',
@@ -30,6 +31,10 @@ export const addressServiceSchema = z.object({
   canRetire: z.boolean(),
   sentFromCount: z.number().int().nonnegative(),
   deliveredToCount: z.number().int().nonnegative(),
+  evidence: z.array(identityEvidenceSourceSchema),
+  status: accountIdentityStatusSchema,
+  containerEnabled: z.boolean(),
+  containerName: z.string().nullable(),
   recommendation: z.enum(['retain', 'migrate', 'watch', 'consider_deactivation']),
   messageCount: z.number().int().nonnegative(),
   latestAt: z.iso.datetime().nullable(),
