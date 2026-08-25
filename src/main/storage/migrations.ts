@@ -1,0 +1,488 @@
+import type BetterSqlite3 from 'better-sqlite3';
+
+interface Migration {
+  version: number;
+  statements: string;
+}
+
+export const MIGRATIONS: readonly Migration[] = Object.freeze([
+  {
+    version: 1,
+    statements: `
+      CREATE TABLE secret_refs (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        purpose TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE jobs (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (
+          state IN ('pending', 'running', 'succeeded', 'failed', 'skipped', 'verification_mismatch')
+        ),
+        idempotency_key TEXT NOT NULL UNIQUE,
+        total_items INTEGER NOT NULL DEFAULT 0 CHECK (total_items >= 0),
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        checkpoint_json TEXT,
+        error_code TEXT
+      );
+
+      CREATE TABLE job_items (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        item_key TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (
+          state IN ('pending', 'running', 'succeeded', 'failed', 'skipped', 'verification_mismatch')
+        ),
+        attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+        prior_state_json TEXT,
+        target_state_json TEXT,
+        result_json TEXT,
+        error_code TEXT,
+        updated_at TEXT NOT NULL,
+        UNIQUE(job_id, item_key)
+      );
+
+      CREATE TABLE audit_events (
+        id TEXT PRIMARY KEY,
+        job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+        job_item_id TEXT REFERENCES job_items(id) ON DELETE SET NULL,
+        event_type TEXT NOT NULL,
+        safe_payload_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX jobs_profile_state_idx ON jobs(profile_id, state);
+      CREATE INDEX job_items_job_state_idx ON job_items(job_id, state);
+      CREATE INDEX audit_events_job_created_idx ON audit_events(job_id, created_at);
+      CREATE INDEX secret_refs_profile_purpose_idx ON secret_refs(profile_id, purpose);
+    `,
+  },
+  {
+    version: 2,
+    statements: `
+      CREATE TABLE provider_connections (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK (provider IN ('proton')),
+        host TEXT NOT NULL CHECK (host IN ('127.0.0.1', '::1', 'localhost')),
+        port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
+        username TEXT NOT NULL,
+        security TEXT NOT NULL CHECK (security IN ('starttls', 'tls', 'plain')),
+        secret_ref_id TEXT NOT NULL REFERENCES secret_refs(id) ON DELETE RESTRICT,
+        state TEXT NOT NULL CHECK (state IN ('connected', 'attention')),
+        last_connected_at TEXT,
+        last_error_category TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(profile_id, provider)
+      );
+
+      CREATE INDEX provider_connections_profile_idx
+        ON provider_connections(profile_id, provider);
+    `,
+  },
+  {
+    version: 3,
+    statements: `
+      CREATE TABLE proton_capabilities (
+        connection_id TEXT NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
+        capability TEXT NOT NULL,
+        observed_at TEXT NOT NULL,
+        PRIMARY KEY(connection_id, capability)
+      );
+
+      CREATE TABLE mail_containers (
+        id TEXT PRIMARY KEY,
+        connection_id TEXT NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
+        profile_id TEXT NOT NULL,
+        provider_container_id TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        delimiter TEXT NOT NULL,
+        special_use TEXT,
+        flags_json TEXT NOT NULL DEFAULT '[]',
+        message_count INTEGER NOT NULL CHECK(message_count >= 0),
+        unread_count INTEGER NOT NULL CHECK(unread_count >= 0),
+        uid_validity TEXT NOT NULL,
+        uid_next INTEGER NOT NULL CHECK(uid_next >= 0),
+        observed_at TEXT NOT NULL,
+        UNIQUE(connection_id, provider_container_id)
+      );
+
+      CREATE TABLE receiving_addresses (
+        id TEXT PRIMARY KEY,
+        connection_id TEXT NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
+        profile_id TEXT NOT NULL,
+        normalized_address TEXT NOT NULL,
+        occurrence_count INTEGER NOT NULL CHECK(occurrence_count > 0),
+        last_seen_at TEXT,
+        sources_json TEXT NOT NULL DEFAULT '[]',
+        observed_at TEXT NOT NULL,
+        UNIQUE(connection_id, normalized_address)
+      );
+
+      CREATE INDEX mail_containers_profile_idx ON mail_containers(profile_id, connection_id);
+      CREATE INDEX receiving_addresses_profile_idx ON receiving_addresses(profile_id, connection_id);
+    `,
+  },
+  {
+    version: 4,
+    statements: `
+      CREATE TABLE proton_audit_runs (
+        job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+        connection_id TEXT NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
+        extract_bodies INTEGER NOT NULL CHECK(extract_bodies IN (0, 1)),
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE proton_folder_checkpoints (
+        connection_id TEXT NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
+        container_id TEXT NOT NULL REFERENCES mail_containers(id) ON DELETE CASCADE,
+        uid_validity TEXT NOT NULL,
+        last_uid INTEGER NOT NULL DEFAULT 0 CHECK(last_uid >= 0),
+        indexed_count INTEGER NOT NULL DEFAULT 0 CHECK(indexed_count >= 0),
+        earliest_at TEXT,
+        latest_at TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(connection_id, container_id)
+      );
+
+      CREATE TABLE indexed_messages (
+        id TEXT PRIMARY KEY,
+        connection_id TEXT NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
+        container_id TEXT NOT NULL REFERENCES mail_containers(id) ON DELETE CASCADE,
+        uid_validity TEXT NOT NULL,
+        uid INTEGER NOT NULL CHECK(uid > 0),
+        message_id TEXT,
+        received_at TEXT,
+        subject TEXT,
+        sender_json TEXT NOT NULL DEFAULT '[]',
+        recipients_json TEXT NOT NULL DEFAULT '[]',
+        headers_json TEXT NOT NULL DEFAULT '{}',
+        flags_json TEXT NOT NULL DEFAULT '[]',
+        size_bytes INTEGER NOT NULL DEFAULT 0 CHECK(size_bytes >= 0),
+        body_text TEXT,
+        body_truncated INTEGER NOT NULL DEFAULT 0 CHECK(body_truncated IN (0, 1)),
+        indexed_at TEXT NOT NULL,
+        UNIQUE(connection_id, container_id, uid_validity, uid)
+      );
+
+      CREATE TABLE proton_scan_failures (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        container_id TEXT REFERENCES mail_containers(id) ON DELETE CASCADE,
+        uid INTEGER,
+        category TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX indexed_messages_connection_idx ON indexed_messages(connection_id, container_id, uid);
+      CREATE INDEX proton_scan_failures_job_idx ON proton_scan_failures(job_id, container_id);
+    `,
+  },
+  {
+    version: 5,
+    statements: `
+      CREATE TABLE mailbox_analyses (
+        id TEXT PRIMARY KEY,
+        connection_id TEXT NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
+        profile_id TEXT NOT NULL,
+        classifier_version TEXT NOT NULL,
+        analyzed_at TEXT NOT NULL
+      );
+
+      CREATE TABLE message_classifications (
+        analysis_id TEXT NOT NULL REFERENCES mailbox_analyses(id) ON DELETE CASCADE,
+        message_row_id TEXT NOT NULL REFERENCES indexed_messages(id) ON DELETE CASCADE,
+        canonical_key TEXT NOT NULL,
+        category TEXT NOT NULL,
+        confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1),
+        evidence_json TEXT NOT NULL,
+        sender_domain TEXT NOT NULL,
+        receiving_addresses_json TEXT NOT NULL,
+        PRIMARY KEY(analysis_id, canonical_key)
+      );
+
+      CREATE TABLE analysis_streams (
+        id TEXT PRIMARY KEY,
+        analysis_id TEXT NOT NULL REFERENCES mailbox_analyses(id) ON DELETE CASCADE,
+        sender_domain TEXT NOT NULL,
+        category TEXT NOT NULL,
+        receiving_address TEXT NOT NULL,
+        message_count INTEGER NOT NULL CHECK(message_count > 0),
+        latest_at TEXT,
+        confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1),
+        evidence_json TEXT NOT NULL
+      );
+
+      CREATE TABLE address_service_evidence (
+        id TEXT PRIMARY KEY,
+        analysis_id TEXT NOT NULL REFERENCES mailbox_analyses(id) ON DELETE CASCADE,
+        receiving_address TEXT NOT NULL,
+        sender_domain TEXT NOT NULL,
+        message_count INTEGER NOT NULL CHECK(message_count > 0),
+        latest_at TEXT,
+        categories_json TEXT NOT NULL
+      );
+
+      CREATE INDEX message_classifications_analysis_idx ON message_classifications(analysis_id, category);
+      CREATE INDEX analysis_streams_analysis_idx ON analysis_streams(analysis_id, message_count DESC);
+      CREATE INDEX address_service_analysis_idx ON address_service_evidence(analysis_id, receiving_address);
+    `,
+  },
+  {
+    version: 6,
+    statements: `
+      CREATE TABLE cleanup_plans (
+        id TEXT PRIMARY KEY,
+        connection_id TEXT NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
+        analysis_id TEXT NOT NULL REFERENCES mailbox_analyses(id) ON DELETE CASCADE,
+        revision TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('draft', 'approved', 'executing', 'completed', 'failed')),
+        skipped_count INTEGER NOT NULL DEFAULT 0 CHECK(skipped_count >= 0),
+        job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        approved_at TEXT
+      );
+
+      CREATE TABLE cleanup_actions (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL REFERENCES cleanup_plans(id) ON DELETE CASCADE,
+        message_row_id TEXT NOT NULL REFERENCES indexed_messages(id) ON DELETE CASCADE,
+        canonical_key TEXT NOT NULL,
+        category TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        uid_validity TEXT NOT NULL,
+        uid INTEGER NOT NULL CHECK(uid > 0),
+        target_path TEXT NOT NULL,
+        action_kind TEXT NOT NULL CHECK(action_kind IN ('sort_read_archive', 'native_spam')),
+        state TEXT NOT NULL CHECK(state IN ('pending', 'running', 'succeeded', 'failed', 'skipped', 'verification_mismatch')),
+        prior_flags_json TEXT,
+        error_code TEXT,
+        updated_at TEXT NOT NULL,
+        UNIQUE(plan_id, canonical_key)
+      );
+
+      CREATE INDEX cleanup_actions_plan_state_idx ON cleanup_actions(plan_id, state);
+    `,
+  },
+  {
+    version: 7,
+    statements: `
+      CREATE TABLE subscription_scans (
+        id TEXT PRIMARY KEY,
+        analysis_id TEXT NOT NULL REFERENCES mailbox_analyses(id) ON DELETE CASCADE,
+        profile_id TEXT NOT NULL,
+        generated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE subscription_candidates (
+        id TEXT PRIMARY KEY,
+        scan_id TEXT NOT NULL REFERENCES subscription_scans(id) ON DELETE CASCADE,
+        sender_domain TEXT NOT NULL,
+        list_id TEXT NOT NULL,
+        receiving_address TEXT NOT NULL,
+        endpoint TEXT,
+        eligibility TEXT NOT NULL CHECK(eligibility IN ('eligible', 'manual', 'protected', 'spam_skipped')),
+        authenticated INTEGER NOT NULL CHECK(authenticated IN (0, 1)),
+        message_count INTEGER NOT NULL CHECK(message_count > 0),
+        latest_at TEXT,
+        categories_json TEXT NOT NULL,
+        sample_subjects_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending', 'unsubscribed', 'failed', 'manual', 'spam_skipped')),
+        reason TEXT NOT NULL
+      );
+
+      CREATE TABLE unsubscribe_runs (
+        job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+        scan_id TEXT NOT NULL REFERENCES subscription_scans(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX subscription_candidates_scan_idx ON subscription_candidates(scan_id, eligibility, message_count DESC);
+    `,
+  },
+  {
+    version: 8,
+    statements: `
+      CREATE TABLE gmail_connections (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL UNIQUE,
+        email TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        secret_ref_id TEXT NOT NULL REFERENCES secret_refs(id) ON DELETE RESTRICT,
+        state TEXT NOT NULL CHECK(state IN ('connected', 'attention')),
+        connected_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX gmail_connections_profile_idx ON gmail_connections(profile_id);
+    `,
+  },
+  {
+    version: 9,
+    statements: `
+      CREATE TABLE gmail_audit_state (
+        connection_id TEXT PRIMARY KEY REFERENCES gmail_connections(id) ON DELETE CASCADE,
+        state TEXT NOT NULL CHECK(state IN ('idle', 'scanning', 'paused', 'completed', 'failed')),
+        next_page_token TEXT,
+        indexed_messages INTEGER NOT NULL DEFAULT 0 CHECK(indexed_messages >= 0),
+        total_estimate INTEGER NOT NULL DEFAULT 0 CHECK(total_estimate >= 0),
+        earliest_at TEXT,
+        latest_at TEXT,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE gmail_indexed_messages (
+        id TEXT PRIMARY KEY,
+        connection_id TEXT NOT NULL REFERENCES gmail_connections(id) ON DELETE CASCADE,
+        gmail_message_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        received_at TEXT,
+        subject TEXT,
+        sender_json TEXT NOT NULL DEFAULT '[]',
+        recipients_json TEXT NOT NULL DEFAULT '[]',
+        headers_json TEXT NOT NULL DEFAULT '{}',
+        label_ids_json TEXT NOT NULL DEFAULT '[]',
+        size_bytes INTEGER NOT NULL DEFAULT 0 CHECK(size_bytes >= 0),
+        indexed_at TEXT NOT NULL,
+        UNIQUE(connection_id, gmail_message_id)
+      );
+      CREATE INDEX gmail_messages_connection_date_idx ON gmail_indexed_messages(connection_id, received_at DESC);
+    `,
+  },
+  {
+    version: 10,
+    statements: `
+      CREATE TABLE gmail_mailbox_analyses (
+        id TEXT PRIMARY KEY,
+        connection_id TEXT NOT NULL UNIQUE REFERENCES gmail_connections(id) ON DELETE CASCADE,
+        profile_id TEXT NOT NULL,
+        classifier_version TEXT NOT NULL,
+        analyzed_at TEXT NOT NULL
+      );
+      CREATE TABLE gmail_message_classifications (
+        analysis_id TEXT NOT NULL REFERENCES gmail_mailbox_analyses(id) ON DELETE CASCADE,
+        message_row_id TEXT NOT NULL REFERENCES gmail_indexed_messages(id) ON DELETE CASCADE,
+        category TEXT NOT NULL,
+        confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1),
+        evidence_json TEXT NOT NULL,
+        sender_domain TEXT NOT NULL,
+        receiving_addresses_json TEXT NOT NULL,
+        PRIMARY KEY(analysis_id, message_row_id)
+      );
+      CREATE TABLE gmail_analysis_streams (
+        id TEXT PRIMARY KEY,
+        analysis_id TEXT NOT NULL REFERENCES gmail_mailbox_analyses(id) ON DELETE CASCADE,
+        sender_domain TEXT NOT NULL,
+        category TEXT NOT NULL,
+        receiving_address TEXT NOT NULL,
+        message_count INTEGER NOT NULL CHECK(message_count > 0),
+        latest_at TEXT,
+        confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1),
+        evidence_json TEXT NOT NULL
+      );
+      CREATE INDEX gmail_classifications_analysis_idx ON gmail_message_classifications(analysis_id, category);
+      CREATE INDEX gmail_streams_analysis_idx ON gmail_analysis_streams(analysis_id, message_count DESC);
+    `,
+  },
+  {
+    version: 11,
+    statements: `
+      CREATE TABLE gmail_organization_plans (
+        id TEXT PRIMARY KEY, connection_id TEXT NOT NULL REFERENCES gmail_connections(id) ON DELETE CASCADE,
+        analysis_id TEXT NOT NULL REFERENCES gmail_mailbox_analyses(id) ON DELETE CASCADE, revision TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('draft','approved','running','completed','failed')),
+        skipped_ambiguous_streams INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, approved_at TEXT
+      );
+      CREATE TABLE gmail_rule_actions (
+        id TEXT PRIMARY KEY, plan_id TEXT NOT NULL REFERENCES gmail_organization_plans(id) ON DELETE CASCADE,
+        rule_key TEXT NOT NULL, sender_domain TEXT NOT NULL, receiving_address TEXT, category TEXT NOT NULL,
+        target_label TEXT NOT NULL, mark_read INTEGER NOT NULL CHECK(mark_read IN (0,1)), archive INTEGER NOT NULL CHECK(archive IN (0,1)), spam INTEGER NOT NULL CHECK(spam IN (0,1)),
+        confidence REAL NOT NULL, existing_messages INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL CHECK(state IN ('pending','running','succeeded','failed')),
+        filter_id TEXT, error_code TEXT, updated_at TEXT NOT NULL, UNIQUE(plan_id,rule_key)
+      );
+      CREATE INDEX gmail_rules_plan_state_idx ON gmail_rule_actions(plan_id,state);
+    `,
+  },
+  {
+    version: 12,
+    statements: `
+      CREATE TABLE gmail_subscription_scans (id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL REFERENCES gmail_mailbox_analyses(id) ON DELETE CASCADE, profile_id TEXT NOT NULL, generated_at TEXT NOT NULL);
+      CREATE TABLE gmail_subscription_candidates (
+        id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES gmail_subscription_scans(id) ON DELETE CASCADE,
+        sender_domain TEXT NOT NULL, list_id TEXT NOT NULL, receiving_address TEXT NOT NULL, endpoint TEXT,
+        eligibility TEXT NOT NULL CHECK(eligibility IN ('eligible','manual','protected','spam_skipped')),
+        authenticated INTEGER NOT NULL CHECK(authenticated IN (0,1)), message_count INTEGER NOT NULL,
+        latest_at TEXT, categories_json TEXT NOT NULL, sample_subjects_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending','unsubscribed','failed','manual','spam_skipped')), reason TEXT NOT NULL
+      );
+      CREATE INDEX gmail_subscription_candidates_scan_idx ON gmail_subscription_candidates(scan_id,eligibility,message_count DESC);
+    `,
+  },
+  {
+    version: 13,
+    statements: `
+      ALTER TABLE cleanup_plans ADD COLUMN plan_kind TEXT NOT NULL DEFAULT 'organize'
+        CHECK(plan_kind IN ('organize','trash'));
+
+      ALTER TABLE cleanup_actions RENAME TO cleanup_actions_v12;
+      DROP INDEX cleanup_actions_plan_state_idx;
+      CREATE TABLE cleanup_actions (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL REFERENCES cleanup_plans(id) ON DELETE CASCADE,
+        message_row_id TEXT NOT NULL REFERENCES indexed_messages(id) ON DELETE CASCADE,
+        canonical_key TEXT NOT NULL,
+        category TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        uid_validity TEXT NOT NULL,
+        uid INTEGER NOT NULL CHECK(uid > 0),
+        target_path TEXT NOT NULL,
+        action_kind TEXT NOT NULL CHECK(action_kind IN ('sort_read_archive', 'native_spam', 'native_trash')),
+        state TEXT NOT NULL CHECK(state IN ('pending', 'running', 'succeeded', 'failed', 'skipped', 'verification_mismatch')),
+        prior_flags_json TEXT,
+        error_code TEXT,
+        updated_at TEXT NOT NULL,
+        UNIQUE(plan_id, canonical_key)
+      );
+      INSERT INTO cleanup_actions SELECT * FROM cleanup_actions_v12;
+      DROP TABLE cleanup_actions_v12;
+      CREATE INDEX cleanup_actions_plan_state_idx ON cleanup_actions(plan_id, state);
+    `,
+  },
+]);
+
+export const applyMigrations = (
+  database: BetterSqlite3.Database,
+  now: () => string = () => new Date().toISOString(),
+): void => {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
+  `);
+
+  const applied = new Set(
+    database
+      .prepare('SELECT version FROM schema_migrations ORDER BY version')
+      .all()
+      .map((row) => (row as { version: number }).version),
+  );
+  const record = database.prepare(
+    'INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)',
+  );
+
+  for (const migration of MIGRATIONS) {
+    if (applied.has(migration.version)) continue;
+    database.transaction(() => {
+      database.exec(migration.statements);
+      record.run(migration.version, now());
+    })();
+  }
+};

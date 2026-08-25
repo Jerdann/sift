@@ -1,0 +1,46 @@
+name: Release Sift for Windows
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify source
+        run: pnpm audit:public && pnpm test
+
+      - name: Build installer and update feed
+        run: pnpm make
+
+      - name: Verify packaged runtime
+        run: pnpm verify:package
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem -LiteralPath 'out/make/squirrel.windows/x64' -File | ForEach-Object FullName
+          if ($assets.Count -lt 3) { throw 'Squirrel update artifacts are incomplete.' }
+          gh release create $env:GITHUB_REF_NAME @assets --generate-notes --title "Sift $env:GITHUB_REF_NAME"

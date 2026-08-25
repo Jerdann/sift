@@ -1,0 +1,14 @@
+node_modules/
+.vite/
+out/
+coverage/
+playwright-report/
+test-results/
+*.log
+.env
+.env.*
+!.env.example
+.planning/
+.agents/
+.codex/
+AGENTS.md

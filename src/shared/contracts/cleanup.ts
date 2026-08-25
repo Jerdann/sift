@@ -1,0 +1,56 @@
+import { z } from 'zod';
+import { jobProgressSchema } from './jobs';
+import { mailCategorySchema } from './analysis';
+
+export const cleanupImpactSchema = z.object({
+  category: mailCategorySchema,
+  targetFolder: z.string(),
+  action: z.enum(['sort_read_archive', 'native_spam', 'native_trash']),
+  messageCount: z.number().int().nonnegative(),
+});
+
+export const cleanupPlanSchema = z.object({
+  id: z.uuid(),
+  connectionId: z.uuid(),
+  kind: z.enum(['organize', 'trash']),
+  revision: z.string(),
+  state: z.enum(['draft', 'approved', 'executing', 'completed', 'failed']),
+  createdAt: z.iso.datetime(),
+  approvedAt: z.iso.datetime().nullable(),
+  actionCount: z.number().int().nonnegative(),
+  spamCount: z.number().int().nonnegative(),
+  trashCount: z.number().int().nonnegative(),
+  skippedCount: z.number().int().nonnegative(),
+  impacts: z.array(cleanupImpactSchema),
+  job: jobProgressSchema.nullable(),
+});
+
+export const approveCleanupInputSchema = z.object({
+  planId: z.uuid(),
+  revision: z.string().min(1),
+});
+
+export const generateCleanupInputSchema = z.object({
+  kind: z.enum(['organize', 'trash']).default('organize'),
+  containers: z.record(
+    z.string().email(),
+    z.string().trim().min(1).max(64).regex(/^[^\\/\0]+$/),
+  ).default({}),
+  trashSenderDomains: z.array(z.string().trim().min(1).max(253)).max(500).default([]),
+});
+
+export const getCleanupInputSchema = z.object({
+  kind: z.enum(['organize', 'trash']).default('organize'),
+});
+
+export const cleanupProgressSchema = z.object({
+  profileId: z.uuid(),
+  plan: cleanupPlanSchema,
+  currentTarget: z.string().nullable(),
+});
+
+export type CleanupPlan = z.infer<typeof cleanupPlanSchema>;
+export type GenerateCleanupInput = z.infer<typeof generateCleanupInputSchema>;
+export type GetCleanupInput = z.infer<typeof getCleanupInputSchema>;
+export type ApproveCleanupInput = z.infer<typeof approveCleanupInputSchema>;
+export type CleanupProgress = z.infer<typeof cleanupProgressSchema>;
