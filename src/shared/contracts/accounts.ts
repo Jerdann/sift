@@ -63,5 +63,6 @@ export type AccountIdentityStatus = z.infer<typeof accountIdentityStatusSchema>;
 export type IdentityEvidenceSource = z.infer<typeof identityEvidenceSourceSchema>;
 export type MailAccountSummary = z.infer<typeof mailAccountSummarySchema>;
 export type AccountSelectionInput = z.infer<typeof accountSelectionInputSchema>;
+export type AccountIdentityListInput = z.infer<typeof accountIdentityListInputSchema>;
 export type AccountIdentitySummary = z.infer<typeof accountIdentitySummarySchema>;
 export type AccountIdentityUpdateInput = z.infer<typeof accountIdentityUpdateInputSchema>;

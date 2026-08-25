@@ -59,10 +59,42 @@ import {
   protonDiscoverySummarySchema,
   protonDisconnectInputSchema,
 } from '../shared/contracts/proton';
+import {
+  type AccountIdentityListInput,
+  type AccountIdentityUpdateInput,
+  type AccountSelectionInput,
+  accountIdentityListInputSchema,
+  accountIdentitySummarySchema,
+  accountIdentityUpdateInputSchema,
+  accountSelectionInputSchema,
+  mailAccountSummarySchema,
+} from '../shared/contracts/accounts';
 
 const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
   getVersion: async () =>
     z.string().parse(await ipcRenderer.invoke(IPC_CHANNELS.appGetVersion)),
+  listMailAccounts: async () =>
+    z.array(mailAccountSummarySchema).parse(await ipcRenderer.invoke(IPC_CHANNELS.accountsList)),
+  selectMailAccount: async (input: AccountSelectionInput) =>
+    mailAccountSummarySchema.parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.accountsSelect,
+      accountSelectionInputSchema.parse(input),
+    )),
+  listAccountIdentities: async (input: AccountIdentityListInput) =>
+    z.array(accountIdentitySummarySchema).parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.identitiesList,
+      accountIdentityListInputSchema.parse(input),
+    )),
+  refreshAccountIdentities: async (input: AccountIdentityListInput) =>
+    z.array(accountIdentitySummarySchema).parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.identitiesRefresh,
+      accountIdentityListInputSchema.parse(input),
+    )),
+  updateAccountIdentity: async (input: AccountIdentityUpdateInput) =>
+    accountIdentitySummarySchema.parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.identitiesUpdate,
+      accountIdentityUpdateInputSchema.parse(input),
+    )),
   listProfiles: async () =>
     z.array(profileSummarySchema).parse(
       await ipcRenderer.invoke(IPC_CHANNELS.profilesList),

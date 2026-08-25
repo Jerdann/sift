@@ -112,6 +112,11 @@ describe('desktop security boundary', () => {
   it('exposes a closed bridge and no raw HTML rendering primitive', () => {
     expect(EMAIL_ORGANIZER_BRIDGE_METHODS).toEqual([
       'getVersion',
+      'listMailAccounts',
+      'selectMailAccount',
+      'listAccountIdentities',
+      'refreshAccountIdentities',
+      'updateAccountIdentity',
       'listProfiles',
       'createProfile',
       'selectProfile',

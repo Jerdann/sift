@@ -21,6 +21,7 @@ test('creates isolated profiles and resumes interrupted work after relaunch', as
     await expect(page.getByRole('heading', { name: 'Keep the mail that matters. Clear out the rest.' })).toBeVisible();
     await page.getByRole('button', { name: 'Accounts', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Connect through Google’s consent screen' })).toBeVisible();
+    await page.screenshot({ path: 'test-results/accounts-workspace.png', fullPage: true });
 
     await page.getByRole('button', { name: /Owner.*Switch profile/ }).click();
     await page.getByRole('button', { name: 'Create local profile' }).click();
@@ -63,6 +64,8 @@ test('creates isolated profiles and resumes interrupted work after relaunch', as
         'getProtonDiscovery',
         'getSubscriptionDashboard',
         'getVersion',
+        'listAccountIdentities',
+        'listMailAccounts',
         'listProfiles',
         'onCleanupProgress',
         'onGmailAuditProgress',
@@ -70,18 +73,21 @@ test('creates isolated profiles and resumes interrupted work after relaunch', as
         'onProtonAuditProgress',
         'onUnsubscribeProgress',
         'pauseProtonAudit',
+        'refreshAccountIdentities',
         'resumeBulkUnsubscribe',
         'resumeCleanupPlan',
         'resumeJob',
         'resumeProtonAudit',
         'scanGmailSubscriptions',
         'scanSubscriptions',
+        'selectMailAccount',
         'selectProfile',
         'startBulkUnsubscribe',
         'startGmailAudit',
         'startGmailBulkUnsubscribe',
         'startProtonAudit',
         'startSyntheticJob',
+        'updateAccountIdentity',
       ],
     });
 

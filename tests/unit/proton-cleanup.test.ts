@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { analyzeMailbox } from '../../src/main/analysis/mailbox-analysis-service';
+import { AccountIdentityRepository } from '../../src/main/identity/account-identity-repository';
 import { CleanupPlanRepository } from '../../src/main/cleanup/cleanup-plan-repository';
 import { CleanupRunner } from '../../src/main/cleanup/cleanup-runner';
 import { JobRepository } from '../../src/main/jobs/job-repository';
@@ -64,6 +65,11 @@ const setup = () => {
   insert.run('7f7b1044-94b4-42c5-91c7-a0518d3d0231', connection.id, inbox.id, 1, '<security>', 'New login security alert', '["security@service.example"]', '{"delivered-to":"owner@pm.test"}');
   insert.run('56b19752-78dd-4640-b395-d724d1f81a65', connection.id, inbox.id, 2, '<promo>', '50% off today', '["offers@store.example"]', '{"delivered-to":"owner@pm.test","list-id":"store.example"}');
   insert.run('8b6cedd6-41d0-4bb4-9182-2fa44ecb03d2', connection.id, inbox.id, 3, '<spam>', 'Claim your crypto giveaway', '["scam@bad.example"]', '{"delivered-to":"owner@pm.test","authentication-results":"dkim=fail; dmarc=fail"}');
+  analyzeMailbox(profile.database, profileId, connection.id);
+  new AccountIdentityRepository(profile.database, profileId).update({
+    provider: 'proton', connectionId: connection.id, address: 'owner@pm.test',
+    status: 'confirmed', containerEnabled: true, containerName: 'Primary',
+  });
   analyzeMailbox(profile.database, profileId, connection.id);
   const jobs = new JobRepository(profile.database);
   const plans = new CleanupPlanRepository(profile.database, jobs, profileId);

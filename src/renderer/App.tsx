@@ -30,6 +30,11 @@ import type { SubscriptionDashboard, UnsubscribeProgress } from '../shared/contr
 import { buildPortableRulePack } from '../core/rules/rule-pack';
 import type { GmailAuditSummary, GmailConnectionSummary } from '../shared/contracts/gmail';
 import type { GmailOrganizationPlan } from '../shared/contracts/gmail-organize';
+import type {
+  AccountIdentitySummary,
+  AccountIdentityUpdateInput,
+  MailAccountSummary,
+} from '../shared/contracts/accounts';
 
 type PageId = 'overview' | 'accounts' | 'audit' | 'organize' | 'unsubscribe' | 'delete';
 const navItems: ReadonlyArray<{ id: PageId; label: string; icon: typeof Inbox }> = [
@@ -196,6 +201,11 @@ const ProfilePicker = ({ profiles, loadError, onCreate, onOpen }: ProfilePickerP
 interface AppShellProps {
   profileName: string;
   onSwitchProfile(): void;
+  accounts: MailAccountSummary[];
+  identities: Record<string, AccountIdentitySummary[]>;
+  onSelectAccount(account: MailAccountSummary): Promise<void>;
+  onRefreshIdentities(account: MailAccountSummary): Promise<void>;
+  onUpdateIdentity(input: AccountIdentityUpdateInput): Promise<void>;
   protonConnection: ProtonConnectionSummary | null;
   protonDiscovery: ProtonDiscoverySummary | null;
   onDiagnoseProton(credentials: BridgeCredentials): Promise<BridgeDiagnostic>;
@@ -262,6 +272,7 @@ const ProtonConnectionPanel = ({
   const [diagnostic, setDiagnostic] = useState<BridgeDiagnostic | null>(null);
   const [busy, setBusy] = useState<'test' | 'save' | 'disconnect' | 'discover' | null>(null);
   const [error, setError] = useState('');
+  const [adding, setAdding] = useState(false);
 
   const update = <Key extends keyof BridgeCredentials>(
     key: Key,
@@ -292,6 +303,7 @@ const ProtonConnectionPanel = ({
       setDiagnostic(result.diagnostic);
       if (result.connection) {
         setCredentials((current) => ({ ...current, password: '' }));
+        setAdding(false);
       }
     } catch {
       setError('Sift could not encrypt and save this Bridge connection.');
@@ -326,7 +338,7 @@ const ProtonConnectionPanel = ({
     }
   };
 
-  if (connection) {
+  if (connection && !adding) {
     return (
       <section className="readiness-panel proton-panel" aria-labelledby="proton-title">
         <div className="panel-header">
@@ -355,6 +367,9 @@ const ProtonConnectionPanel = ({
             onClick={() => void disconnect()}
           >
             {busy === 'disconnect' ? 'Disconnecting…' : 'Remove local credential'}
+          </button>
+          <button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => setAdding(true)}>
+            Add another Proton account
           </button>
           {error ? <p className="field-error" role="alert">{error}</p> : null}
         </div>
@@ -465,6 +480,7 @@ const ProtonConnectionPanel = ({
       ) : null}
       {error ? <p className="connection-error" role="alert">{error}</p> : null}
       <div className="panel-action connection-actions">
+        {connection ? <button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => setAdding(false)}>Cancel</button> : null}
         <button
           className="secondary-button"
           type="button"
@@ -622,11 +638,9 @@ const AnalysisPanel = ({
   );
 };
 
-type OrganizationStage = 'identities' | 'containers' | 'categories' | 'senders' | 'filters';
+type OrganizationStage = 'categories' | 'senders' | 'filters';
 
 const organizationStages: ReadonlyArray<{ id: OrganizationStage; label: string }> = [
-  { id: 'identities', label: 'Aliases' },
-  { id: 'containers', label: 'Containers' },
   { id: 'categories', label: 'Categories' },
   { id: 'senders', label: 'Sender cleanup' },
   { id: 'filters', label: 'Filters & apply' },
@@ -639,11 +653,6 @@ const recency = (latestAt: string | null): { label: string; days: number } => {
   if (days < 30) return { label: `${days} days ago`, days };
   if (days < 365) return { label: `${Math.floor(days / 30)} months ago`, days };
   return { label: `${Math.floor(days / 365)} years ago`, days };
-};
-
-const suggestedContainerName = (address: string): string => {
-  const local = address.split('@')[0] ?? address;
-  return local.replace(/[._-]+/g, ' ').replace(/\b\w/g, (value) => value.toUpperCase()).slice(0, 64);
 };
 
 const ProtonOrganizationFlow = ({
@@ -665,28 +674,22 @@ const ProtonOrganizationFlow = ({
   onResumeCleanup(planId: string, revision: string): Promise<void>;
   onContinue(): void;
 }) => {
-  const [stage, setStage] = useState<OrganizationStage>('identities');
+  const [stage, setStage] = useState<OrganizationStage>('categories');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [selectedAddress, setSelectedAddress] = useState('');
-  const [containerized, setContainerized] = useState<Record<string, boolean>>({});
-  const [containerNames, setContainerNames] = useState<Record<string, string>>({});
   const [exportStatus, setExportStatus] = useState('');
   const [senderLimit, setSenderLimit] = useState(25);
 
   useEffect(() => {
     if (!analysis?.addresses.length) return;
     setSelectedAddress((current) => current || analysis.addresses[0]!.address);
-    setContainerNames((current) => Object.fromEntries(analysis.addresses.map((identity) => [
-      identity.address,
-      current[identity.address] ?? suggestedContainerName(identity.address),
-    ])));
   }, [analysis]);
 
   if (!audit?.indexedMessages) return null;
   const analyze = async () => {
     setBusy(true); setError('');
-    try { await onAnalyze(); setStage('identities'); }
+    try { await onAnalyze(); setStage('categories'); }
     catch { setError('Sift could not rebuild the proposal. The saved scan is still available; try again.'); }
     finally { setBusy(false); }
   };
@@ -718,8 +721,9 @@ const ProtonOrganizationFlow = ({
     };
   }).sort((left, right) => right.messages - left.messages);
   const containers = Object.fromEntries(analysis.addresses
-    .filter((identity) => containerized[identity.address] && containerNames[identity.address]?.trim())
-    .map((identity) => [identity.address, containerNames[identity.address]!.trim()]));
+    .filter((identity) => identity.containerEnabled && identity.containerName?.trim())
+    .map((identity) => [identity.address, identity.containerName!.trim()]));
+  const currentIdentity = analysis.addresses.find((identity) => identity.address === currentAddress);
   const rulePack = buildPortableRulePack(analysis);
 
   return <>
@@ -727,15 +731,11 @@ const ProtonOrganizationFlow = ({
       <div className="organization-flow-head"><div><p className="eyebrow">PROTON ORGANIZATION</p><h2 id="organization-flow-title">Shape one address at a time</h2><p>{analysis.uniqueMessages.toLocaleString()} inbound messages · {analysis.addresses.length} proven aliases · {analysis.classifierVersion}</p></div><button className="secondary-button" type="button" disabled={busy} onClick={() => void analyze()}>{busy ? 'Refreshing…' : 'Rebuild proposal'}</button></div>
       <nav className="organization-stages" aria-label="Organization proposal stages">{organizationStages.map((item, index) => <button key={item.id} type="button" className={stage === item.id ? 'active' : index < stageIndex ? 'complete' : ''} onClick={() => setStage(item.id)}><span>{index < stageIndex ? <Check size={13} /> : index + 1}</span>{item.label}</button>)}</nav>
 
-      {stage === 'identities' ? <div className="organization-stage"><div className="stage-intro"><span>1</span><div><h3>Confirm the aliases that belong to this mailbox</h3><p>Only Sent-folder From evidence and strong Delivered-To evidence qualify. To, Cc, Bcc, and unrelated senders are excluded.</p></div></div><div className="identity-list">{analysis.addresses.map((identity) => <div key={identity.address}><span className="state-icon safe"><Check size={15} /></span><span><strong>{identity.address}</strong><small>{identity.ownershipEvidence === 'sent_and_received' ? 'Sent from and received here' : identity.ownershipEvidence === 'sent' ? 'Proven from Sent mail' : identity.ownershipEvidence === 'provider_account' ? 'Provider account identity' : 'Proven from delivery headers'} · {identity.messageCount.toLocaleString()} mapped messages</small></span><b>{identity.canRetire ? 'SENT + RECEIVED' : 'RECEIVED ONLY'}</b></div>)}</div></div> : null}
+      {stage === 'categories' ? <div className="organization-stage"><div className="stage-intro"><span>1</span><div><h3>Review standard categories inside each confirmed address</h3><p>Switch addresses to see the proposal change. Containerized addresses receive paths such as Home & Joint/Money/Receipts.</p></div></div><div className="address-switcher" role="tablist" aria-label="Address category proposal">{analysis.addresses.map((identity) => <button role="tab" aria-selected={currentAddress === identity.address} className={currentAddress === identity.address ? 'active' : ''} key={identity.address} onClick={() => setSelectedAddress(identity.address)}>{identity.address}<small>{identity.messageCount.toLocaleString()} messages</small></button>)}</div>{categoryRows.length ? <div className="category-by-address"><div className="category-address-head"><strong>{currentAddress}</strong><span>{currentIdentity?.containerEnabled ? `${currentIdentity.containerName} / …` : 'Shared category structure'}</span></div>{categoryRows.map((row) => <div key={row.category}><strong>{row.label}</strong><span>{currentIdentity?.containerEnabled ? `${currentIdentity.containerName}/${row.folder}` : row.folder}</span><b>{row.messages.toLocaleString()}</b></div>)}</div> : <p className="analysis-empty-note">No confident category streams were found for this address.</p>}</div> : null}
 
-      {stage === 'containers' ? <div className="organization-stage"><div className="stage-intro"><span>2</span><div><h3>Choose which aliases deserve their own container</h3><p>A container becomes the top-level folder for that address. Leave an alias off to use the shared category structure.</p></div></div><div className="container-list">{analysis.addresses.map((identity) => <label key={identity.address} className={containerized[identity.address] ? 'selected' : ''}><input type="checkbox" checked={Boolean(containerized[identity.address])} onChange={(event) => setContainerized((current) => ({ ...current, [identity.address]: event.target.checked }))} /><span><strong>{identity.address}</strong><small>{identity.services.slice(0, 3).map((service) => service.domain).join(' · ') || 'No services mapped yet'}</small></span><input aria-label={`Container name for ${identity.address}`} disabled={!containerized[identity.address]} value={containerNames[identity.address] ?? ''} onChange={(event) => setContainerNames((current) => ({ ...current, [identity.address]: event.target.value.replace(/[\\/]/g, '').slice(0, 64) }))} /></label>)}</div></div> : null}
+      {stage === 'senders' ? <div className="organization-stage"><div className="stage-intro"><span>2</span><div><h3>Catch the largest and stalest sender streams</h3><p>Volume shows the widest net. Last activity separates ongoing noise from abandoned history that is safer to remove in one batch.</p></div></div><div className="sender-review"><div className="sender-review-head"><span>Sender</span><span>Addresses</span><span>Last message</span><span>Suggested next move</span><span>Messages</span></div>{senders.slice(0, senderLimit).map((sender) => { const age = recency(sender.latestAt); const suggestion = age.days > 365 ? 'Delete old history' : age.days > 180 ? 'Review for deletion' : sender.messages > 100 ? 'Filter future mail' : 'Keep categorized'; return <div key={sender.domain}><strong>{sender.domain}</strong><span>{sender.addresses.length === 1 ? sender.addresses[0] : `${sender.addresses.length} addresses`}</span><small>{age.label}</small><b className={age.days > 180 ? 'stale' : ''}>{suggestion}</b><em>{sender.messages.toLocaleString()}</em></div>; })}</div>{senderLimit < Math.min(senders.length, 100) ? <button className="sender-expand" type="button" onClick={() => setSenderLimit((current) => Math.min(current + 25, 100))}>Show the next {Math.min(25, Math.min(senders.length, 100) - senderLimit)} senders</button> : null}</div> : null}
 
-      {stage === 'categories' ? <div className="organization-stage"><div className="stage-intro"><span>3</span><div><h3>Review standard categories inside each address</h3><p>Switch aliases to see the proposal change. Containerized addresses receive paths such as Home & Joint/Money/Receipts.</p></div></div><div className="address-switcher" role="tablist" aria-label="Alias category proposal">{analysis.addresses.map((identity) => <button role="tab" aria-selected={currentAddress === identity.address} className={currentAddress === identity.address ? 'active' : ''} key={identity.address} onClick={() => setSelectedAddress(identity.address)}>{identity.address}<small>{identity.messageCount.toLocaleString()} messages</small></button>)}</div>{categoryRows.length ? <div className="category-by-address"><div className="category-address-head"><strong>{currentAddress}</strong><span>{containerized[currentAddress] ? `${containerNames[currentAddress]} / …` : 'Shared category structure'}</span></div>{categoryRows.map((row) => <div key={row.category}><strong>{row.label}</strong><span>{containerized[currentAddress] ? `${containerNames[currentAddress]}/${row.folder}` : row.folder}</span><b>{row.messages.toLocaleString()}</b></div>)}</div> : <p className="analysis-empty-note">No confident category streams were found for this alias.</p>}</div> : null}
-
-      {stage === 'senders' ? <div className="organization-stage"><div className="stage-intro"><span>4</span><div><h3>Catch the largest and stalest sender streams</h3><p>Volume shows the widest net. Last activity separates ongoing noise from abandoned history that is safer to remove in one batch.</p></div></div><div className="sender-review"><div className="sender-review-head"><span>Sender</span><span>Aliases</span><span>Last message</span><span>Suggested next move</span><span>Messages</span></div>{senders.slice(0, senderLimit).map((sender) => { const age = recency(sender.latestAt); const suggestion = age.days > 365 ? 'Delete old history' : age.days > 180 ? 'Review for deletion' : sender.messages > 100 ? 'Filter future mail' : 'Keep categorized'; return <div key={sender.domain}><strong>{sender.domain}</strong><span>{sender.addresses.length === 1 ? sender.addresses[0] : `${sender.addresses.length} aliases`}</span><small>{age.label}</small><b className={age.days > 180 ? 'stale' : ''}>{suggestion}</b><em>{sender.messages.toLocaleString()}</em></div>; })}</div>{senderLimit < Math.min(senders.length, 100) ? <button className="sender-expand" type="button" onClick={() => setSenderLimit((current) => Math.min(current + 25, 100))}>Show the next {Math.min(25, Math.min(senders.length, 100) - senderLimit)} senders</button> : null}</div> : null}
-
-      {stage === 'filters' ? <div className="organization-stage"><div className="stage-intro"><span>5</span><div><h3>Turn the approved structure into folders and future rules</h3><p>{Object.keys(containers).length} alias containers selected. The cleanup preview below uses those paths; future-rule exports stay conservative and omit ambiguous streams.</p></div></div><div className="filter-summary"><span><b>{rulePack.rules.length}</b><small>high-confidence future rules</small></span><span><b>{rulePack.skippedAmbiguousStreams}</b><small>ambiguous streams withheld</small></span><div><button className="secondary-button" type="button" onClick={() => void window.emailOrganizer.exportRulePack({ format: 'proton-sieve', source: 'proton' }).then((result) => setExportStatus(result.canceled ? '' : `Saved ${result.ruleCount} rules to ${result.path}`)).catch(() => setExportStatus('Rule export failed.'))}>Save Proton Sieve</button><button className="secondary-button" type="button" onClick={() => void window.emailOrganizer.exportRulePack({ format: 'portable-json', source: 'proton' }).then((result) => setExportStatus(result.canceled ? '' : `Saved rule pack to ${result.path}`)).catch(() => setExportStatus('Rule export failed.'))}>Save portable pack</button></div></div>{exportStatus ? <p className="export-status">{exportStatus}</p> : null}</div> : null}
+      {stage === 'filters' ? <div className="organization-stage"><div className="stage-intro"><span>3</span><div><h3>Turn the approved structure into folders and future rules</h3><p>{Object.keys(containers).length} address containers selected. The cleanup preview below uses those paths; future-rule exports stay conservative and omit ambiguous streams.</p></div></div><div className="filter-summary"><span><b>{rulePack.rules.length}</b><small>high-confidence future rules</small></span><span><b>{rulePack.skippedAmbiguousStreams}</b><small>ambiguous streams withheld</small></span><div><button className="secondary-button" type="button" onClick={() => void window.emailOrganizer.exportRulePack({ format: 'proton-sieve', source: 'proton' }).then((result) => setExportStatus(result.canceled ? '' : `Saved ${result.ruleCount} rules to ${result.path}`)).catch(() => setExportStatus('Rule export failed.'))}>Save Proton Sieve</button><button className="secondary-button" type="button" onClick={() => void window.emailOrganizer.exportRulePack({ format: 'portable-json', source: 'proton' }).then((result) => setExportStatus(result.canceled ? '' : `Saved rule pack to ${result.path}`)).catch(() => setExportStatus('Rule export failed.'))}>Save portable pack</button></div></div>{exportStatus ? <p className="export-status">{exportStatus}</p> : null}</div> : null}
 
       <div className="organization-flow-actions"><button className="secondary-button" type="button" disabled={stageIndex === 0} onClick={() => setStage(organizationStages[stageIndex - 1]!.id)}>Back</button>{stageIndex < organizationStages.length - 1 ? <button className="primary-button compact" type="button" onClick={() => setStage(organizationStages[stageIndex + 1]!.id)}>Continue to {organizationStages[stageIndex + 1]!.label.toLowerCase()}</button> : <button className="primary-button compact" type="button" onClick={onContinue}>Continue to unsubscribe</button>}</div>
     </section>
@@ -906,23 +906,24 @@ const GmailConnectionPanel = ({ connection, audit, onConnect, onDisconnect, onAu
   const [clientSecret, setClientSecret] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [adding, setAdding] = useState(false);
   const connect = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError('');
-    try { await onConnect(clientId, clientSecret || undefined); }
+    try { await onConnect(clientId, clientSecret || undefined); setAdding(false); }
     catch { setError('Gmail sign-in did not finish. Verify the Desktop OAuth client, Gmail API, consent-screen scopes, and test-user access.'); }
     finally { setBusy(false); }
   };
   return (
     <section className="readiness-panel gmail-panel" aria-labelledby="gmail-title">
       <div className="panel-header"><div><p className="eyebrow">GMAIL</p><h2 id="gmail-title">Connect through Google’s consent screen</h2></div><span className="secured-label"><ShieldCheck size={14} /> OAuth + PKCE</span></div>
-      {connection ? (
-        <div className="gmail-connected-wrap"><div className="gmail-connected"><div><span className="state-icon safe"><Check size={15} /></span><span><strong>{connection.email}</strong><small>Refresh access is encrypted in this Windows profile. Your Google password is never seen or stored.</small></span><b>CONNECTED</b></div><button className="secondary-button" type="button" disabled={busy || audit?.state === 'scanning'} onClick={() => void onDisconnect(connection.id)}>{busy ? 'Disconnecting…' : 'Disconnect Gmail'}</button></div><div className="gmail-audit"><span><strong>{audit?.state === 'completed' ? 'Gmail history inventoried' : audit?.state === 'scanning' ? 'Reading Gmail metadata' : audit?.state === 'paused' || audit?.state === 'failed' ? 'Audit can resume from its saved page' : 'Ready for a read-only history audit'}</strong><small>{(audit?.indexedMessages ?? 0).toLocaleString()} indexed{audit?.totalEstimate ? ` of about ${audit.totalEstimate.toLocaleString()}` : ''} · includes Spam and Trash for accurate classification</small></span><button className="primary-button compact" type="button" disabled={busy || audit?.state === 'scanning'} onClick={() => { setBusy(true); setError(''); void onAudit().catch(() => setError('Gmail audit paused at its last saved page. Check the connection and resume.')).finally(() => setBusy(false)); }}>{busy ? 'Scanning Gmail…' : audit?.state === 'completed' ? 'Run fresh Gmail audit' : audit?.indexedMessages ? 'Resume Gmail audit' : 'Start Gmail audit'}</button></div>{audit?.state === 'scanning' ? <progress max={Math.max(audit.totalEstimate, 1)} value={audit.indexedMessages} /> : null}</div>
+      {connection && !adding ? (
+        <div className="gmail-connected-wrap"><div className="gmail-connected"><div><span className="state-icon safe"><Check size={15} /></span><span><strong>{connection.email}</strong><small>Refresh access is encrypted in this Windows profile. Your Google password is never seen or stored.</small></span><b>CONNECTED</b></div><div className="connection-actions"><button className="secondary-button" type="button" disabled={busy || audit?.state === 'scanning'} onClick={() => setAdding(true)}>Add another Gmail</button><button className="secondary-button" type="button" disabled={busy || audit?.state === 'scanning'} onClick={() => void onDisconnect(connection.id)}>{busy ? 'Disconnecting…' : 'Disconnect Gmail'}</button></div></div><div className="gmail-audit"><span><strong>{audit?.state === 'completed' ? 'Gmail history inventoried' : audit?.state === 'scanning' ? 'Reading Gmail metadata' : audit?.state === 'paused' || audit?.state === 'failed' ? 'Audit can resume from its saved page' : 'Ready for a read-only history audit'}</strong><small>{(audit?.indexedMessages ?? 0).toLocaleString()} indexed{audit?.totalEstimate ? ` of about ${audit.totalEstimate.toLocaleString()}` : ''} · includes Spam and Trash for accurate classification</small></span><button className="primary-button compact" type="button" disabled={busy || audit?.state === 'scanning'} onClick={() => { setBusy(true); setError(''); void onAudit().catch(() => setError('Gmail audit paused at its last saved page. Check the connection and resume.')).finally(() => setBusy(false)); }}>{busy ? 'Scanning Gmail…' : audit?.state === 'completed' ? 'Run fresh Gmail audit' : audit?.indexedMessages ? 'Resume Gmail audit' : 'Start Gmail audit'}</button></div>{audit?.state === 'scanning' ? <progress max={Math.max(audit.totalEstimate, 1)} value={audit.indexedMessages} /> : null}</div>
       ) : (
         <form className="gmail-connect-form" onSubmit={(event) => void connect(event)}>
           <p>Use a Google Cloud <strong>Desktop app</strong> OAuth client with the Gmail API enabled. The browser handles sign-in; Sift listens only on a random <code>127.0.0.1</code> callback port.</p>
           <label><span>OAuth client ID</span><input required value={clientId} onChange={(event) => setClientId(event.target.value)} placeholder="123456789-….apps.googleusercontent.com" autoComplete="off" /></label>
           <details><summary>Client secret (optional for PKCE)</summary><label><span>OAuth client secret</span><input type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} autoComplete="off" /></label></details>
-          <div className="connection-actions"><button className="primary-button" type="submit" disabled={busy || !clientId}>{busy ? 'Waiting for Google…' : 'Open Google sign-in'}</button><small>For an unverified testing project, add both Gmail addresses as test users.</small></div>
+          <div className="connection-actions">{connection ? <button className="secondary-button" type="button" onClick={() => setAdding(false)}>Cancel</button> : null}<button className="primary-button" type="submit" disabled={busy || !clientId}>{busy ? 'Waiting for Google…' : 'Open Google sign-in'}</button><small>For an unverified testing project, add each Gmail address as a test user.</small></div>
         </form>
       )}
       {error ? <p className="connection-error" role="alert">{error}</p> : null}
@@ -932,9 +933,78 @@ const GmailConnectionPanel = ({ connection, audit, onConnect, onDisconnect, onAu
 
 const GmailOrganizationPanel=({analysis,plan,onGenerate,onApprove}:{analysis:MailboxAnalysisSummary|null;plan:GmailOrganizationPlan|null;onGenerate():Promise<void>;onApprove(id:string,revision:string):Promise<void>})=>{const[consent,setConsent]=useState(false);const[busy,setBusy]=useState(false);const[error,setError]=useState('');if(!analysis)return null;const act=async(action:()=>Promise<void>)=>{setBusy(true);setError('');try{await action();}catch{setError('Gmail organization stopped safely. Reopen the plan to retry rules that did not finish.');}finally{setBusy(false);}};return <section className="readiness-panel gmail-organize-panel" aria-labelledby="gmail-organize-title"><div className="panel-header"><div><p className="eyebrow">GMAIL LABELS + FILTERS</p><h2 id="gmail-organize-title">Apply the learned system to Gmail</h2></div><span className="secured-label"><ShieldCheck size={14}/> Approval required</span></div>{!plan?<div className="analysis-empty"><p>Build an exact plan that creates labels, installs future sender filters, and batch-labels the matching history. Security mail stays in Inbox and unread; uncertain streams remain untouched.</p><button className="primary-button compact" disabled={busy} onClick={()=>void act(onGenerate)}>{busy?'Building plan…':'Build Gmail action plan'}</button></div>:<div className="cleanup-review"><div className="cleanup-totals"><div><b>{plan.ruleCount}</b><span>future filters</span></div><div><b>{plan.existingMessageCount.toLocaleString()}</b><span>existing messages</span></div><div><b>{plan.skippedAmbiguousStreams}</b><span>ambiguous streams skipped</span></div></div><div className="proposal-table"><div className="cleanup-impact-row cleanup-impact-head"><span>Sender</span><span>Label</span><span>Action</span><span>Messages</span></div>{plan.rules.slice(0,100).map(rule=><div className="cleanup-impact-row" key={rule.id}><strong>{rule.senderDomain}</strong><span>{rule.targetLabel}</span><small>{rule.spam?'Spam':`${rule.markRead?'read · ':''}${rule.archive?'archive':'keep in inbox'}`}</small><b>{rule.existingMessages}</b></div>)}</div>{plan.state==='draft'?<div className="cleanup-approval"><label><input type="checkbox" checked={consent} onChange={event=>setConsent(event.target.checked)}/><span><strong>I approve these Gmail labels, filters, and history changes</strong><small>No deletion. Only the exact high-confidence sender streams listed above are changed.</small></span></label><button className="primary-button" disabled={!consent||busy||!plan.ruleCount} onClick={()=>void act(()=>onApprove(plan.id,plan.revision))}>{busy?'Applying Gmail plan…':'Apply approved Gmail plan'}</button></div>:<div className="cleanup-execution"><div><span><strong>{plan.state==='completed'?'Gmail organization complete':plan.state==='failed'?'Some rules can be retried':'Applying Gmail plan'}</strong><small>{plan.rules.filter(rule=>rule.state==='succeeded').length} / {plan.ruleCount} rules finished</small></span><b>{Math.round(plan.rules.filter(rule=>rule.state==='succeeded').length/Math.max(plan.ruleCount,1)*100)}%</b></div><progress max={plan.ruleCount||1} value={plan.rules.filter(rule=>rule.state==='succeeded').length}/></div>}</div>}{error?<p className="connection-error">{error}</p>:null}</section>;};
 
+const AccountWorkspace = ({ accounts, onSelect }: {
+  accounts: MailAccountSummary[];
+  onSelect(account: MailAccountSummary): Promise<void>;
+}) => {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const attention = accounts.filter((account) => account.state === 'attention').length;
+  return (
+    <section className="readiness-panel account-workspace" aria-labelledby="account-workspace-title">
+      <div className="panel-header"><div><p className="eyebrow">CONNECTED ACCOUNTS</p><h2 id="account-workspace-title">One workspace, every mailbox</h2></div><span className="secured-label"><LockKeyhole size={14} /> Secrets stay local</span></div>
+      <div className="account-metrics"><div><b>{accounts.length}</b><span>connected</span></div><div><b>{attention}</b><span>need attention</span></div><div><b>{accounts.filter((account) => account.selected).length}</b><span>active scopes</span></div></div>
+      {accounts.length ? <div className="account-list" role="list">{accounts.map((account) => <div className={account.selected ? 'account-row selected' : 'account-row'} role="listitem" key={account.id}><span className={account.state === 'connected' ? 'state-icon safe' : 'state-icon warning'}>{account.state === 'connected' ? <Check size={15} /> : <CircleDot size={15} />}</span><span><strong>{account.label}</strong><small>{account.provider === 'gmail' ? 'Gmail · OAuth connection' : 'Proton Mail · local Bridge connection'}{account.connectedAt ? ` · connected ${new Date(account.connectedAt).toLocaleDateString()}` : ''}</small></span><b>{account.selected ? 'ACTIVE' : account.state.toUpperCase()}</b><button className="secondary-button" type="button" disabled={account.selected || busyId === account.id} onClick={() => { setBusyId(account.id); void onSelect(account).finally(() => setBusyId(null)); }}>{busyId === account.id ? 'Switching…' : account.selected ? 'Selected' : 'Use account'}</button></div>)}</div> : <div className="analysis-empty"><p>No mailboxes are connected to this local profile yet. Add Gmail or Proton below to begin.</p></div>}
+    </section>
+  );
+};
+
+const evidenceCopy = (identity: AccountIdentitySummary): string => {
+  const parts = [];
+  if (identity.evidence.includes('provider_primary')) parts.push('Provider says this is the primary address');
+  if (identity.evidence.includes('provider_alias')) parts.push('Provider says this is a send-as address');
+  if (identity.evidence.includes('sent_from')) parts.push(`Used as From in ${identity.sentFromCount.toLocaleString()} Sent message${identity.sentFromCount === 1 ? '' : 's'}`);
+  if (identity.evidence.includes('delivered_to') || identity.evidence.includes('x_original_to')) parts.push(`Mail delivered directly here ${identity.deliveredToCount.toLocaleString()} time${identity.deliveredToCount === 1 ? '' : 's'}`);
+  return parts.join(' · ') || 'Needs evidence review';
+};
+
+const IdentityReview = ({ account, identities, onRefresh, onUpdate }: {
+  account: MailAccountSummary;
+  identities: AccountIdentitySummary[];
+  onRefresh(account: MailAccountSummary): Promise<void>;
+  onUpdate(input: AccountIdentityUpdateInput): Promise<void>;
+}) => {
+  const [busyKey, setBusyKey] = useState('');
+  const [error, setError] = useState('');
+  const [draftNames, setDraftNames] = useState<Record<string, string>>({});
+  const save = async (identity: AccountIdentitySummary, status: AccountIdentitySummary['status'], containerEnabled = identity.containerEnabled) => {
+    setBusyKey(identity.address); setError('');
+    const defaultName = identity.address.split('@')[0]!.replace(/[._-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()).slice(0, 64);
+    try {
+      await onUpdate({
+        provider: account.provider,
+        connectionId: account.id,
+        address: identity.address,
+        status,
+        containerEnabled: status === 'confirmed' && containerEnabled,
+        containerName: status === 'confirmed' && containerEnabled ? (draftNames[identity.address] ?? identity.containerName ?? defaultName) : null,
+      });
+    } catch {
+      setError(`Sift could not save the decision for ${identity.address}. Nothing downstream changed.`);
+    } finally { setBusyKey(''); }
+  };
+  const counts = {
+    confirmed: identities.filter((identity) => identity.status === 'confirmed').length,
+    unreviewed: identities.filter((identity) => identity.status === 'unreviewed').length,
+    rejected: identities.filter((identity) => identity.status === 'rejected').length,
+  };
+  return (
+    <section className="readiness-panel identity-review" aria-labelledby={`identity-${account.id}`}>
+      <div className="panel-header"><div><p className="eyebrow">{account.provider.toUpperCase()} · {account.label}</p><h2 id={`identity-${account.id}`}>Confirm what belongs to you</h2></div><button className="secondary-button" type="button" disabled={busyKey === 'refresh'} onClick={() => { setBusyKey('refresh'); setError(''); void onRefresh(account).catch(() => setError('Address evidence could not be refreshed. Existing decisions are unchanged.')).finally(() => setBusyKey('')); }}>{busyKey === 'refresh' ? 'Scanning addresses…' : 'Scan addresses'}</button></div>
+      <div className="identity-metrics"><span><b>{counts.confirmed}</b> confirmed</span><span><b>{counts.unreviewed}</b> need review</span><span><b>{counts.rejected}</b> not mine</span></div>
+      {identities.length ? <div className="owned-identity-list">{identities.map((identity) => <div className={`owned-identity-row ${identity.status}`} key={identity.id}><span className={identity.status === 'confirmed' ? 'state-icon safe' : identity.status === 'rejected' ? 'state-icon rejected' : 'state-icon warning'}>{identity.status === 'confirmed' ? <Check size={15} /> : <CircleDot size={15} />}</span><span className="identity-copy"><strong>{identity.address}</strong><small>{evidenceCopy(identity)}</small></span><span className="identity-status">{identity.status === 'unreviewed' ? 'NEEDS REVIEW' : identity.status === 'rejected' ? 'NOT MINE' : 'CONFIRMED'}</span><div className="identity-actions"><button className="secondary-button" type="button" disabled={busyKey === identity.address || identity.status === 'confirmed'} onClick={() => void save(identity, 'confirmed')}>Confirm</button><button className="secondary-button danger" type="button" disabled={busyKey === identity.address || identity.status === 'rejected'} onClick={() => void save(identity, 'rejected', false)}>Not mine</button></div>{identity.status === 'confirmed' ? <label className="identity-container"><input type="checkbox" checked={identity.containerEnabled} onChange={(event) => void save(identity, 'confirmed', event.target.checked)} /><span>Create a separate container</span>{identity.containerEnabled ? <input aria-label={`Container name for ${identity.address}`} value={draftNames[identity.address] ?? identity.containerName ?? ''} onChange={(event) => setDraftNames((current) => ({ ...current, [identity.address]: event.target.value.replace(/[\\/]/g, '').slice(0, 64) }))} onBlur={() => void save(identity, 'confirmed', true)} /> : null}</label> : null}</div>)}</div> : <div className="analysis-empty"><p>No owned address evidence has been found yet. Run a mailbox scan, then scan addresses again.</p></div>}
+      {error ? <p className="connection-error" role="alert">{error}</p> : null}
+    </section>
+  );
+};
+
 const AppShell = ({
   profileName,
   onSwitchProfile,
+  accounts,
+  identities,
+  onSelectAccount,
+  onRefreshIdentities,
+  onUpdateIdentity,
   protonConnection,
   protonDiscovery,
   onDiagnoseProton,
@@ -974,11 +1044,12 @@ const AppShell = ({
   onStartGmailUnsubscribe,
 }: AppShellProps) => {
   const [activePage, setActivePage] = useState<PageId>('overview');
-  const connectedCount = Number(Boolean(protonConnection)) + Number(Boolean(gmailConnection));
+  const connectedCount = accounts.length;
   const scannedCount = Number(Boolean(protonAudit?.indexedMessages)) + Number(Boolean(gmailAudit?.indexedMessages));
   const organizedCount = Number(Boolean(cleanupPlan)) + Number(Boolean(gmailOrganization));
   const pageLabel = navItems.find((item) => item.id === activePage)?.label ?? 'Overview';
-  const emptyAccounts = !protonConnection && !gmailConnection;
+  const emptyAccounts = accounts.length === 0;
+  const selectedAccounts = accounts.filter((account) => account.selected);
 
   const taskIntro = (title: string, copy: string) => (
     <div className="page-heading task-heading"><h1>{title}</h1><p>{copy}</p></div>
@@ -1012,11 +1083,11 @@ const AppShell = ({
             <section className="next-action"><span><strong>{emptyAccounts ? 'Start with an account' : scannedCount < connectedCount ? 'Your next best action: scan' : 'Your mailbox map is ready to shape'}</strong><small>{emptyAccounts ? 'Connect Proton, Gmail, or both.' : scannedCount < connectedCount ? 'Build a complete inventory before designing labels and rules.' : 'Open Organize to review categories and prepare cleanup.'}</small></span><button className="primary-button compact" type="button" onClick={() => setActivePage(emptyAccounts ? 'accounts' : scannedCount < connectedCount ? 'audit' : 'organize')}>{emptyAccounts ? 'Open accounts' : scannedCount < connectedCount ? 'Open scan' : 'Open organize'}</button></section>
           </> : null}
 
-          {activePage === 'accounts' ? <>{taskIntro('Bring every inbox into one pruning workspace.', 'Connect an account, confirm what Sift can see, and add another whenever your email life expands. Proton uses Bridge; Gmail uses Google OAuth. Outlook and Hotmail are planned next.')}<GmailConnectionPanel connection={gmailConnection} audit={gmailAudit} onConnect={onConnectGmail} onDisconnect={onDisconnectGmail} onAudit={onStartGmailAudit}/><ProtonConnectionPanel connection={protonConnection} discovery={protonDiscovery} onDiagnose={onDiagnoseProton} onConnect={onConnectProton} onDisconnect={onDisconnectProton} onDiscover={onDiscoverProton}/></> : null}
+          {activePage === 'accounts' ? <>{taskIntro('Bring every inbox into one pruning workspace.', 'Connect an account, choose which mailbox you are working on, and add another whenever your email life expands. Proton uses Bridge; Gmail uses Google OAuth. Outlook and Hotmail are planned next.')}<AccountWorkspace accounts={accounts} onSelect={onSelectAccount}/><GmailConnectionPanel connection={gmailConnection} audit={gmailAudit} onConnect={onConnectGmail} onDisconnect={onDisconnectGmail} onAudit={onStartGmailAudit}/><ProtonConnectionPanel connection={protonConnection} discovery={protonDiscovery} onDiagnose={onDiagnoseProton} onConnect={onConnectProton} onDisconnect={onDisconnectProton} onDiscover={onDiscoverProton}/></> : null}
 
           {activePage === 'audit' ? <>{taskIntro('Map the mailbox before you prune it.', 'Scan message history into a private inventory of senders, dates, folders, and bounded text evidence. A scan changes nothing in the mailbox and can resume after interruption.')}{emptyAccounts ? prerequisite('Connect an account first', 'Sift needs a mailbox connection before it can build an inventory.', 'accounts', 'Open accounts') : <><GmailConnectionPanel connection={gmailConnection} audit={gmailAudit} onConnect={onConnectGmail} onDisconnect={onDisconnectGmail} onAudit={onStartGmailAudit}/><ProtonAuditPanel discovery={protonDiscovery} audit={protonAudit} onStart={onStartProtonAudit} onPause={onPauseProtonAudit} onResume={onResumeProtonAudit}/></>}</> : null}
 
-          {activePage === 'organize' ? <>{taskIntro('Turn mailbox history into a durable system.', 'Start with the aliases that belong to you, decide which purposes stay separate, then narrow the proposal through categories, stale senders, filters, and exact provider actions.')}{!protonAudit?.indexedMessages && !gmailAudit?.indexedMessages ? prerequisite('Scan at least one mailbox', 'Organization proposals are learned from the message inventory, not from a generic template.', emptyAccounts ? 'accounts' : 'audit', emptyAccounts ? 'Connect an account' : 'Open scan') : <><AnalysisPanel provider="gmail" audit={gmailAudit} analysis={gmailAnalysis} onAnalyze={onAnalyzeGmail}/><GmailOrganizationPanel analysis={gmailAnalysis} plan={gmailOrganization} onGenerate={onGenerateGmailOrganization} onApprove={onApproveGmailOrganization}/><ProtonOrganizationFlow audit={protonAudit} analysis={analysis} cleanupPlan={cleanupPlan} onAnalyze={onAnalyzeMailbox} onGenerateCleanup={onGenerateCleanup} onApproveCleanup={onApproveCleanup} onResumeCleanup={onResumeCleanup} onContinue={() => setActivePage('unsubscribe')} /></>}</> : null}
+          {activePage === 'organize' ? <>{taskIntro('Turn mailbox history into a durable system.', 'Confirm your real addresses first, decide which purposes stay separate, then narrow the proposal through categories, stale senders, filters, and exact provider actions.')}{!protonAudit?.indexedMessages && !gmailAudit?.indexedMessages ? prerequisite('Scan at least one mailbox', 'Organization proposals are learned from the message inventory, not from a generic template.', emptyAccounts ? 'accounts' : 'audit', emptyAccounts ? 'Connect an account' : 'Open scan') : <>{selectedAccounts.map((account) => <IdentityReview key={account.id} account={account} identities={identities[account.id] ?? []} onRefresh={onRefreshIdentities} onUpdate={onUpdateIdentity}/>)}<AnalysisPanel provider="gmail" audit={gmailAudit} analysis={gmailAnalysis} onAnalyze={onAnalyzeGmail}/><GmailOrganizationPanel analysis={gmailAnalysis} plan={gmailOrganization} onGenerate={onGenerateGmailOrganization} onApprove={onApproveGmailOrganization}/><ProtonOrganizationFlow audit={protonAudit} analysis={analysis} cleanupPlan={cleanupPlan} onAnalyze={onAnalyzeMailbox} onGenerateCleanup={onGenerateCleanup} onApproveCleanup={onApproveCleanup} onResumeCleanup={onResumeCleanup} onContinue={() => setActivePage('unsubscribe')} /></>}</> : null}
 
           {activePage === 'unsubscribe' ? <>{taskIntro('Stop the mail you never wanted to keep.', 'Find authenticated mailing lists, protect receipts and account notices, and send approved one-click unsubscribe requests without confirming your address to suspected spam.')}{!analysis && !gmailAnalysis ? prerequisite('Build an organization proposal first', 'Sift needs classified sender streams to separate safe subscriptions from protected and suspicious mail.', emptyAccounts ? 'accounts' : scannedCount ? 'organize' : 'audit', emptyAccounts ? 'Connect an account' : scannedCount ? 'Open organize' : 'Open scan') : <><UnsubscribePanel provider="gmail" analysis={gmailAnalysis} dashboard={gmailSubscriptions} onScan={onScanGmailSubscriptions} onStart={onStartGmailUnsubscribe} onResume={async()=>undefined}/><UnsubscribePanel analysis={analysis} dashboard={subscriptions} onScan={onScanSubscriptions} onStart={onStartUnsubscribe} onResume={onResumeUnsubscribe}/>{analysis ? <section className="next-action"><span><strong>Finish with stale history</strong><small>Unsubscribing stops future mail. The last pass identifies old, non-critical sender history that can move to recoverable Trash.</small></span><button className="primary-button compact" type="button" onClick={() => setActivePage('delete')}>Continue to Trash review</button></section> : null}</>}</> : null}
 
@@ -1044,6 +1115,35 @@ export const App = () => {
   const [gmailAnalysis, setGmailAnalysis] = useState<MailboxAnalysisSummary | null>(null);
   const [gmailOrganization,setGmailOrganization]=useState<GmailOrganizationPlan|null>(null);
   const [gmailSubscriptions,setGmailSubscriptions]=useState<SubscriptionDashboard|null>(null);
+  const [accounts, setAccounts] = useState<MailAccountSummary[]>([]);
+  const [identities, setIdentities] = useState<Record<string, AccountIdentitySummary[]>>({});
+
+  const loadWorkspace = async () => {
+    const [connection, discovery, audit, mailboxAnalysis, currentCleanupPlan, currentDeletionPlan, currentSubscriptions, currentGmail, currentGmailAudit, currentGmailAnalysis, currentGmailOrganization, currentGmailSubscriptions, currentAccounts] = await Promise.all([
+      window.emailOrganizer.getProtonConnection(),
+      window.emailOrganizer.getProtonDiscovery(),
+      window.emailOrganizer.getCurrentProtonAudit(),
+      window.emailOrganizer.getMailboxAnalysis(),
+      window.emailOrganizer.getCleanupPlan({ kind: 'organize' }),
+      window.emailOrganizer.getCleanupPlan({ kind: 'trash' }),
+      window.emailOrganizer.getSubscriptionDashboard(),
+      window.emailOrganizer.getGmailConnection(),
+      window.emailOrganizer.getGmailAudit(),
+      window.emailOrganizer.getGmailAnalysis(),
+      window.emailOrganizer.getGmailOrganizationPlan(),
+      window.emailOrganizer.getGmailSubscriptionDashboard(),
+      window.emailOrganizer.listMailAccounts(),
+    ]);
+    setProtonConnection(connection); setProtonDiscovery(discovery); setProtonAudit(audit); setAnalysis(mailboxAnalysis);
+    setCleanupPlan(currentCleanupPlan); setDeletionPlan(currentDeletionPlan); setSubscriptions(currentSubscriptions);
+    setGmailConnection(currentGmail); setGmailAudit(currentGmailAudit); setGmailAnalysis(currentGmailAnalysis);
+    setGmailOrganization(currentGmailOrganization); setGmailSubscriptions(currentGmailSubscriptions); setAccounts(currentAccounts);
+    const identityEntries = await Promise.all(currentAccounts.map(async (account) => [
+      account.id,
+      await window.emailOrganizer.listAccountIdentities({ provider: account.provider, connectionId: account.id }),
+    ] as const));
+    setIdentities(Object.fromEntries(identityEntries));
+  };
 
   useEffect(() => {
     void window.emailOrganizer
@@ -1072,67 +1172,25 @@ export const App = () => {
     const profile = await window.emailOrganizer.createProfile({ displayName });
     setProfiles((existing) => [...existing, profile]);
     setActiveProfile(profile);
-    setProtonConnection(await window.emailOrganizer.getProtonConnection());
-    setProtonDiscovery(await window.emailOrganizer.getProtonDiscovery());
-    setProtonAudit(await window.emailOrganizer.getCurrentProtonAudit());
-    setAnalysis(await window.emailOrganizer.getMailboxAnalysis());
-    setCleanupPlan(await window.emailOrganizer.getCleanupPlan({ kind: 'organize' }));
-    setDeletionPlan(await window.emailOrganizer.getCleanupPlan({ kind: 'trash' }));
-    setSubscriptions(await window.emailOrganizer.getSubscriptionDashboard());
-    setGmailConnection(await window.emailOrganizer.getGmailConnection());
-    setGmailAudit(await window.emailOrganizer.getGmailAudit());
-    setGmailAnalysis(await window.emailOrganizer.getGmailAnalysis());
-    setGmailOrganization(await window.emailOrganizer.getGmailOrganizationPlan());
-    setGmailSubscriptions(await window.emailOrganizer.getGmailSubscriptionDashboard());
+    await loadWorkspace();
   };
 
   const openProfile = async (profile: ProfileSummary) => {
     const selected = await window.emailOrganizer.selectProfile({ profileId: profile.id });
     setProfiles((existing) => existing.map((item) => item.id === selected.id ? selected : item));
     setActiveProfile(selected);
-    const [connection, discovery, audit, mailboxAnalysis, currentCleanupPlan, currentDeletionPlan, currentSubscriptions, currentGmail, currentGmailAudit, currentGmailAnalysis,currentGmailOrganization,currentGmailSubscriptions] = await Promise.all([
-      window.emailOrganizer.getProtonConnection(),
-      window.emailOrganizer.getProtonDiscovery(),
-      window.emailOrganizer.getCurrentProtonAudit(),
-      window.emailOrganizer.getMailboxAnalysis(),
-      window.emailOrganizer.getCleanupPlan({ kind: 'organize' }),
-      window.emailOrganizer.getCleanupPlan({ kind: 'trash' }),
-      window.emailOrganizer.getSubscriptionDashboard(),
-      window.emailOrganizer.getGmailConnection(),
-      window.emailOrganizer.getGmailAudit(),
-      window.emailOrganizer.getGmailAnalysis(),
-      window.emailOrganizer.getGmailOrganizationPlan(),
-      window.emailOrganizer.getGmailSubscriptionDashboard(),
-    ]);
-    setProtonConnection(connection);
-    setProtonDiscovery(discovery);
-    setProtonAudit(audit);
-    setAnalysis(mailboxAnalysis);
-    setCleanupPlan(currentCleanupPlan);
-    setDeletionPlan(currentDeletionPlan);
-    setSubscriptions(currentSubscriptions);
-    setGmailConnection(currentGmail);
-    setGmailAudit(currentGmailAudit);
-    setGmailAnalysis(currentGmailAnalysis);
-    setGmailOrganization(currentGmailOrganization);
-    setGmailSubscriptions(currentGmailSubscriptions);
+    await loadWorkspace();
   };
 
   const connectProton = async (credentials: BridgeCredentials) => {
     const result = await window.emailOrganizer.connectProtonBridge(credentials);
-    if (result.connection) setProtonConnection(result.connection);
+    if (result.connection) await loadWorkspace();
     return result;
   };
 
   const disconnectProton = async (connectionId: string) => {
     await window.emailOrganizer.disconnectProtonBridge({ connectionId });
-    setProtonConnection(null);
-    setProtonDiscovery(null);
-    setProtonAudit(null);
-    setAnalysis(null);
-    setCleanupPlan(null);
-    setDeletionPlan(null);
-    setSubscriptions(null);
+    await loadWorkspace();
   };
 
   const discoverProton = async () => {
@@ -1188,16 +1246,32 @@ export const App = () => {
     setSubscriptions(progress.dashboard);
   };
   const connectGmail = async (clientId: string, clientSecret?: string) => {
-    setGmailConnection(await window.emailOrganizer.connectGmail({ clientId, ...(clientSecret ? { clientSecret } : {}) }));
-    setGmailAudit(await window.emailOrganizer.getGmailAudit());
+    await window.emailOrganizer.connectGmail({ clientId, ...(clientSecret ? { clientSecret } : {}) });
+    await loadWorkspace();
   };
   const disconnectGmail = async (connectionId: string) => {
     await window.emailOrganizer.disconnectGmail({ connectionId });
-    setGmailConnection(null);
-    setGmailAudit(null);
-    setGmailAnalysis(null);
-    setGmailOrganization(null);
-    setGmailSubscriptions(null);
+    await loadWorkspace();
+  };
+  const selectAccount = async (account: MailAccountSummary) => {
+    await window.emailOrganizer.selectMailAccount({ provider: account.provider, connectionId: account.id });
+    await loadWorkspace();
+  };
+  const refreshIdentities = async (account: MailAccountSummary) => {
+    const refreshed = await window.emailOrganizer.refreshAccountIdentities({ provider: account.provider, connectionId: account.id });
+    setIdentities((current) => ({ ...current, [account.id]: refreshed }));
+  };
+  const updateIdentity = async (input: AccountIdentityUpdateInput) => {
+    const updated = await window.emailOrganizer.updateAccountIdentity(input);
+    setIdentities((current) => ({
+      ...current,
+      [input.connectionId]: (current[input.connectionId] ?? []).map((identity) => identity.address === updated.address ? updated : identity),
+    }));
+    if (input.provider === 'gmail') {
+      setGmailAnalysis(gmailAudit?.indexedMessages ? await window.emailOrganizer.analyzeGmail() : await window.emailOrganizer.getGmailAnalysis());
+    } else {
+      setAnalysis(protonAudit?.indexedMessages ? await window.emailOrganizer.analyzeMailbox() : await window.emailOrganizer.getMailboxAnalysis());
+    }
   };
   const startGmailAudit = async () => setGmailAudit(await window.emailOrganizer.startGmailAudit());
   const analyzeGmail = async () => setGmailAnalysis(await window.emailOrganizer.analyzeGmail());
@@ -1214,6 +1288,11 @@ export const App = () => {
     <AppShell
       profileName={activeProfile.displayName}
       onSwitchProfile={() => setActiveProfile(null)}
+      accounts={accounts}
+      identities={identities}
+      onSelectAccount={selectAccount}
+      onRefreshIdentities={refreshIdentities}
+      onUpdateIdentity={updateIdentity}
       protonConnection={protonConnection}
       protonDiscovery={protonDiscovery}
       onDiagnoseProton={(credentials) => window.emailOrganizer.diagnoseProtonBridge(credentials)}

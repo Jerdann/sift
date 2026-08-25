@@ -21,6 +21,7 @@ import { registerAnalysisHandlers } from './ipc/analysis-handlers';
 import { registerCleanupHandlers } from './ipc/cleanup-handlers';
 import { registerUnsubscribeHandlers } from './ipc/unsubscribe-handlers';
 import { registerGmailHandlers } from './ipc/gmail-handlers';
+import { registerAccountHandlers } from './ipc/account-handlers';
 import { ProfileRepository } from './profiles/profile-repository';
 import { ProfileSession } from './profiles/profile-session';
 import { startAutomaticUpdates } from './updates/auto-update';
@@ -123,6 +124,7 @@ const registerIpcHandlers = (): void => {
   registerCleanupHandlers({ ipcMain, profileSession, developmentServerUrl });
   registerUnsubscribeHandlers({ ipcMain, profileSession, developmentServerUrl });
   registerGmailHandlers({ ipcMain, profileSession, developmentServerUrl });
+  registerAccountHandlers({ ipcMain, profileSession, developmentServerUrl });
 };
 
 export const createMainWindow = (): BrowserWindow => {

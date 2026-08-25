@@ -50,7 +50,7 @@ export const analyzeMailbox = (
     connectionId,
     protonIdentityEvidence(database, connectionId),
   );
-  const activeOwnership = ownership.filter((identity) => identity.status !== 'rejected');
+  const activeOwnership = ownership.filter((identity) => identity.status === 'confirmed');
   const ownedAddresses = new Set(activeOwnership.map((identity) => identity.address));
   const sendingAddresses = new Set(activeOwnership.filter((identity) => identity.sentFromCount > 0).map((identity) => identity.address));
   const seen = new Set<string>();

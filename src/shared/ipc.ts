@@ -24,9 +24,21 @@ import type { StartUnsubscribeInput, SubscriptionDashboard, UnsubscribeJobInput,
 import type { ExportRulePackInput, ExportRulePackResult } from './contracts/rules';
 import type { GmailAuditSummary, GmailConnectionSummary, GmailDisconnectInput, GmailOAuthInput } from './contracts/gmail';
 import type { ApproveGmailOrganizationInput, GmailOrganizationPlan } from './contracts/gmail-organize';
+import type {
+  AccountIdentityListInput,
+  AccountIdentitySummary,
+  AccountIdentityUpdateInput,
+  AccountSelectionInput,
+  MailAccountSummary,
+} from './contracts/accounts';
 
 export const IPC_CHANNELS = Object.freeze({
   appGetVersion: 'app:get-version',
+  accountsList: 'accounts:list',
+  accountsSelect: 'accounts:select',
+  identitiesList: 'identities:list',
+  identitiesRefresh: 'identities:refresh',
+  identitiesUpdate: 'identities:update',
   profilesCreate: 'profiles:create',
   profilesList: 'profiles:list',
   profilesSelect: 'profiles:select',
@@ -76,6 +88,11 @@ export const IPC_CHANNELS = Object.freeze({
 
 export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   'getVersion',
+  'listMailAccounts',
+  'selectMailAccount',
+  'listAccountIdentities',
+  'refreshAccountIdentities',
+  'updateAccountIdentity',
   'listProfiles',
   'createProfile',
   'selectProfile',
@@ -125,6 +142,11 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
 
 export interface EmailOrganizerBridge {
   getVersion(): Promise<string>;
+  listMailAccounts(): Promise<MailAccountSummary[]>;
+  selectMailAccount(input: AccountSelectionInput): Promise<MailAccountSummary>;
+  listAccountIdentities(input: AccountIdentityListInput): Promise<AccountIdentitySummary[]>;
+  refreshAccountIdentities(input: AccountIdentityListInput): Promise<AccountIdentitySummary[]>;
+  updateAccountIdentity(input: AccountIdentityUpdateInput): Promise<AccountIdentitySummary>;
   listProfiles(): Promise<ProfileSummary[]>;
   createProfile(input: CreateProfileInput): Promise<ProfileSummary>;
   selectProfile(input: SelectProfileInput): Promise<ProfileSummary>;

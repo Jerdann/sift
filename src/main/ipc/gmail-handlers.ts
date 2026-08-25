@@ -31,8 +31,11 @@ export const registerGmailHandlers = ({ ipcMain, profileSession, developmentServ
     const grant = await authorizeGmail(input, (url) => shell.openExternal(url), fetchPort);
     const connection = repository().save(input, grant.email, grant.refreshToken);
     const context = profileSession.requireActiveContext();
-    const protonCount = Number((context.database.prepare("SELECT COUNT(*) AS count FROM provider_connections WHERE profile_id = ? AND provider = 'proton'").get(context.profile.id) as { count: number }).count);
-    profileSession.setActiveProviderCount(protonCount + 1);
+    const providerCount = Number((context.database.prepare(`SELECT
+      (SELECT COUNT(*) FROM gmail_connections WHERE profile_id = ?) +
+      (SELECT COUNT(*) FROM provider_connections WHERE profile_id = ? AND provider = 'proton') AS count
+    `).get(context.profile.id, context.profile.id) as { count: number }).count);
+    profileSession.setActiveProviderCount(providerCount);
     return gmailConnectionSummarySchema.parse(connection);
   });
   ipcMain.handle(IPC_CHANNELS.gmailDisconnect, (event, rawInput) => {
@@ -40,8 +43,11 @@ export const registerGmailHandlers = ({ ipcMain, profileSession, developmentServ
     const { connectionId } = gmailDisconnectInputSchema.parse(rawInput);
     repository().disconnect(connectionId);
     const context = profileSession.requireActiveContext();
-    const protonCount = Number((context.database.prepare("SELECT COUNT(*) AS count FROM provider_connections WHERE profile_id = ? AND provider = 'proton'").get(context.profile.id) as { count: number }).count);
-    profileSession.setActiveProviderCount(protonCount);
+    const providerCount = Number((context.database.prepare(`SELECT
+      (SELECT COUNT(*) FROM gmail_connections WHERE profile_id = ?) +
+      (SELECT COUNT(*) FROM provider_connections WHERE profile_id = ? AND provider = 'proton') AS count
+    `).get(context.profile.id, context.profile.id) as { count: number }).count);
+    profileSession.setActiveProviderCount(providerCount);
   });
   ipcMain.handle(IPC_CHANNELS.gmailAuditGet, (event) => {
     trust(event);

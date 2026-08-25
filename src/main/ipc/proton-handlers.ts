@@ -48,9 +48,13 @@ export const registerProtonHandlers = ({
     const context = profileSession.requireActiveContext();
     return new ProtonDiscoveryRepository(context.database, context.profile.id);
   };
-  const gmailCount = (): number => {
+  const providerCount = (): number => {
     const context = profileSession.requireActiveContext();
-    return Number((context.database.prepare('SELECT COUNT(*) AS count FROM gmail_connections WHERE profile_id = ?').get(context.profile.id) as { count: number }).count);
+    return Number((context.database.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM gmail_connections WHERE profile_id = ?) +
+        (SELECT COUNT(*) FROM provider_connections WHERE profile_id = ? AND provider = 'proton') AS count
+    `).get(context.profile.id, context.profile.id) as { count: number }).count);
   };
 
   ipcMain.handle(IPC_CHANNELS.protonGetConnection, (event) => {
@@ -76,7 +80,7 @@ export const registerProtonHandlers = ({
     }
 
     const connection = repository().save(credentials);
-    profileSession.setActiveProviderCount(1 + gmailCount());
+    profileSession.setActiveProviderCount(providerCount());
     return bridgeConnectResultSchema.parse({ diagnostic, connection });
   });
 
@@ -84,7 +88,7 @@ export const registerProtonHandlers = ({
     trust(event);
     const { connectionId } = protonDisconnectInputSchema.parse(rawInput);
     repository().disconnect(connectionId);
-    profileSession.setActiveProviderCount(gmailCount());
+    profileSession.setActiveProviderCount(providerCount());
   });
 
   ipcMain.handle(IPC_CHANNELS.protonGetDiscovery, (event) => {

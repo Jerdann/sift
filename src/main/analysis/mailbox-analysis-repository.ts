@@ -168,7 +168,7 @@ export class MailboxAnalysisRepository {
     if (!identities.length) {
       identities = identityRepository.sync('proton', connectionId, protonIdentityEvidence(this.#database, connectionId));
     }
-    const ownership = identities.filter((identity) => identity.status !== 'rejected');
+    const ownership = identities.filter((identity) => identity.status === 'confirmed');
     const verifiedAddresses = new Set(ownership.map((item) => item.address));
     const serviceRows = (this.#database.prepare(`
       SELECT * FROM address_service_evidence WHERE analysis_id = ?

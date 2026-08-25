@@ -55,7 +55,7 @@ export class GmailAnalysisService {
       gmailIdentityEvidence(this.#database, connection.id, connection.email),
     );
     const activeAddresses = new Set(
-      identities.filter((identity) => identity.status !== 'rejected').map((identity) => identity.address),
+      identities.filter((identity) => identity.status === 'confirmed').map((identity) => identity.address),
     );
     const analysisId = this.#createId();
     const analyzedAt = this.#now();
@@ -159,7 +159,7 @@ export class GmailAnalysisService {
         gmailIdentityEvidence(this.#database, connection.id, connection.email),
       );
     }
-    identities = identities.filter((identity) => identity.status !== 'rejected');
+    identities = identities.filter((identity) => identity.status === 'confirmed');
     const safeStreams = streams.filter((stream) => identities.some((identity) => identity.address === stream.receiving_address));
     const addresses = identities.map((identity) => {
       const addressStreams = safeStreams.filter((stream) => stream.receiving_address === identity.address);

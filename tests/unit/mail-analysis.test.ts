@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { classifyMessage } from '../../src/core/classification/mail-classifier';
 import { buildPortableRulePack, renderProtonSieve } from '../../src/core/rules/rule-pack';
 import { analyzeMailbox } from '../../src/main/analysis/mailbox-analysis-service';
+import { AccountIdentityRepository } from '../../src/main/identity/account-identity-repository';
 import { ProfileRepository } from '../../src/main/profiles/profile-repository';
 import { ProtonConnectionRepository } from '../../src/main/proton/proton-connection-repository';
 import { ProtonDiscoveryRepository } from '../../src/main/proton/proton-discovery-repository';
@@ -77,6 +78,20 @@ describe('local mailbox analysis', () => {
     insert.run('6a2f4af1-c2c9-4525-9710-712d5ea9bd5e', connection.id, inbox.id, '1', 4, '<home@example>', '2026-08-24T12:30:00.000Z', 'Neighborhood update', '["news@community.example"]', '["home@pm.test"]', '{"delivered-to":"home@pm.test","x-original-to":"home=pm.test+partner=mail.test@forward.protonmail.ch"}');
     insert.run('f7aa8027-636f-4a7c-91d4-9e206028f8fd', connection.id, sent.id, '3', 1, '<outbound@example>', '2026-08-24T13:00:00.000Z', 'Project question', '["owner@pm.test"]', '["coworker@company.test"]', '{}');
 
+    const unreviewed = analyzeMailbox(profile.database, profileId, connection.id);
+    expect(unreviewed.addresses).toEqual([]);
+    const identities = new AccountIdentityRepository(profile.database, profileId);
+    expect(identities.list('proton', connection.id).map((identity) => identity.address)).toEqual([
+      'home@pm.test',
+      'owner@pm.test',
+    ]);
+    for (const identity of identities.list('proton', connection.id)) {
+      identities.update({
+        provider: 'proton', connectionId: connection.id, address: identity.address,
+        status: 'confirmed', containerEnabled: identity.address === 'home@pm.test',
+        containerName: identity.address === 'home@pm.test' ? 'Home' : null,
+      });
+    }
     const result = analyzeMailbox(profile.database, profileId, connection.id);
     expect(result.uniqueMessages).toBe(4);
     expect(result.categories.map((item) => [item.category, item.messageCount])).toEqual(expect.arrayContaining([
@@ -87,6 +102,7 @@ describe('local mailbox analysis', () => {
     expect(result.addresses[0]).toMatchObject({ address: 'owner@pm.test', recommendation: 'retain', importantCount: 2 });
     expect(result.addresses[0]).toMatchObject({ ownershipEvidence: 'sent_and_received', canRetire: true });
     expect(result.addresses[1]).toMatchObject({ address: 'home@pm.test', ownershipEvidence: 'received', canRetire: false });
+    expect(result.addresses[1]).toMatchObject({ containerEnabled: true, containerName: 'Home' });
     expect(result.addresses[0]!.services.map((service) => service.domain)).toEqual(expect.arrayContaining(['store.example', 'service.example']));
     const pack = buildPortableRulePack(result);
     expect(pack.rules.map((rule) => [rule.senderDomain, rule.targetFolder])).toEqual([

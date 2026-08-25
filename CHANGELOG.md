@@ -16,12 +16,14 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 - Multiple Proton and Gmail connections inside one isolated local profile.
 - Evidence-backed owned-address review with persistent confirmation, rejection, and container choices.
+- A provider-neutral Accounts workspace with explicit mailbox switching and always-available add-account actions.
 - Release validation that keeps the package version, Git tag, and changelog in sync.
 
 ### Changed
 
 - Gmail address mapping now uses provider identity, Sent mail, and direct-delivery evidence instead of assigning every message to the primary address.
 - Account selection is explicit and scopes all existing provider workflows.
+- Organize now begins with an address evidence ledger; only confirmed identities can reach categories, rules, cleanup, or retirement guidance.
 - Release verification now includes type checking, unit tests, Electron end-to-end tests, package verification, runtime smoke testing, and the public privacy audit.
 
 ### Security
