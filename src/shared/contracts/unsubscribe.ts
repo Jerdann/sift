@@ -11,6 +11,8 @@ export const subscriptionCandidateSchema = z.object({
   authenticated: z.boolean(),
   messageCount: z.number().int().positive(),
   latestAt: z.iso.datetime().nullable(),
+  messagesPerMonth: z.number().nonnegative(),
+  readRate: z.number().min(0).max(1),
   priorityScore: z.number().nonnegative(),
   requestedAt: z.iso.datetime().nullable(),
   recurrence: z.enum(['never_requested', 'quiet', 'recurring']),

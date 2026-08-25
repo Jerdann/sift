@@ -775,6 +775,15 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       ALTER TABLE gmail_history_impacts ADD COLUMN trash INTEGER NOT NULL DEFAULT 0 CHECK(trash IN (0,1));
     `,
   },
+  {
+    version: 22,
+    statements: `
+      ALTER TABLE subscription_candidates ADD COLUMN earliest_at TEXT;
+      ALTER TABLE subscription_candidates ADD COLUMN read_count INTEGER NOT NULL DEFAULT 0 CHECK(read_count >= 0);
+      ALTER TABLE gmail_subscription_candidates ADD COLUMN earliest_at TEXT;
+      ALTER TABLE gmail_subscription_candidates ADD COLUMN read_count INTEGER NOT NULL DEFAULT 0 CHECK(read_count >= 0);
+    `,
+  },
 ]);
 
 export const applyMigrations = (

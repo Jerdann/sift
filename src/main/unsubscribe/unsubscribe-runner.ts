@@ -13,6 +13,12 @@ export interface SubscriptionRunnerPort {
   getByScan(scanId: string): UnsubscribeProgress['dashboard'];
 }
 
+export interface UnsubscribeRunnerOptions {
+  minimumHostIntervalMs?: number;
+  now?: () => number;
+  wait?: (milliseconds: number) => Promise<void>;
+}
+
 const privateAddress = (address: string): boolean => {
   const normalized = address.toLowerCase();
   if (normalized === '::1' || normalized.startsWith('fc') || normalized.startsWith('fd') || normalized.startsWith('fe8') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb')) return true;
@@ -68,15 +74,23 @@ export class UnsubscribeRunner {
   readonly #subscriptions: SubscriptionRunnerPort;
   readonly #post: (endpoint: string) => Promise<boolean>;
   readonly #listeners = new Set<(progress: UnsubscribeProgress) => void>();
+  readonly #lastRequestByHost = new Map<string, number>();
+  readonly #minimumHostIntervalMs: number;
+  readonly #now: () => number;
+  readonly #wait: (milliseconds: number) => Promise<void>;
 
   constructor(
     jobs: JobRepository,
     subscriptions: SubscriptionRunnerPort,
     post: (endpoint: string) => Promise<boolean> = postOneClickUnsubscribe,
+    options: UnsubscribeRunnerOptions = {},
   ) {
     this.#jobs = jobs;
     this.#subscriptions = subscriptions;
     this.#post = post;
+    this.#minimumHostIntervalMs = options.minimumHostIntervalMs ?? 750;
+    this.#now = options.now ?? Date.now;
+    this.#wait = options.wait ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   }
 
   subscribe(listener: (progress: UnsubscribeProgress) => void): () => void {
@@ -91,6 +105,7 @@ export class UnsubscribeRunner {
       if (!item) break;
       try {
         const action = this.#subscriptions.action(item.itemKey);
+        await this.#throttle(action.endpoint);
         const ok = await this.#post(action.endpoint);
         if (!ok) throw new Error('unsubscribe_request_failed');
         this.#subscriptions.mark(action.id, 'unsubscribed');
@@ -113,5 +128,15 @@ export class UnsubscribeRunner {
   #emit(scanId: string) {
     const progress = this.progress(scanId);
     for (const listener of this.#listeners) listener(progress);
+  }
+
+  async #throttle(endpoint: string): Promise<void> {
+    const host = new URL(endpoint).hostname.toLowerCase();
+    const prior = this.#lastRequestByHost.get(host);
+    if (prior !== undefined) {
+      const remaining = prior + this.#minimumHostIntervalMs - this.#now();
+      if (remaining > 0) await this.#wait(remaining);
+    }
+    this.#lastRequestByHost.set(host, this.#now());
   }
 }

@@ -14,6 +14,7 @@ interface EvidenceRow {
   subject: string | null;
   received_at: string | null;
   headers_json: string;
+  flags_json: string;
 }
 
 interface Group {
@@ -25,6 +26,8 @@ interface Group {
   authenticated: boolean;
   messageCount: number;
   latestAt: string | null;
+  earliestAt: string | null;
+  readCount: number;
   categories: Set<MailCategory>;
   subjects: string[];
 }
@@ -72,7 +75,7 @@ export class SubscriptionRepository {
   scan(connectionId: string): SubscriptionDashboard {
     const rows = this.#database.prepare(`
       SELECT mc.analysis_id, mc.canonical_key, mc.category, mc.sender_domain,
-             mc.receiving_addresses_json, im.subject, im.received_at, im.headers_json
+             mc.receiving_addresses_json, im.subject, im.received_at, im.headers_json, im.flags_json
       FROM message_classifications mc
       JOIN mailbox_analyses ma ON ma.id = mc.analysis_id
       JOIN indexed_messages im ON im.id = mc.message_row_id
@@ -110,12 +113,16 @@ export class SubscriptionRepository {
           authenticated: false,
           messageCount: 0,
           latestAt: null,
+          earliestAt: null,
+          readCount: 0,
           categories: new Set(),
           subjects: [],
         };
         current.messageCount += 1;
         current.categories.add(row.category);
         if (row.received_at && (!current.latestAt || row.received_at > current.latestAt)) current.latestAt = row.received_at;
+        if (row.received_at && (!current.earliestAt || row.received_at < current.earliestAt)) current.earliestAt = row.received_at;
+        if ((JSON.parse(row.flags_json) as string[]).some((flag) => flag.toLowerCase() === '\\seen')) current.readCount += 1;
         if (row.subject && current.subjects.length < 3 && !current.subjects.includes(row.subject)) current.subjects.push(row.subject.slice(0, 180));
         current.endpoint ??= httpsEndpoint(headers['list-unsubscribe']);
         current.oneClick ||= /list-unsubscribe\s*=\s*one-click/i.test(headers['list-unsubscribe-post'] ?? '');
@@ -134,8 +141,8 @@ export class SubscriptionRepository {
         INSERT INTO subscription_candidates(
           id, scan_id, sender_domain, list_id, receiving_address, endpoint,
           eligibility, authenticated, message_count, latest_at, categories_json,
-          sample_subjects_json, status, reason
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          sample_subjects_json, status, reason, earliest_at, read_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const protectedCategories = new Set<MailCategory>(['security', 'accounts', 'transactions', 'finance']);
       for (const group of groups.values()) {
@@ -158,6 +165,7 @@ export class SubscriptionRepository {
           this.#createId(), scanId, group.senderDomain, group.listId, group.receivingAddress,
           group.endpoint, eligibility, group.authenticated ? 1 : 0, group.messageCount,
           group.latestAt, JSON.stringify(categories), JSON.stringify(group.subjects), status, reason,
+          group.earliestAt, group.readCount,
         );
       }
     })();
@@ -189,6 +197,9 @@ export class SubscriptionRepository {
         const categories = JSON.parse(String(row.categories_json)) as MailCategory[];
         const prior = ledger.get(`${row.list_id}\0${row.receiving_address}`);
         const recurrence = prior ? row.latest_at && String(row.latest_at) > prior.requested_at ? 'recurring' : 'quiet' : 'never_requested';
+        const spanDays = row.earliest_at && row.latest_at ? Math.max(30, (Date.parse(String(row.latest_at)) - Date.parse(String(row.earliest_at))) / 86_400_000) : 30;
+        const messagesPerMonth = Number(row.message_count) / (spanDays / 30);
+        const readRate = Number(row.read_count) / Number(row.message_count);
         return {
         id: String(row.id),
         senderDomain: String(row.sender_domain),
@@ -198,7 +209,8 @@ export class SubscriptionRepository {
         authenticated: Boolean(row.authenticated),
         messageCount: Number(row.message_count),
         latestAt: row.latest_at ? String(row.latest_at) : null,
-        priorityScore: subscriptionPriorityScore(Number(row.message_count), row.latest_at ? String(row.latest_at) : null, categories),
+        messagesPerMonth, readRate,
+        priorityScore: subscriptionPriorityScore(Number(row.message_count), row.latest_at ? String(row.latest_at) : null, categories, messagesPerMonth, readRate),
         requestedAt: prior?.requested_at ?? null,
         recurrence,
         categories,

@@ -55,8 +55,8 @@ describe('safe bulk unsubscribe', () => {
     const connection = new ProtonConnectionRepository(profile.database, vault, profileId).save({ host: '127.0.0.1', port: 1143, username: 'bridge', password: 'generated', security: 'starttls' });
     const discovery = new ProtonDiscoveryRepository(profile.database, profileId).replace(connection.id, {
       capabilities: ['IMAP4rev1'],
-      mailboxes: [{ path: 'INBOX', name: 'Inbox', delimiter: '/', specialUse: '\\Inbox', flags: [], messageCount: 4, unreadCount: 4, uidValidity: '1', uidNext: 5 }],
-      addresses: [{ address: 'owner@pm.test', occurrenceCount: 4, lastSeenAt: '2026-08-24T12:00:00.000Z', sources: ['delivered-to'] }],
+      mailboxes: [{ path: 'INBOX', name: 'Inbox', delimiter: '/', specialUse: '\\Inbox', flags: [], messageCount: 5, unreadCount: 5, uidValidity: '1', uidNext: 6 }],
+      addresses: [{ address: 'owner@pm.test', occurrenceCount: 5, lastSeenAt: '2026-08-24T12:00:00.000Z', sources: ['delivered-to'] }],
     });
     const inbox = discovery.mailboxes[0]!;
     const insert = profile.database.prepare(`
@@ -76,12 +76,14 @@ describe('safe bulk unsubscribe', () => {
     insert.run('8215a56f-a9b0-49d3-87ec-093804d696ab', connection.id, inbox.id, 2, '<protected>', 'Receipt for your payment', '["billing@billing.example"]', JSON.stringify({ ...JSON.parse(eligibleHeaders), 'list-id': '<billing.example>', 'list-unsubscribe': '<https://billing.example/unsub>' }));
     insert.run('60bf3903-4b81-4c7b-a926-e60751bff86d', connection.id, inbox.id, 3, '<manual>', 'Monthly digest', '["digest@manual.example"]', JSON.stringify({ 'delivered-to': 'owner@pm.test', 'list-id': '<manual.example>', 'authentication-results': 'dkim=pass; dmarc=pass', 'list-unsubscribe': '<mailto:leave@manual.example>' }));
     insert.run('246097df-00eb-4363-987a-50810493a8be', connection.id, inbox.id, 4, '<spam>', 'Claim your crypto giveaway', '["scam@bad.example"]', JSON.stringify({ 'delivered-to': 'owner@pm.test', 'list-id': '<bad.example>', 'list-unsubscribe': '<https://bad.example/confirm>', 'list-unsubscribe-post': 'List-Unsubscribe=One-Click', 'authentication-results': 'dkim=fail; dmarc=fail' }));
+    insert.run('7f1711f8-829f-47e4-a70f-17b877690fd0', connection.id, inbox.id, 5, '<eligible-two>', 'Daily product updates', '["updates@news.example"]', JSON.stringify({ ...JSON.parse(eligibleHeaders), 'list-id': '<daily.news.example>', 'list-unsubscribe': '<https://news.example/unsub/second>' }));
     analyzeMailbox(profile.database, profileId, connection.id);
     const jobs = new JobRepository(profile.database);
     const repository = new SubscriptionRepository(profile.database, jobs, profileId);
     const dashboard = repository.scan(connection.id);
     expect(dashboard.candidates.map((candidate) => candidate.eligibility)).toEqual(expect.arrayContaining(['eligible', 'protected', 'manual', 'spam_skipped']));
     const eligible = dashboard.candidates.find((candidate) => candidate.eligibility === 'eligible')!;
+    expect(eligible).toMatchObject({ messagesPerMonth: 1, readRate: 0 });
     const spam = dashboard.candidates.find((candidate) => candidate.eligibility === 'spam_skipped')!;
     expect(() => repository.start([spam.id])).toThrow('unsubscribe_selection_invalid');
     const started = repository.start([eligible.id]);
@@ -101,6 +103,18 @@ describe('safe bulk unsubscribe', () => {
     profile.database.prepare("UPDATE unsubscribe_ledger SET requested_at='2020-01-01T00:00:00.000Z'").run();
     expect(repository.getByScan(repository.scanIdForJob(started.job!.id)).candidates.find((candidate) => candidate.id === eligible.id)?.recurrence).toBe('recurring');
     expect(post).toHaveBeenCalledTimes(2);
+
+    const throttleScan = repository.scan(connection.id);
+    const throttleCandidates = throttleScan.candidates.filter((candidate) => candidate.eligibility === 'eligible').map((candidate) => candidate.id);
+    const throttleRun = repository.start(throttleCandidates);
+    let clock = 1_000;
+    const waits: number[] = [];
+    await new UnsubscribeRunner(jobs, repository, async () => true, {
+      minimumHostIntervalMs: 750,
+      now: () => clock,
+      wait: async (milliseconds) => { waits.push(milliseconds); clock += milliseconds; },
+    }).run(throttleRun.job!.id);
+    expect(waits).toEqual([750]);
     profile.database.close();
   });
 });

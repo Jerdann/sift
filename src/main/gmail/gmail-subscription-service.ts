@@ -13,6 +13,7 @@ interface Row {
   subject: string | null;
   received_at: string | null;
   headers_json: string;
+  label_ids_json: string;
 }
 
 interface Group {
@@ -24,6 +25,8 @@ interface Group {
   authenticated: boolean;
   count: number;
   latest: string | null;
+  earliest: string | null;
+  readCount: number;
   categories: Set<MailCategory>;
   subjects: string[];
 }
@@ -59,7 +62,7 @@ export class GmailSubscriptionService {
   scan(connectionId: string): SubscriptionDashboard {
     const rows = this.#database.prepare(`
       SELECT gmc.analysis_id,gmc.category,gmc.sender_domain,gmc.receiving_addresses_json,
-        gim.subject,gim.received_at,gim.headers_json
+        gim.subject,gim.received_at,gim.headers_json,gim.label_ids_json
       FROM gmail_message_classifications gmc
       JOIN gmail_mailbox_analyses gma ON gma.id=gmc.analysis_id
       JOIN gmail_indexed_messages gim ON gim.id=gmc.message_row_id
@@ -80,10 +83,12 @@ export class GmailSubscriptionService {
       const addresses = JSON.parse(row.receiving_addresses_json) as string[];
       for (const address of addresses.length ? addresses : ['unknown']) {
         const key = `${listId}\0${row.sender_domain}\0${address}`;
-        const group = groups.get(key) ?? { senderDomain: row.sender_domain, listId, address, endpoint: null, oneClick: false, authenticated: false, count: 0, latest: null, categories: new Set<MailCategory>(), subjects: [] };
+        const group = groups.get(key) ?? { senderDomain: row.sender_domain, listId, address, endpoint: null, oneClick: false, authenticated: false, count: 0, latest: null, earliest: null, readCount: 0, categories: new Set<MailCategory>(), subjects: [] };
         group.count += 1;
         group.categories.add(row.category);
         if (row.received_at && (!group.latest || row.received_at > group.latest)) group.latest = row.received_at;
+        if (row.received_at && (!group.earliest || row.received_at < group.earliest)) group.earliest = row.received_at;
+        if (!(JSON.parse(row.label_ids_json) as string[]).includes('UNREAD')) group.readCount += 1;
         if (row.subject && group.subjects.length < 3 && !group.subjects.includes(row.subject)) group.subjects.push(row.subject.slice(0, 180));
         group.endpoint ??= httpsEndpoint(headers['list-unsubscribe']);
         group.oneClick ||= /list-unsubscribe\s*=\s*one-click/i.test(headers['list-unsubscribe-post'] ?? '');
@@ -98,7 +103,7 @@ export class GmailSubscriptionService {
     this.#database.transaction(() => {
       this.#database.prepare('DELETE FROM gmail_subscription_scans WHERE analysis_id=?').run(analysisId);
       this.#database.prepare('INSERT INTO gmail_subscription_scans(id,analysis_id,profile_id,generated_at) VALUES (?,?,?,?)').run(scanId, analysisId, this.#profileId, generatedAt);
-      const add = this.#database.prepare('INSERT INTO gmail_subscription_candidates(id,scan_id,sender_domain,list_id,receiving_address,endpoint,eligibility,authenticated,message_count,latest_at,categories_json,sample_subjects_json,status,reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+      const add = this.#database.prepare('INSERT INTO gmail_subscription_candidates(id,scan_id,sender_domain,list_id,receiving_address,endpoint,eligibility,authenticated,message_count,latest_at,categories_json,sample_subjects_json,status,reason,earliest_at,read_count) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
       for (const group of groups.values()) {
         const categories = [...group.categories].sort();
         let eligibility: 'eligible' | 'manual' | 'protected' | 'spam_skipped';
@@ -115,7 +120,7 @@ export class GmailSubscriptionService {
             ? 'Sender authentication is insufficient for an automated request.'
             : 'No authenticated RFC 8058 one-click HTTPS endpoint was found.';
         }
-        add.run(this.#createId(), scanId, group.senderDomain, group.listId, group.address, group.endpoint, eligibility, group.authenticated ? 1 : 0, group.count, group.latest, JSON.stringify(categories), JSON.stringify(group.subjects), status, reason);
+        add.run(this.#createId(), scanId, group.senderDomain, group.listId, group.address, group.endpoint, eligibility, group.authenticated ? 1 : 0, group.count, group.latest, JSON.stringify(categories), JSON.stringify(group.subjects), status, reason, group.earliest, group.readCount);
       }
     })();
     return this.getByScan(scanId);
@@ -143,11 +148,15 @@ export class GmailSubscriptionService {
         const categories = JSON.parse(String(row.categories_json)) as MailCategory[];
         const prior = ledger.get(`${row.list_id}\0${row.receiving_address}`);
         const recurrence = prior ? row.latest_at && String(row.latest_at) > prior.requested_at ? 'recurring' : 'quiet' : 'never_requested';
+        const spanDays = row.earliest_at && row.latest_at ? Math.max(30, (Date.parse(String(row.latest_at)) - Date.parse(String(row.earliest_at))) / 86_400_000) : 30;
+        const messagesPerMonth = Number(row.message_count) / (spanDays / 30);
+        const readRate = Number(row.read_count) / Number(row.message_count);
         return {
           id: String(row.id), senderDomain: String(row.sender_domain), listId: String(row.list_id), receivingAddress: String(row.receiving_address),
           eligibility: row.eligibility, authenticated: Boolean(row.authenticated), messageCount: Number(row.message_count),
           latestAt: row.latest_at ? String(row.latest_at) : null,
-          priorityScore: subscriptionPriorityScore(Number(row.message_count), row.latest_at ? String(row.latest_at) : null, categories),
+          messagesPerMonth, readRate,
+          priorityScore: subscriptionPriorityScore(Number(row.message_count), row.latest_at ? String(row.latest_at) : null, categories, messagesPerMonth, readRate),
           requestedAt: prior?.requested_at ?? null, recurrence, categories,
           sampleSubjects: JSON.parse(String(row.sample_subjects_json)), status: row.status,
           reason: recurrence === 'recurring' ? `${row.reason} New mail arrived after the last verified request.` : row.reason,
