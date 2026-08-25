@@ -1306,6 +1306,9 @@ export const App = () => {
     if (progress.plan.kind === 'trash') setDeletionPlan(progress.plan);
     else setCleanupPlan(progress.plan);
   }), [activeProfile?.id]);
+  useEffect(() => window.emailOrganizer.onGmailOrganizationProgress((progress) => {
+    if (progress.profileId === activeProfile?.id) setGmailOrganization(progress.plan);
+  }), [activeProfile?.id]);
   useEffect(() => window.emailOrganizer.onUnsubscribeProgress((progress: UnsubscribeProgress) => {
     if (progress.profileId === activeProfile?.id) setSubscriptions(progress.dashboard);
   }), [activeProfile?.id]);

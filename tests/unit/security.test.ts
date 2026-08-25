@@ -162,6 +162,7 @@ describe('desktop security boundary', () => {
       'approveGmailOrganizationPlan',
       'retryGmailOrganizationPlan',
       'undoGmailOrganizationPlan',
+      'onGmailOrganizationProgress',
       'getGmailSubscriptionDashboard',
       'scanGmailSubscriptions',
       'startGmailBulkUnsubscribe',

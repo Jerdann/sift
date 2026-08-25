@@ -313,6 +313,11 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
   approveGmailOrganizationPlan: async (input: ApproveGmailOrganizationInput) => gmailOrganizationPlanSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailOrganizeApprove, approveGmailOrganizationInputSchema.parse(input))),
   retryGmailOrganizationPlan: async (input: RetryGmailOrganizationInput) => gmailOrganizationPlanSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailOrganizeRetry, retryGmailOrganizationInputSchema.parse(input))),
   undoGmailOrganizationPlan: async (input: UndoGmailOrganizationInput) => gmailOrganizationPlanSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailOrganizeUndo, undoGmailOrganizationInputSchema.parse(input))),
+  onGmailOrganizationProgress: (listener: (progress: { profileId: string; plan: import('../shared/contracts/gmail-organize').GmailOrganizationPlan }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(z.object({ profileId: z.uuid(), plan: gmailOrganizationPlanSchema }).parse(payload));
+    ipcRenderer.on(IPC_CHANNELS.gmailOrganizeProgress, wrapped);
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.gmailOrganizeProgress, wrapped);
+  },
   getGmailSubscriptionDashboard: async () => subscriptionDashboardSchema.nullable().parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeGet)),
   scanGmailSubscriptions: async () => subscriptionDashboardSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeScan)),
   startGmailBulkUnsubscribe: async (input: StartUnsubscribeInput) => subscriptionDashboardSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailUnsubscribeStart, startUnsubscribeInputSchema.parse(input))),

@@ -31,16 +31,17 @@ export class GmailOrganizationRunner {
     this.#fetchPort = fetchPort;
   }
 
-  async run(jobId: string) {
+  async run(jobId: string, onProgress?: (plan: ReturnType<GmailOrganizationRepository['sync']>) => void) {
     const planId = this.#plans.planIdForJob(jobId);
     const labels = new Map<string, string>();
+    const tokens = new Map<string, string>();
     for (;;) {
       const item = this.#jobs.claimNextPending(jobId);
       if (!item) break;
       const batch = this.#plans.batch(item.itemKey);
       this.#plans.markBatch(batch.id, 'running');
       try {
-        const token = await this.#token(batch.connectionId);
+        const token = await this.#token(batch.connectionId, tokens);
         const targetLabelId = batch.spam ? 'SPAM' : await this.#labelId(token, batch.targetLabel, labels);
         const desired = Object.fromEntries(batch.messageIds.map((id) => {
           const next = new Set(batch.priorLabels[id] ?? []);
@@ -67,12 +68,14 @@ export class GmailOrganizationRunner {
         this.#plans.markBatch(batch.id, state, code);
         this.#jobs.transitionItem(item.id, state, { errorCode: code });
       }
+      onProgress?.(this.#plans.sync(planId));
     }
     return this.#plans.sync(planId);
   }
 
-  async undo(jobId: string) {
+  async undo(jobId: string, onProgress?: (plan: ReturnType<GmailOrganizationRepository['sync']>) => void) {
     const planId = this.#plans.planIdForJob(jobId);
+    const tokens = new Map<string, string>();
     for (;;) {
       const item = this.#jobs.claimNextPending(jobId);
       if (!item) break;
@@ -80,7 +83,7 @@ export class GmailOrganizationRunner {
       this.#plans.markUndo(batch.id, 'running');
       try {
         if (!batch.resultingLabels) throw new Error('gmail_history_undo_receipt_missing');
-        const token = await this.#token(batch.connectionId);
+        const token = await this.#token(batch.connectionId, tokens);
         const current = await this.#readLabels(token, batch.messageIds);
         if (!mapMatches(current, batch.resultingLabels, batch.messageIds)) throw new Error('provider_verification_mismatch');
         const groups = new Map<string, { ids: string[]; add: string[]; remove: string[] }>();
@@ -105,14 +108,19 @@ export class GmailOrganizationRunner {
         this.#plans.markUndo(batch.id, state, code);
         this.#jobs.transitionItem(item.id, state, { errorCode: code });
       }
+      onProgress?.(this.#plans.sync(planId));
     }
     return this.#plans.sync(planId);
   }
 
-  async #token(connectionId: string): Promise<string> {
+  async #token(connectionId: string, cache: Map<string, string>): Promise<string> {
+    const cached = cache.get(connectionId);
+    if (cached) return cached;
     const credentials = this.#connections.credentials(connectionId);
     if (!credentials) throw new Error('gmail_not_connected');
-    return refreshGmailAccessToken(credentials.connection.clientId, credentials.refreshToken, credentials.clientSecret, this.#fetchPort);
+    const token = await refreshGmailAccessToken(credentials.connection.clientId, credentials.refreshToken, credentials.clientSecret, this.#fetchPort);
+    cache.set(connectionId, token);
+    return token;
   }
 
   async #labelId(token: string, name: string, cache: Map<string, string>): Promise<string> {

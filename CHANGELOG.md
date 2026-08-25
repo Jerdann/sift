@@ -6,9 +6,32 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ### Planned
 
-- Per-address organization revisions and correction learning.
-- Idempotent provider rule reconciliation.
-- Durable unsubscribe and recoverable stale-mail pruning.
+- Durable unsubscribe retry, provider-aware throttling, and clearer manual-action queues.
+- A unified age-aware stale-history planner across providers.
+- Outlook and Hotmail account support.
+
+## [0.6.0] - 2026-08-25
+
+### Added
+
+- A dedicated Rules workspace that inventories provider rules before proposing any change.
+- Deterministic Gmail filter reconciliation with stable Sift ownership, exact-match adoption, selective retry, provider verification, and supported undo.
+- Checksum-tracked Proton Sieve exports that clearly separate locally managed artifacts from server-side filters Proton Bridge cannot inspect.
+- Verified Proton history moves with destination UID and UIDVALIDITY receipts, exact prior-flag restoration, selective retry, and Undo.
+- Durable 100-message Gmail history batches with live label preconditions, post-change verification, streamed progress, selective retry, crash recovery, and exact-label Undo.
+
+### Changed
+
+- Future automation and existing-history organization are now separate actions: filters live on Rules, while historical moves and labels stay in Organize.
+- Gmail and Proton history plans now use the corrected address-scoped proposal rather than the raw classifier output.
+- Rule generation uses source category plus proven receiving address, so corrections remain stable without conflating unrelated recipients or senders.
+- Gmail history execution reuses one access token per run and never creates future filters as a side effect of organizing old mail.
+
+### Security
+
+- Unrelated Gmail filters are explicitly classified as external and cannot be replaced or deleted by Sift.
+- Provider operations require immutable revision approval, re-check current provider state, and record only non-secret verification metadata.
+- Gmail and Proton Undo operations refuse to overwrite mail whose provider state changed after Sift’s verified action.
 
 ## [0.5.1] - 2026-08-25
 
@@ -49,7 +72,8 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 - Arbitrary message participants can no longer become user-owned identities merely by appearing in From, To, Cc, Bcc, Reply-To, or group-recipient fields.
 - Account and identity operations remain restricted to the active local profile through validated IPC contracts.
 
-[Unreleased]: https://github.com/Jerdann/sift/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/Jerdann/sift/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Jerdann/sift/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Jerdann/sift/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Jerdann/sift/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Jerdann/sift/compare/v0.3.0...v0.4.0

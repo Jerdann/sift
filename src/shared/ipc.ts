@@ -86,6 +86,7 @@ export const IPC_CHANNELS = Object.freeze({
   gmailOrganizeApprove: 'gmail-organize:approve',
   gmailOrganizeRetry: 'gmail-organize:retry',
   gmailOrganizeUndo: 'gmail-organize:undo',
+  gmailOrganizeProgress: 'gmail-organize:progress',
   gmailUnsubscribeGet: 'gmail-unsubscribe:get',
   gmailUnsubscribeScan: 'gmail-unsubscribe:scan',
   gmailUnsubscribeStart: 'gmail-unsubscribe:start',
@@ -155,6 +156,7 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   'approveGmailOrganizationPlan',
   'retryGmailOrganizationPlan',
   'undoGmailOrganizationPlan',
+  'onGmailOrganizationProgress',
   'getGmailSubscriptionDashboard',
   'scanGmailSubscriptions',
   'startGmailBulkUnsubscribe',
@@ -224,6 +226,7 @@ export interface EmailOrganizerBridge {
   approveGmailOrganizationPlan(input: ApproveGmailOrganizationInput): Promise<GmailOrganizationPlan>;
   retryGmailOrganizationPlan(input: RetryGmailOrganizationInput): Promise<GmailOrganizationPlan>;
   undoGmailOrganizationPlan(input: UndoGmailOrganizationInput): Promise<GmailOrganizationPlan>;
+  onGmailOrganizationProgress(listener: (progress: { profileId: string; plan: GmailOrganizationPlan }) => void): () => void;
   getGmailSubscriptionDashboard(): Promise<SubscriptionDashboard | null>;
   scanGmailSubscriptions(): Promise<SubscriptionDashboard>;
   startGmailBulkUnsubscribe(input: StartUnsubscribeInput): Promise<SubscriptionDashboard>;

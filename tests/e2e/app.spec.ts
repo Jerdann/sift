@@ -77,6 +77,7 @@ test('creates isolated profiles and resumes interrupted work after relaunch', as
         'listProfiles',
         'onCleanupProgress',
         'onGmailAuditProgress',
+        'onGmailOrganizationProgress',
         'onJobProgress',
         'onProtonAuditProgress',
         'onUnsubscribeProgress',
