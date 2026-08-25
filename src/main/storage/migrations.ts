@@ -587,6 +587,105 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       );
     `,
   },
+  {
+    version: 16,
+    statements: `
+      ALTER TABLE organization_proposal_items ADD COLUMN source_category TEXT;
+      UPDATE organization_proposal_items SET source_category = category WHERE source_category IS NULL;
+
+      CREATE TABLE rule_inventories (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton', 'gmail')),
+        connection_id TEXT NOT NULL,
+        capability TEXT NOT NULL CHECK(capability IN ('live_api', 'managed_export')),
+        provider_limit INTEGER,
+        captured_at TEXT NOT NULL
+      );
+      CREATE INDEX rule_inventories_scope_idx
+        ON rule_inventories(profile_id, provider, connection_id, captured_at DESC);
+
+      CREATE TABLE rule_inventory_items (
+        id TEXT PRIMARY KEY,
+        inventory_id TEXT NOT NULL REFERENCES rule_inventories(id) ON DELETE CASCADE,
+        provider_rule_id TEXT NOT NULL,
+        stable_key TEXT,
+        fingerprint TEXT NOT NULL,
+        ownership TEXT NOT NULL CHECK(ownership IN ('external', 'managed', 'adopted', 'exported')),
+        criteria_json TEXT NOT NULL,
+        action_json TEXT NOT NULL
+      );
+      CREATE INDEX rule_inventory_items_snapshot_idx
+        ON rule_inventory_items(inventory_id, ownership, fingerprint);
+
+      CREATE TABLE managed_rules (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton', 'gmail')),
+        connection_id TEXT NOT NULL,
+        stable_key TEXT NOT NULL,
+        provider_rule_id TEXT,
+        fingerprint TEXT NOT NULL,
+        desired_json TEXT NOT NULL,
+        ownership TEXT NOT NULL CHECK(ownership IN ('managed', 'adopted', 'exported')),
+        state TEXT NOT NULL CHECK(state IN ('active', 'removed', 'mismatched')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(connection_id, stable_key)
+      );
+      CREATE INDEX managed_rules_scope_idx
+        ON managed_rules(profile_id, provider, connection_id, state);
+
+      CREATE TABLE rule_reconciliation_plans (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton', 'gmail')),
+        connection_id TEXT NOT NULL,
+        proposal_id TEXT NOT NULL REFERENCES organization_proposals(id) ON DELETE CASCADE,
+        proposal_revision TEXT NOT NULL,
+        inventory_id TEXT NOT NULL REFERENCES rule_inventories(id) ON DELETE RESTRICT,
+        revision TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('draft', 'approved', 'executing', 'completed', 'failed', 'undone')),
+        job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+        undo_job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        approved_at TEXT
+      );
+      CREATE INDEX rule_reconciliation_plans_scope_idx
+        ON rule_reconciliation_plans(profile_id, provider, connection_id, created_at DESC);
+
+      CREATE TABLE rule_reconciliation_operations (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL REFERENCES rule_reconciliation_plans(id) ON DELETE CASCADE,
+        stable_key TEXT NOT NULL,
+        operation_kind TEXT NOT NULL CHECK(operation_kind IN ('create', 'replace', 'remove', 'adopt', 'unchanged')),
+        desired_json TEXT,
+        prior_json TEXT,
+        prior_managed_json TEXT,
+        state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending', 'running', 'succeeded', 'failed', 'verification_mismatch', 'undone')),
+        provider_rule_id TEXT,
+        verified_fingerprint TEXT,
+        error_code TEXT,
+        updated_at TEXT NOT NULL,
+        UNIQUE(plan_id, stable_key)
+      );
+      CREATE INDEX rule_reconciliation_operations_state_idx
+        ON rule_reconciliation_operations(plan_id, state, operation_kind);
+
+      CREATE TABLE proton_rule_exports (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        connection_id TEXT NOT NULL,
+        plan_id TEXT NOT NULL REFERENCES rule_reconciliation_plans(id) ON DELETE CASCADE,
+        revision TEXT NOT NULL,
+        checksum TEXT NOT NULL,
+        exported_path TEXT,
+        exported_at TEXT,
+        import_status TEXT NOT NULL CHECK(import_status IN ('not_exported', 'awaiting_manual_import', 'confirmed_imported')),
+        created_at TEXT NOT NULL
+      );
+    `,
+  },
 ]);
 
 export const applyMigrations = (

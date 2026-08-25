@@ -7,6 +7,7 @@ import {
   FolderTree,
   Inbox,
   LockKeyhole,
+  ListFilter,
   MailPlus,
   Search,
   ShieldCheck,
@@ -36,18 +37,20 @@ import type {
   MailAccountSummary,
 } from '../shared/contracts/accounts';
 import type { EditOrganizationProposal, OrganizationProposal } from '../shared/contracts/organization';
+import type { RuleInventory, RuleReconciliationPlan } from '../shared/contracts/rule-management';
 
 const mailCategoryOptions: MailCategory[] = [
   'personal', 'security', 'accounts', 'transactions', 'finance', 'shopping', 'travel',
   'games', 'subscriptions', 'promotions', 'social', 'suspicious', 'spam', 'other',
 ];
 
-type PageId = 'overview' | 'accounts' | 'audit' | 'organize' | 'unsubscribe' | 'delete';
+type PageId = 'overview' | 'accounts' | 'audit' | 'organize' | 'rules' | 'unsubscribe' | 'delete';
 const navItems: ReadonlyArray<{ id: PageId; label: string; icon: typeof Inbox }> = [
   { id: 'overview', label: 'Overview', icon: Inbox },
   { id: 'accounts', label: 'Accounts', icon: MailPlus },
   { id: 'audit', label: 'Scan', icon: Search },
   { id: 'organize', label: 'Organize', icon: FolderTree },
+  { id: 'rules', label: 'Rules', icon: ListFilter },
   { id: 'unsubscribe', label: 'Unsubscribe', icon: Tags },
   { id: 'delete', label: 'Trash review', icon: Archive },
 ];
@@ -215,6 +218,14 @@ interface AppShellProps {
   proposals: Record<string, OrganizationProposal | null>;
   onGenerateProposal(account: MailAccountSummary): Promise<void>;
   onEditProposal(input: EditOrganizationProposal): Promise<void>;
+  ruleInventories: Record<string, RuleInventory | null>;
+  rulePlans: Record<string, RuleReconciliationPlan | null>;
+  onRefreshRuleInventory(account: MailAccountSummary): Promise<void>;
+  onGenerateRulePlan(account: MailAccountSummary): Promise<void>;
+  onApproveRulePlan(plan: RuleReconciliationPlan): Promise<void>;
+  onRetryRulePlan(plan: RuleReconciliationPlan): Promise<void>;
+  onUndoRulePlan(plan: RuleReconciliationPlan): Promise<void>;
+  onExportProtonRulePlan(plan: RuleReconciliationPlan): Promise<string>;
   protonConnection: ProtonConnectionSummary | null;
   protonDiscovery: ProtonDiscoverySummary | null;
   onDiagnoseProton(credentials: BridgeCredentials): Promise<BridgeDiagnostic>;
@@ -647,11 +658,11 @@ const AnalysisPanel = ({
   );
 };
 
-type OrganizationStage = 'senders' | 'filters';
+type OrganizationStage = 'senders' | 'apply';
 
 const organizationStages: ReadonlyArray<{ id: OrganizationStage; label: string }> = [
   { id: 'senders', label: 'Sender cleanup' },
-  { id: 'filters', label: 'Filters & apply' },
+  { id: 'apply', label: 'Apply history' },
 ];
 
 const recency = (latestAt: string | null): { label: string; days: number } => {
@@ -685,7 +696,6 @@ const ProtonOrganizationFlow = ({
   const [stage, setStage] = useState<OrganizationStage>('senders');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [exportStatus, setExportStatus] = useState('');
   const [senderLimit, setSenderLimit] = useState(25);
 
   if (!audit?.indexedMessages) return null;
@@ -713,7 +723,6 @@ const ProtonOrganizationFlow = ({
   const containers = Object.fromEntries(analysis.addresses
     .filter((identity) => identity.containerEnabled && identity.containerName?.trim())
     .map((identity) => [identity.address, identity.containerName!.trim()]));
-  const rulePack = buildPortableRulePack(analysis);
 
   return <>
     <section className="readiness-panel organization-flow" aria-labelledby="organization-flow-title">
@@ -722,11 +731,11 @@ const ProtonOrganizationFlow = ({
 
       {stage === 'senders' ? <div className="organization-stage"><div className="stage-intro"><span>1</span><div><h3>Catch the largest and stalest sender streams</h3><p>Volume shows the widest net. Last activity separates ongoing noise from abandoned history that is safer to remove in one batch.</p></div></div><div className="sender-review"><div className="sender-review-head"><span>Sender</span><span>Addresses</span><span>Last message</span><span>Suggested next move</span><span>Messages</span></div>{senders.slice(0, senderLimit).map((sender) => { const age = recency(sender.latestAt); const suggestion = age.days > 365 ? 'Delete old history' : age.days > 180 ? 'Review for deletion' : sender.messages > 100 ? 'Filter future mail' : 'Keep categorized'; return <div key={sender.domain}><strong>{sender.domain}</strong><span>{sender.addresses.length === 1 ? sender.addresses[0] : `${sender.addresses.length} addresses`}</span><small>{age.label}</small><b className={age.days > 180 ? 'stale' : ''}>{suggestion}</b><em>{sender.messages.toLocaleString()}</em></div>; })}</div>{senderLimit < Math.min(senders.length, 100) ? <button className="sender-expand" type="button" onClick={() => setSenderLimit((current) => Math.min(current + 25, 100))}>Show the next {Math.min(25, Math.min(senders.length, 100) - senderLimit)} senders</button> : null}</div> : null}
 
-      {stage === 'filters' ? <div className="organization-stage"><div className="stage-intro"><span>2</span><div><h3>Turn the approved structure into folders and future rules</h3><p>{Object.keys(containers).length} address containers selected. The cleanup preview below uses those paths; future-rule exports stay conservative and omit ambiguous streams.</p></div></div><div className="filter-summary"><span><b>{rulePack.rules.length}</b><small>high-confidence future rules</small></span><span><b>{rulePack.skippedAmbiguousStreams}</b><small>ambiguous streams withheld</small></span><div><button className="secondary-button" type="button" onClick={() => void window.emailOrganizer.exportRulePack({ format: 'proton-sieve', source: 'proton' }).then((result) => setExportStatus(result.canceled ? '' : `Saved ${result.ruleCount} rules to ${result.path}`)).catch(() => setExportStatus('Rule export failed.'))}>Save Proton Sieve</button><button className="secondary-button" type="button" onClick={() => void window.emailOrganizer.exportRulePack({ format: 'portable-json', source: 'proton' }).then((result) => setExportStatus(result.canceled ? '' : `Saved rule pack to ${result.path}`)).catch(() => setExportStatus('Rule export failed.'))}>Save portable pack</button></div></div>{exportStatus ? <p className="export-status">{exportStatus}</p> : null}</div> : null}
+      {stage === 'apply' ? <div className="organization-stage"><div className="stage-intro"><span>2</span><div><h3>Apply the approved structure to existing Proton history</h3><p>{Object.keys(containers).length} address containers selected. Preview the exact message moves below; future automation is reviewed separately on the Rules page.</p></div></div></div> : null}
 
       <div className="organization-flow-actions"><button className="secondary-button" type="button" disabled={stageIndex === 0} onClick={() => setStage(organizationStages[stageIndex - 1]!.id)}>Back</button>{stageIndex < organizationStages.length - 1 ? <button className="primary-button compact" type="button" onClick={() => setStage(organizationStages[stageIndex + 1]!.id)}>Continue to {organizationStages[stageIndex + 1]!.label.toLowerCase()}</button> : <button className="primary-button compact" type="button" onClick={onContinue}>Continue to unsubscribe</button>}</div>
     </section>
-    {stage === 'filters' ? <CleanupPanel analysis={analysis} plan={cleanupPlan} onGenerate={() => onGenerateCleanup(containers)} onApprove={onApproveCleanup} onResume={onResumeCleanup} /> : null}
+    {stage === 'apply' ? <CleanupPanel analysis={analysis} plan={cleanupPlan} onGenerate={() => onGenerateCleanup(containers)} onApprove={onApproveCleanup} onResume={onResumeCleanup} /> : null}
   </>;
 };
 
@@ -1026,6 +1035,56 @@ const OrganizationProposalEditor = ({ account, proposal, onGenerate, onEdit }: {
   );
 };
 
+const RuleReconciliationPanel = ({
+  account,
+  inventory,
+  plan,
+  onRefresh,
+  onGenerate,
+  onApprove,
+  onRetry,
+  onUndo,
+  onExportProton,
+}: {
+  account: MailAccountSummary;
+  inventory: RuleInventory | null;
+  plan: RuleReconciliationPlan | null;
+  onRefresh(account: MailAccountSummary): Promise<void>;
+  onGenerate(account: MailAccountSummary): Promise<void>;
+  onApprove(plan: RuleReconciliationPlan): Promise<void>;
+  onRetry(plan: RuleReconciliationPlan): Promise<void>;
+  onUndo(plan: RuleReconciliationPlan): Promise<void>;
+  onExportProton(plan: RuleReconciliationPlan): Promise<string>;
+}) => {
+  const [consent, setConsent] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [status, setStatus] = useState('');
+  const act = async (key: string, action: () => Promise<void>) => {
+    setBusy(key); setError(''); setStatus('');
+    try { await action(); }
+    catch { setError('The rule operation stopped safely. Provider state will be inventoried again before any retry.'); }
+    finally { setBusy(''); }
+  };
+  const externalCount = inventory?.rules.filter((rule) => rule.ownership === 'external').length ?? 0;
+  const managedCount = inventory?.rules.length ? inventory.rules.length - externalCount : 0;
+  const actionable = plan?.operations.filter((operation) => operation.kind !== 'unchanged') ?? [];
+  const failed = plan?.operations.filter((operation) => ['failed', 'verification_mismatch'].includes(operation.state)) ?? [];
+  const completed = plan?.operations.filter((operation) => operation.state === 'succeeded').length ?? 0;
+  return <section className="readiness-panel rule-reconciliation" aria-labelledby={`rules-${account.id}`}>
+    <div className="panel-header"><div><p className="eyebrow">{account.provider.toUpperCase()} · {account.label}</p><h2 id={`rules-${account.id}`}>{account.provider === 'gmail' ? 'Reconcile Gmail filters' : 'Build the managed Proton Sieve export'}</h2></div><span className="secured-label"><ShieldCheck size={14}/>{account.provider === 'gmail' ? 'Verified provider state' : 'Manual Proton import'}</span></div>
+    <div className="rule-capability"><p>{account.provider === 'gmail' ? 'Sift inventories live Gmail filters, owns only the filters it creates, and replaces changed managed filters without touching unrelated rules.' : 'Proton Bridge does not expose server-side filters. Sift tracks only its versioned Sieve exports and never claims visibility into filters created in Proton Mail.'}</p><button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => void act('inventory', () => onRefresh(account))}>{busy === 'inventory' ? 'Reading rules…' : inventory ? 'Refresh rule inventory' : 'Inventory rules first'}</button></div>
+    {inventory ? <div className="rule-inventory-metrics"><span><b>{inventory.rules.length}</b><small>{account.provider === 'gmail' ? 'provider filters found' : 'managed exports tracked'}</small></span><span><b>{managedCount}</b><small>Sift managed</small></span><span><b>{externalCount}</b><small>external · never modified</small></span><span><b>{inventory.providerLimit ?? '—'}</b><small>provider limit</small></span></div> : null}
+    {!inventory ? <div className="analysis-empty"><p>Inventory comes before proposal approval. This prevents duplicate managed rules and gives external filters an explicit protected boundary.</p></div> : !plan ? <div className="analysis-empty"><p>Compare the corrected address-scoped organization proposal with this inventory, then review every create, replacement, adoption, removal, and unchanged rule.</p><button className="primary-button compact" type="button" disabled={Boolean(busy)} onClick={() => void act('plan', () => onGenerate(account))}>{busy === 'plan' ? 'Reconciling…' : 'Build rule reconciliation plan'}</button></div> : <div className="rule-plan-review">
+      <div className="proposal-revision"><span><b>{actionable.length}</b> provider changes</span><span><b>{plan.operations.length - actionable.length}</b> already correct</span><small>Plan revision {plan.revision.slice(0, 10)}</small></div>
+      <div className="rule-operation-list"><div className="rule-operation-head"><span>Operation</span><span>Sender and address</span><span>Destination</span><span>Status</span></div>{plan.operations.slice(0, 200).map((operation) => <div className={`rule-operation-row ${operation.kind}`} key={operation.id}><b>{operation.kind.toUpperCase()}</b><span><strong>{operation.desired?.senderDomain ?? operation.prior?.criteria.from ?? 'Retired managed rule'}</strong><small>{operation.desired?.receivingAddress ?? operation.prior?.criteria.to ?? 'No address scope'}</small></span><span>{operation.desired?.targetPath ?? 'Remove from Sift registry'}</span><em>{operation.state.replace('_', ' ')}</em></div>)}</div>
+      {plan.state === 'draft' ? <div className="cleanup-approval"><label><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)}/><span><strong>I approve these exact managed-rule changes</strong><small>{account.provider === 'gmail' ? `${externalCount} external filters remain untouched. Each Sift operation is re-read and verified before success.` : 'This saves a checksum-tracked Sieve file for manual review and import in Proton Mail.'}</small></span></label><button className="primary-button" type="button" disabled={!consent || Boolean(busy)} onClick={() => void act('apply', async () => { if (account.provider === 'proton') setStatus(await onExportProton(plan)); else await onApprove(plan); })}>{busy === 'apply' ? account.provider === 'proton' ? 'Preparing export…' : 'Applying and verifying…' : account.provider === 'proton' ? 'Save managed Sieve export' : `Apply ${actionable.length} managed changes`}</button></div> : <div className="rule-plan-actions"><span><strong>{plan.state === 'completed' ? 'Managed rules verified' : plan.state === 'undone' ? 'Supported changes undone' : plan.state === 'failed' ? 'Some operations need attention' : 'Rule job in progress'}</strong><small>{completed} / {plan.operations.length} operations verified</small></span><div>{failed.length ? <button className="primary-button compact" type="button" disabled={Boolean(busy)} onClick={() => void act('retry', () => onRetry(plan))}>{busy === 'retry' ? 'Retrying…' : `Retry ${failed.length} failed`}</button> : null}{account.provider === 'gmail' && plan.state === 'completed' && completed ? <button className="secondary-button danger" type="button" disabled={Boolean(busy)} onClick={() => void act('undo', () => onUndo(plan))}>{busy === 'undo' ? 'Restoring…' : 'Undo supported changes'}</button> : null}</div></div>}
+    </div>}
+    {status ? <p className="export-status">{status}</p> : null}
+    {error ? <p className="connection-error" role="alert">{error}</p> : null}
+  </section>;
+};
+
 const AppShell = ({
   profileName,
   onSwitchProfile,
@@ -1037,6 +1096,14 @@ const AppShell = ({
   proposals,
   onGenerateProposal,
   onEditProposal,
+  ruleInventories,
+  rulePlans,
+  onRefreshRuleInventory,
+  onGenerateRulePlan,
+  onApproveRulePlan,
+  onRetryRulePlan,
+  onUndoRulePlan,
+  onExportProtonRulePlan,
   protonConnection,
   protonDiscovery,
   onDiagnoseProton,
@@ -1119,7 +1186,9 @@ const AppShell = ({
 
           {activePage === 'audit' ? <>{taskIntro('Map the mailbox before you prune it.', 'Scan message history into a private inventory of senders, dates, folders, and bounded text evidence. A scan changes nothing in the mailbox and can resume after interruption.')}{emptyAccounts ? prerequisite('Connect an account first', 'Sift needs a mailbox connection before it can build an inventory.', 'accounts', 'Open accounts') : <><GmailConnectionPanel connection={gmailConnection} audit={gmailAudit} onConnect={onConnectGmail} onDisconnect={onDisconnectGmail} onAudit={onStartGmailAudit}/><ProtonAuditPanel discovery={protonDiscovery} audit={protonAudit} onStart={onStartProtonAudit} onPause={onPauseProtonAudit} onResume={onResumeProtonAudit}/></>}</> : null}
 
-          {activePage === 'organize' ? <>{taskIntro('Turn mailbox history into a durable system.', 'Confirm your real addresses first, then correct the address-scoped filing plan before Sift builds any provider rules or moves a message.')}{!protonAudit?.indexedMessages && !gmailAudit?.indexedMessages ? prerequisite('Scan at least one mailbox', 'Organization proposals are learned from the message inventory, not from a generic template.', emptyAccounts ? 'accounts' : 'audit', emptyAccounts ? 'Connect an account' : 'Open scan') : <>{selectedAccounts.map((account) => <div className="account-organization-sequence" key={account.id}><IdentityReview account={account} identities={identities[account.id] ?? []} onRefresh={onRefreshIdentities} onUpdate={onUpdateIdentity}/><OrganizationProposalEditor account={account} proposal={proposals[account.id] ?? null} onGenerate={onGenerateProposal} onEdit={onEditProposal}/></div>)}<GmailOrganizationPanel analysis={gmailAnalysis} plan={gmailOrganization} onGenerate={onGenerateGmailOrganization} onApprove={onApproveGmailOrganization}/><ProtonOrganizationFlow audit={protonAudit} analysis={analysis} cleanupPlan={cleanupPlan} onAnalyze={onAnalyzeMailbox} onGenerateCleanup={onGenerateCleanup} onApproveCleanup={onApproveCleanup} onResumeCleanup={onResumeCleanup} onContinue={() => setActivePage('unsubscribe')} /></>}</> : null}
+          {activePage === 'organize' ? <>{taskIntro('Turn mailbox history into a durable system.', 'Confirm your real addresses first, then correct the address-scoped filing plan before Sift builds any provider rules or moves a message.')}{!protonAudit?.indexedMessages && !gmailAudit?.indexedMessages ? prerequisite('Scan at least one mailbox', 'Organization proposals are learned from the message inventory, not from a generic template.', emptyAccounts ? 'accounts' : 'audit', emptyAccounts ? 'Connect an account' : 'Open scan') : <>{selectedAccounts.map((account) => <div className="account-organization-sequence" key={account.id}><IdentityReview account={account} identities={identities[account.id] ?? []} onRefresh={onRefreshIdentities} onUpdate={onUpdateIdentity}/><OrganizationProposalEditor account={account} proposal={proposals[account.id] ?? null} onGenerate={onGenerateProposal} onEdit={onEditProposal}/></div>)}<ProtonOrganizationFlow audit={protonAudit} analysis={analysis} cleanupPlan={cleanupPlan} onAnalyze={onAnalyzeMailbox} onGenerateCleanup={onGenerateCleanup} onApproveCleanup={onApproveCleanup} onResumeCleanup={onResumeCleanup} onContinue={() => setActivePage('rules')} /></>}</> : null}
+
+          {activePage === 'rules' ? <>{taskIntro('Keep the new system working automatically.', 'Inventory existing provider rules first, protect anything Sift does not own, then approve a deterministic create, replace, adopt, or remove plan.')}{selectedAccounts.some((account) => proposals[account.id]) ? <>{selectedAccounts.map((account) => <RuleReconciliationPanel key={account.id} account={account} inventory={ruleInventories[account.id] ?? null} plan={rulePlans[account.id] ?? null} onRefresh={onRefreshRuleInventory} onGenerate={onGenerateRulePlan} onApprove={onApproveRulePlan} onRetry={onRetryRulePlan} onUndo={onUndoRulePlan} onExportProton={onExportProtonRulePlan}/>)}</> : prerequisite('Finish an organization proposal first', 'Rules are derived from the corrected address-scoped filing plan, never directly from a generic template.', scannedCount ? 'organize' : 'audit', scannedCount ? 'Open organize' : 'Open scan')}</> : null}
 
           {activePage === 'unsubscribe' ? <>{taskIntro('Stop the mail you never wanted to keep.', 'Find authenticated mailing lists, protect receipts and account notices, and send approved one-click unsubscribe requests without confirming your address to suspected spam.')}{!analysis && !gmailAnalysis ? prerequisite('Build an organization proposal first', 'Sift needs classified sender streams to separate safe subscriptions from protected and suspicious mail.', emptyAccounts ? 'accounts' : scannedCount ? 'organize' : 'audit', emptyAccounts ? 'Connect an account' : scannedCount ? 'Open organize' : 'Open scan') : <><UnsubscribePanel provider="gmail" analysis={gmailAnalysis} dashboard={gmailSubscriptions} onScan={onScanGmailSubscriptions} onStart={onStartGmailUnsubscribe} onResume={async()=>undefined}/><UnsubscribePanel analysis={analysis} dashboard={subscriptions} onScan={onScanSubscriptions} onStart={onStartUnsubscribe} onResume={onResumeUnsubscribe}/>{analysis ? <section className="next-action"><span><strong>Finish with stale history</strong><small>Unsubscribing stops future mail. The last pass identifies old, non-critical sender history that can move to recoverable Trash.</small></span><button className="primary-button compact" type="button" onClick={() => setActivePage('delete')}>Continue to Trash review</button></section> : null}</>}</> : null}
 
@@ -1150,6 +1219,8 @@ export const App = () => {
   const [accounts, setAccounts] = useState<MailAccountSummary[]>([]);
   const [identities, setIdentities] = useState<Record<string, AccountIdentitySummary[]>>({});
   const [proposals, setProposals] = useState<Record<string, OrganizationProposal | null>>({});
+  const [ruleInventories, setRuleInventories] = useState<Record<string, RuleInventory | null>>({});
+  const [rulePlans, setRulePlans] = useState<Record<string, RuleReconciliationPlan | null>>({});
 
   const loadWorkspace = async () => {
     const [connection, discovery, audit, mailboxAnalysis, currentCleanupPlan, currentDeletionPlan, currentSubscriptions, currentGmail, currentGmailAudit, currentGmailAnalysis, currentGmailOrganization, currentGmailSubscriptions, currentAccounts] = await Promise.all([
@@ -1179,8 +1250,18 @@ export const App = () => {
       account.id,
       await window.emailOrganizer.getOrganizationProposal({ provider: account.provider, connectionId: account.id }),
     ] as const));
+    const ruleInventoryEntries = await Promise.all(currentAccounts.map(async (account) => [
+      account.id,
+      await window.emailOrganizer.getRuleInventory({ provider: account.provider, connectionId: account.id }),
+    ] as const));
+    const rulePlanEntries = await Promise.all(currentAccounts.map(async (account) => [
+      account.id,
+      await window.emailOrganizer.getRulePlan({ provider: account.provider, connectionId: account.id }),
+    ] as const));
     setIdentities(Object.fromEntries(identityEntries));
     setProposals(Object.fromEntries(proposalEntries));
+    setRuleInventories(Object.fromEntries(ruleInventoryEntries));
+    setRulePlans(Object.fromEntries(rulePlanEntries));
   };
 
   useEffect(() => {
@@ -1299,6 +1380,7 @@ export const App = () => {
     const refreshed = await window.emailOrganizer.refreshAccountIdentities({ provider: account.provider, connectionId: account.id });
     setIdentities((current) => ({ ...current, [account.id]: refreshed }));
     setProposals((current) => ({ ...current, [account.id]: null }));
+    setRulePlans((current) => ({ ...current, [account.id]: null }));
   };
   const updateIdentity = async (input: AccountIdentityUpdateInput) => {
     const updated = await window.emailOrganizer.updateAccountIdentity(input);
@@ -1312,6 +1394,7 @@ export const App = () => {
       setAnalysis(protonAudit?.indexedMessages ? await window.emailOrganizer.analyzeMailbox() : await window.emailOrganizer.getMailboxAnalysis());
     }
     setProposals((current) => ({ ...current, [input.connectionId]: null }));
+    setRulePlans((current) => ({ ...current, [input.connectionId]: null }));
   };
   const generateProposal = async (account: MailAccountSummary) => {
     if (account.provider === 'gmail' && gmailAudit?.indexedMessages) {
@@ -1321,10 +1404,40 @@ export const App = () => {
     }
     const proposal = await window.emailOrganizer.generateOrganizationProposal({ provider: account.provider, connectionId: account.id });
     setProposals((current) => ({ ...current, [account.id]: proposal }));
+    setRulePlans((current) => ({ ...current, [account.id]: null }));
   };
   const editProposal = async (input: EditOrganizationProposal) => {
     const proposal = await window.emailOrganizer.editOrganizationProposal(input);
     setProposals((current) => ({ ...current, [proposal.connectionId]: proposal }));
+    setRulePlans((current) => ({ ...current, [proposal.connectionId]: null }));
+  };
+  const refreshRuleInventory = async (account: MailAccountSummary) => {
+    const inventory = await window.emailOrganizer.refreshRuleInventory({ provider: account.provider, connectionId: account.id });
+    setRuleInventories((current) => ({ ...current, [account.id]: inventory }));
+    setRulePlans((current) => ({ ...current, [account.id]: null }));
+  };
+  const generateRulePlan = async (account: MailAccountSummary) => {
+    const plan = await window.emailOrganizer.generateRulePlan({ provider: account.provider, connectionId: account.id });
+    setRulePlans((current) => ({ ...current, [account.id]: plan }));
+  };
+  const approveRulePlan = async (plan: RuleReconciliationPlan) => {
+    const updated = await window.emailOrganizer.approveRulePlan({ planId: plan.id, revision: plan.revision });
+    setRulePlans((current) => ({ ...current, [updated.connectionId]: updated }));
+  };
+  const retryRulePlan = async (plan: RuleReconciliationPlan) => {
+    const operationIds = plan.operations.filter((operation) => ['failed', 'verification_mismatch'].includes(operation.state)).map((operation) => operation.id);
+    if (!operationIds.length) return;
+    const updated = await window.emailOrganizer.retryRulePlan({ planId: plan.id, operationIds });
+    setRulePlans((current) => ({ ...current, [updated.connectionId]: updated }));
+  };
+  const undoRulePlan = async (plan: RuleReconciliationPlan) => {
+    const updated = await window.emailOrganizer.undoRulePlan({ planId: plan.id });
+    setRulePlans((current) => ({ ...current, [updated.connectionId]: updated }));
+  };
+  const exportProtonRulePlan = async (plan: RuleReconciliationPlan) => {
+    const result = await window.emailOrganizer.exportProtonRulePlan({ planId: plan.id, revision: plan.revision });
+    setRulePlans((current) => ({ ...current, [result.plan.connectionId]: result.plan }));
+    return result.canceled ? '' : `Saved ${result.ruleCount} managed rules. Checksum ${result.checksum?.slice(0, 12)}…`;
   };
   const startGmailAudit = async () => setGmailAudit(await window.emailOrganizer.startGmailAudit());
   const analyzeGmail = async () => setGmailAnalysis(await window.emailOrganizer.analyzeGmail());
@@ -1349,6 +1462,14 @@ export const App = () => {
       proposals={proposals}
       onGenerateProposal={generateProposal}
       onEditProposal={editProposal}
+      ruleInventories={ruleInventories}
+      rulePlans={rulePlans}
+      onRefreshRuleInventory={refreshRuleInventory}
+      onGenerateRulePlan={generateRulePlan}
+      onApproveRulePlan={approveRulePlan}
+      onRetryRulePlan={retryRulePlan}
+      onUndoRulePlan={undoRulePlan}
+      onExportProtonRulePlan={exportProtonRulePlan}
       protonConnection={protonConnection}
       protonDiscovery={protonDiscovery}
       onDiagnoseProton={(credentials) => window.emailOrganizer.diagnoseProtonBridge(credentials)}

@@ -32,6 +32,7 @@ import type {
   MailAccountSummary,
 } from './contracts/accounts';
 import type { EditOrganizationProposal, OrganizationProposal, OrganizationProposalScope } from './contracts/organization';
+import type { ApproveRulePlan, ExportProtonRulePlan, ProtonRuleExportResult, RetryRulePlan, RuleInventory, RuleManagementScope, RuleReconciliationPlan, UndoRulePlan } from './contracts/rule-management';
 
 export const IPC_CHANNELS = Object.freeze({
   appGetVersion: 'app:get-version',
@@ -43,6 +44,14 @@ export const IPC_CHANNELS = Object.freeze({
   organizationProposalGet: 'organization-proposal:get',
   organizationProposalGenerate: 'organization-proposal:generate',
   organizationProposalEdit: 'organization-proposal:edit',
+  ruleInventoryGet: 'rule-inventory:get',
+  ruleInventoryRefresh: 'rule-inventory:refresh',
+  rulePlanGet: 'rule-plan:get',
+  rulePlanGenerate: 'rule-plan:generate',
+  rulePlanApprove: 'rule-plan:approve',
+  rulePlanRetry: 'rule-plan:retry',
+  rulePlanUndo: 'rule-plan:undo',
+  rulePlanExportProton: 'rule-plan:export-proton',
   profilesCreate: 'profiles:create',
   profilesList: 'profiles:list',
   profilesSelect: 'profiles:select',
@@ -100,6 +109,14 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   'getOrganizationProposal',
   'generateOrganizationProposal',
   'editOrganizationProposal',
+  'getRuleInventory',
+  'refreshRuleInventory',
+  'getRulePlan',
+  'generateRulePlan',
+  'approveRulePlan',
+  'retryRulePlan',
+  'undoRulePlan',
+  'exportProtonRulePlan',
   'listProfiles',
   'createProfile',
   'selectProfile',
@@ -157,6 +174,14 @@ export interface EmailOrganizerBridge {
   getOrganizationProposal(input: OrganizationProposalScope): Promise<OrganizationProposal | null>;
   generateOrganizationProposal(input: OrganizationProposalScope): Promise<OrganizationProposal>;
   editOrganizationProposal(input: EditOrganizationProposal): Promise<OrganizationProposal>;
+  getRuleInventory(input: RuleManagementScope): Promise<RuleInventory | null>;
+  refreshRuleInventory(input: RuleManagementScope): Promise<RuleInventory>;
+  getRulePlan(input: RuleManagementScope): Promise<RuleReconciliationPlan | null>;
+  generateRulePlan(input: RuleManagementScope): Promise<RuleReconciliationPlan>;
+  approveRulePlan(input: ApproveRulePlan): Promise<RuleReconciliationPlan>;
+  retryRulePlan(input: RetryRulePlan): Promise<RuleReconciliationPlan>;
+  undoRulePlan(input: UndoRulePlan): Promise<RuleReconciliationPlan>;
+  exportProtonRulePlan(input: ExportProtonRulePlan): Promise<ProtonRuleExportResult>;
   listProfiles(): Promise<ProfileSummary[]>;
   createProfile(input: CreateProfileInput): Promise<ProfileSummary>;
   selectProfile(input: SelectProfileInput): Promise<ProfileSummary>;

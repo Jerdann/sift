@@ -22,6 +22,19 @@ import {
   organizationProposalSchema,
   organizationProposalScopeSchema,
 } from '../../shared/contracts/organization';
+import {
+  approveRulePlanSchema,
+  retryRulePlanSchema,
+  undoRulePlanSchema,
+  ruleInventorySchema,
+  ruleManagementScopeSchema,
+  ruleReconciliationPlanSchema,
+} from '../../shared/contracts/rule-management';
+import { RuleReconciliationRepository } from '../rules/rule-reconciliation-repository';
+import { GmailRuleInventoryService } from '../gmail/gmail-rule-inventory-service';
+import { ProtonRuleInventoryService } from '../rules/proton-rule-inventory-service';
+import { GmailRuleReconciliationRunner } from '../gmail/gmail-rule-reconciliation-runner';
+import { JobRepository } from '../jobs/job-repository';
 
 export const registerAccountHandlers = ({
   ipcMain,
@@ -39,12 +52,15 @@ export const registerAccountHandlers = ({
   const repositories = () => {
     const context = profileSession.requireActiveContext();
     const vault = profileSession.requireSecretVault();
+    const jobs = new JobRepository(context.database);
     return {
       context,
       gmail: new GmailConnectionRepository(context.database, vault, context.profile.id),
       proton: new ProtonConnectionRepository(context.database, vault, context.profile.id),
       identities: new AccountIdentityRepository(context.database, context.profile.id),
       proposals: new OrganizationProposalRepository(context.database, context.profile.id),
+      jobs,
+      rules: new RuleReconciliationRepository(context.database, context.profile.id, { jobs }),
     };
   };
 
@@ -168,6 +184,73 @@ export const registerAccountHandlers = ({
     );
   });
 
+  ipcMain.handle(IPC_CHANNELS.ruleInventoryGet, (event, rawInput: unknown) => {
+    trust(event);
+    const input = ruleManagementScopeSchema.parse(rawInput);
+    return ruleInventorySchema.nullable().parse(
+      repositories().rules.getCurrentInventory(input.provider, input.connectionId),
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.ruleInventoryRefresh, async (event, rawInput: unknown) => {
+    trust(event);
+    const input = ruleManagementScopeSchema.parse(rawInput);
+    const current = repositories();
+    const inventory = input.provider === 'gmail'
+      ? await new GmailRuleInventoryService(current.gmail, current.rules, fetchPort).refresh(input.connectionId)
+      : new ProtonRuleInventoryService(current.rules).refresh(input.connectionId);
+    return ruleInventorySchema.parse(inventory);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.rulePlanGet, (event, rawInput: unknown) => {
+    trust(event);
+    const input = ruleManagementScopeSchema.parse(rawInput);
+    return ruleReconciliationPlanSchema.nullable().parse(
+      repositories().rules.getCurrentPlan(input.provider, input.connectionId),
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.rulePlanGenerate, (event, rawInput: unknown) => {
+    trust(event);
+    const input = ruleManagementScopeSchema.parse(rawInput);
+    return ruleReconciliationPlanSchema.parse(
+      repositories().rules.generate(input.provider, input.connectionId),
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.rulePlanApprove, async (event, rawInput: unknown) => {
+    trust(event);
+    const input = approveRulePlanSchema.parse(rawInput);
+    const current = repositories();
+    const approved = current.rules.approve(input.planId, input.revision);
+    if (approved.provider !== 'gmail' || !approved.job) throw new Error('provider_rule_apply_requires_export');
+    return ruleReconciliationPlanSchema.parse(
+      await new GmailRuleReconciliationRunner(current.gmail, current.rules, current.jobs, fetchPort).run(approved.job.id),
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.rulePlanRetry, async (event, rawInput: unknown) => {
+    trust(event);
+    const input = retryRulePlanSchema.parse(rawInput);
+    const current = repositories();
+    const retried = current.rules.retry(input.planId, input.operationIds);
+    if (retried.provider !== 'gmail' || !retried.job) throw new Error('provider_rule_apply_requires_export');
+    return ruleReconciliationPlanSchema.parse(
+      await new GmailRuleReconciliationRunner(current.gmail, current.rules, current.jobs, fetchPort).run(retried.job.id),
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.rulePlanUndo, async (event, rawInput: unknown) => {
+    trust(event);
+    const input = undoRulePlanSchema.parse(rawInput);
+    const current = repositories();
+    const prepared = current.rules.prepareUndo(input.planId);
+    if (prepared.provider !== 'gmail' || !prepared.undoJob) throw new Error('provider_rule_undo_requires_export');
+    return ruleReconciliationPlanSchema.parse(
+      await new GmailRuleReconciliationRunner(current.gmail, current.rules, current.jobs, fetchPort).undo(prepared.undoJob.id),
+    );
+  });
+
   return () => {
     for (const channel of [
       IPC_CHANNELS.accountsList,
@@ -178,6 +261,13 @@ export const registerAccountHandlers = ({
       IPC_CHANNELS.organizationProposalGet,
       IPC_CHANNELS.organizationProposalGenerate,
       IPC_CHANNELS.organizationProposalEdit,
+      IPC_CHANNELS.ruleInventoryGet,
+      IPC_CHANNELS.ruleInventoryRefresh,
+      IPC_CHANNELS.rulePlanGet,
+      IPC_CHANNELS.rulePlanGenerate,
+      IPC_CHANNELS.rulePlanApprove,
+      IPC_CHANNELS.rulePlanRetry,
+      IPC_CHANNELS.rulePlanUndo,
     ]) ipcMain.removeHandler(channel);
   };
 };

@@ -215,6 +215,30 @@ export class JobRepository {
     })();
   }
 
+  retryItems(jobId: string, itemKeys: readonly string[]): number {
+    if (!itemKeys.length) return 0;
+    return this.#database.transaction(() => {
+      const placeholders = itemKeys.map(() => '?').join(',');
+      const rows = this.#database.prepare(`
+        SELECT id,item_key,state FROM job_items
+        WHERE job_id=? AND item_key IN (${placeholders})
+      `).all(jobId, ...itemKeys) as Array<{ id: string; item_key: string; state: JobState }>;
+      if (rows.length !== new Set(itemKeys).size) throw new Error('job_retry_item_not_found');
+      if (rows.some((row) => !['failed', 'verification_mismatch'].includes(row.state))) {
+        throw new Error('job_retry_item_not_retryable');
+      }
+      const now = this.#now();
+      const update = this.#database.prepare("UPDATE job_items SET state='pending',error_code=NULL,result_json=NULL,updated_at=? WHERE id=?");
+      for (const row of rows) {
+        update.run(now, row.id);
+        this.#appendAudit(jobId, row.id, 'job_item.retried', {});
+      }
+      this.#database.prepare("UPDATE jobs SET state='pending',error_code=NULL,finished_at=NULL WHERE id=?").run(jobId);
+      this.#appendAudit(jobId, null, 'job.retried', { itemCount: rows.length });
+      return rows.length;
+    })();
+  }
+
   #reconcileJob(jobId: string): void {
     const progress = this.getProgress(jobId);
     if (progress.counts.pending > 0 || progress.counts.running > 0) return;

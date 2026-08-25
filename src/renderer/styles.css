@@ -916,6 +916,39 @@ select:focus-visible {
 .proposal-activity b { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
 .proposal-activity small { color: #9aa5a2; font-size: 9px; line-height: 1.4; }
 
+.rule-reconciliation { margin-bottom: 22px; overflow: hidden; }
+.rule-capability { min-height: 76px; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; gap: 28px; border-bottom: 1px solid var(--line); background: #12161c; }
+.rule-capability p { max-width: 78ch; margin: 0; color: #a7b1ae; font-size: 11px; line-height: 1.6; }
+.rule-capability button { flex: 0 0 auto; }
+.rule-inventory-metrics { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
+.rule-inventory-metrics > span { min-height: 70px; padding: 14px 20px; display: grid; align-content: center; gap: 5px; border-right: 1px solid #242b33; }
+.rule-inventory-metrics > span:last-child { border-right: 0; }
+.rule-inventory-metrics b { font-family: 'IBM Plex Mono', monospace; font-size: 18px; font-weight: 500; }
+.rule-inventory-metrics small { color: #9aa5a2; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+.rule-plan-review { padding-bottom: 16px; }
+.rule-operation-list { padding: 0 24px; }
+.rule-operation-head,
+.rule-operation-row { display: grid; grid-template-columns: 92px minmax(240px, 1.3fr) minmax(220px, 1fr) 120px; align-items: center; gap: 16px; border-bottom: 1px solid #242b33; }
+.rule-operation-head { min-height: 35px; color: #9aa5a2; font-size: 9px; text-transform: uppercase; letter-spacing: .07em; }
+.rule-operation-row { min-height: 64px; }
+.rule-operation-row > b { width: max-content; padding: 4px 6px; border: 1px solid #39434e; border-radius: 4px; color: #a7b1ae; font-family: 'IBM Plex Mono', monospace; font-size: 8px; }
+.rule-operation-row.create > b { color: var(--green); border-color: #315447; }
+.rule-operation-row.replace > b,
+.rule-operation-row.remove > b { color: #efb6ad; border-color: #5b3937; }
+.rule-operation-row.adopt > b { color: #f0d79e; border-color: #5b4e2f; }
+.rule-operation-row > span { min-width: 0; overflow-wrap: anywhere; color: #bac4c1; font-size: 10px; }
+.rule-operation-row > span strong,
+.rule-operation-row > span small { display: block; }
+.rule-operation-row > span strong { color: var(--text); font-size: 11px; }
+.rule-operation-row > span small { margin-top: 4px; color: #9aa5a2; font-size: 9px; }
+.rule-operation-row > em { color: #9aa5a2; font-family: 'IBM Plex Mono', monospace; font-size: 8px; font-style: normal; text-align: right; text-transform: uppercase; }
+.rule-plan-actions { min-height: 78px; margin: 16px 24px 0; padding-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-top: 1px solid var(--line); }
+.rule-plan-actions > span strong,
+.rule-plan-actions > span small { display: block; }
+.rule-plan-actions > span strong { font-size: 12px; }
+.rule-plan-actions > span small { margin-top: 5px; color: #9aa5a2; font-size: 9px; }
+.rule-plan-actions > div { display: flex; gap: 8px; }
+
 @media (max-width: 1100px) {
   .account-row { grid-template-columns: 34px minmax(0, 1fr) 100px; }
   .account-row > b { display: none; }
@@ -924,4 +957,6 @@ select:focus-visible {
   .identity-container { grid-column: 2 / -1; }
   .editable-proposal-head,
   .editable-proposal-row { grid-template-columns: 28px minmax(220px, 1.25fr) minmax(180px, 1fr) 110px; gap: 12px; }
+  .rule-operation-head,
+  .rule-operation-row { grid-template-columns: 86px minmax(210px, 1.2fr) minmax(180px, 1fr) 100px; gap: 12px; }
 }

@@ -108,6 +108,7 @@ export class OrganizationProposalRepository {
         evidence: [...aggregate.evidence].sort().slice(0, 12),
         samples: [...aggregate.samples],
         enabled: true,
+        sourceCategory: aggregate.category,
         sourceFingerprint,
       };
     }).sort((left, right) => (left.scopeAddress ?? '').localeCompare(right.scopeAddress ?? '') || right.messageCount - left.messageCount || left.category.localeCompare(right.category));
@@ -117,8 +118,8 @@ export class OrganizationProposalRepository {
     this.#database.transaction(() => {
       this.#database.prepare("UPDATE organization_proposals SET state='superseded',updated_at=? WHERE profile_id=? AND provider=? AND connection_id=? AND state='draft'").run(now, this.#profileId, provider, connectionId);
       this.#database.prepare(`INSERT INTO organization_proposals(id,profile_id,provider,connection_id,analysis_id,revision,state,created_at,updated_at) VALUES (?,?,?,?,?,?,'draft',?,?)`).run(proposalId, this.#profileId, provider, connectionId, rows[0]!.analysis_id, revision, now, now);
-      const insert = this.#database.prepare(`INSERT INTO organization_proposal_items(id,proposal_id,scope_address,container_name,category,target_path,enabled,message_count,latest_at,confidence,evidence_json,samples_json,source_fingerprint,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-      for (const item of items) insert.run(item.id, proposalId, item.scopeAddress, item.containerName, item.category, item.targetPath, 1, item.messageCount, item.latestAt, item.confidence, JSON.stringify(item.evidence), JSON.stringify(item.samples), item.sourceFingerprint, now);
+      const insert = this.#database.prepare(`INSERT INTO organization_proposal_items(id,proposal_id,scope_address,container_name,category,target_path,enabled,message_count,latest_at,confidence,evidence_json,samples_json,source_fingerprint,updated_at,source_category) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      for (const item of items) insert.run(item.id, proposalId, item.scopeAddress, item.containerName, item.category, item.targetPath, 1, item.messageCount, item.latestAt, item.confidence, JSON.stringify(item.evidence), JSON.stringify(item.samples), item.sourceFingerprint, now, item.sourceCategory);
     })();
     return this.get(provider, connectionId)!;
   }

@@ -76,6 +76,21 @@ import {
   organizationProposalSchema,
   organizationProposalScopeSchema,
 } from '../shared/contracts/organization';
+import {
+  type ApproveRulePlan,
+  type RetryRulePlan,
+  type UndoRulePlan,
+  type ExportProtonRulePlan,
+  type RuleManagementScope,
+  approveRulePlanSchema,
+  retryRulePlanSchema,
+  undoRulePlanSchema,
+  exportProtonRulePlanSchema,
+  protonRuleExportResultSchema,
+  ruleInventorySchema,
+  ruleManagementScopeSchema,
+  ruleReconciliationPlanSchema,
+} from '../shared/contracts/rule-management';
 
 const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
   getVersion: async () =>
@@ -116,6 +131,46 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
     organizationProposalSchema.parse(await ipcRenderer.invoke(
       IPC_CHANNELS.organizationProposalEdit,
       editOrganizationProposalSchema.parse(input),
+    )),
+  getRuleInventory: async (input: RuleManagementScope) =>
+    ruleInventorySchema.nullable().parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.ruleInventoryGet,
+      ruleManagementScopeSchema.parse(input),
+    )),
+  refreshRuleInventory: async (input: RuleManagementScope) =>
+    ruleInventorySchema.parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.ruleInventoryRefresh,
+      ruleManagementScopeSchema.parse(input),
+    )),
+  getRulePlan: async (input: RuleManagementScope) =>
+    ruleReconciliationPlanSchema.nullable().parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.rulePlanGet,
+      ruleManagementScopeSchema.parse(input),
+    )),
+  generateRulePlan: async (input: RuleManagementScope) =>
+    ruleReconciliationPlanSchema.parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.rulePlanGenerate,
+      ruleManagementScopeSchema.parse(input),
+    )),
+  approveRulePlan: async (input: ApproveRulePlan) =>
+    ruleReconciliationPlanSchema.parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.rulePlanApprove,
+      approveRulePlanSchema.parse(input),
+    )),
+  retryRulePlan: async (input: RetryRulePlan) =>
+    ruleReconciliationPlanSchema.parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.rulePlanRetry,
+      retryRulePlanSchema.parse(input),
+    )),
+  undoRulePlan: async (input: UndoRulePlan) =>
+    ruleReconciliationPlanSchema.parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.rulePlanUndo,
+      undoRulePlanSchema.parse(input),
+    )),
+  exportProtonRulePlan: async (input: ExportProtonRulePlan) =>
+    protonRuleExportResultSchema.parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.rulePlanExportProton,
+      exportProtonRulePlanSchema.parse(input),
     )),
   listProfiles: async () =>
     z.array(profileSummarySchema).parse(
