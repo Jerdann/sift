@@ -10,6 +10,12 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 - Idempotent provider rule reconciliation.
 - Durable unsubscribe and recoverable stale-mail pruning.
 
+## [0.5.1] - 2026-08-25
+
+### Fixed
+
+- Gave clean Windows release runners enough time to download and launch Electron before the first UI assertion.
+
 ## [0.5.0] - 2026-08-25
 
 ### Added
@@ -43,6 +49,7 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 - Arbitrary message participants can no longer become user-owned identities merely by appearing in From, To, Cc, Bcc, Reply-To, or group-recipient fields.
 - Account and identity operations remain restricted to the active local profile through validated IPC contracts.
 
-[Unreleased]: https://github.com/Jerdann/sift/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Jerdann/sift/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Jerdann/sift/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Jerdann/sift/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Jerdann/sift/compare/v0.3.0...v0.4.0
