@@ -16,6 +16,12 @@ import { protonIdentityEvidence } from '../identity/ownership-evidence';
 import { ProfileSession } from '../profiles/profile-session';
 import { ProtonConnectionRepository } from '../proton/proton-connection-repository';
 import { assertTrustedIpcSender } from '../window-security';
+import { OrganizationProposalRepository } from '../organization/organization-proposal-repository';
+import {
+  editOrganizationProposalSchema,
+  organizationProposalSchema,
+  organizationProposalScopeSchema,
+} from '../../shared/contracts/organization';
 
 export const registerAccountHandlers = ({
   ipcMain,
@@ -38,6 +44,7 @@ export const registerAccountHandlers = ({
       gmail: new GmailConnectionRepository(context.database, vault, context.profile.id),
       proton: new ProtonConnectionRepository(context.database, vault, context.profile.id),
       identities: new AccountIdentityRepository(context.database, context.profile.id),
+      proposals: new OrganizationProposalRepository(context.database, context.profile.id),
     };
   };
 
@@ -138,6 +145,29 @@ export const registerAccountHandlers = ({
     );
   });
 
+  ipcMain.handle(IPC_CHANNELS.organizationProposalGet, (event, rawInput: unknown) => {
+    trust(event);
+    const input = organizationProposalScopeSchema.parse(rawInput);
+    return organizationProposalSchema.nullable().parse(
+      repositories().proposals.get(input.provider, input.connectionId),
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.organizationProposalGenerate, (event, rawInput: unknown) => {
+    trust(event);
+    const input = organizationProposalScopeSchema.parse(rawInput);
+    return organizationProposalSchema.parse(
+      repositories().proposals.generate(input.provider, input.connectionId),
+    );
+  });
+
+  ipcMain.handle(IPC_CHANNELS.organizationProposalEdit, (event, rawInput: unknown) => {
+    trust(event);
+    return organizationProposalSchema.parse(
+      repositories().proposals.edit(editOrganizationProposalSchema.parse(rawInput)),
+    );
+  });
+
   return () => {
     for (const channel of [
       IPC_CHANNELS.accountsList,
@@ -145,6 +175,9 @@ export const registerAccountHandlers = ({
       IPC_CHANNELS.identitiesList,
       IPC_CHANNELS.identitiesRefresh,
       IPC_CHANNELS.identitiesUpdate,
+      IPC_CHANNELS.organizationProposalGet,
+      IPC_CHANNELS.organizationProposalGenerate,
+      IPC_CHANNELS.organizationProposalEdit,
     ]) ipcMain.removeHandler(channel);
   };
 };

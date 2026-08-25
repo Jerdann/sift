@@ -31,6 +31,7 @@ import type {
   AccountSelectionInput,
   MailAccountSummary,
 } from './contracts/accounts';
+import type { EditOrganizationProposal, OrganizationProposal, OrganizationProposalScope } from './contracts/organization';
 
 export const IPC_CHANNELS = Object.freeze({
   appGetVersion: 'app:get-version',
@@ -39,6 +40,9 @@ export const IPC_CHANNELS = Object.freeze({
   identitiesList: 'identities:list',
   identitiesRefresh: 'identities:refresh',
   identitiesUpdate: 'identities:update',
+  organizationProposalGet: 'organization-proposal:get',
+  organizationProposalGenerate: 'organization-proposal:generate',
+  organizationProposalEdit: 'organization-proposal:edit',
   profilesCreate: 'profiles:create',
   profilesList: 'profiles:list',
   profilesSelect: 'profiles:select',
@@ -93,6 +97,9 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   'listAccountIdentities',
   'refreshAccountIdentities',
   'updateAccountIdentity',
+  'getOrganizationProposal',
+  'generateOrganizationProposal',
+  'editOrganizationProposal',
   'listProfiles',
   'createProfile',
   'selectProfile',
@@ -147,6 +154,9 @@ export interface EmailOrganizerBridge {
   listAccountIdentities(input: AccountIdentityListInput): Promise<AccountIdentitySummary[]>;
   refreshAccountIdentities(input: AccountIdentityListInput): Promise<AccountIdentitySummary[]>;
   updateAccountIdentity(input: AccountIdentityUpdateInput): Promise<AccountIdentitySummary>;
+  getOrganizationProposal(input: OrganizationProposalScope): Promise<OrganizationProposal | null>;
+  generateOrganizationProposal(input: OrganizationProposalScope): Promise<OrganizationProposal>;
+  editOrganizationProposal(input: EditOrganizationProposal): Promise<OrganizationProposal>;
   listProfiles(): Promise<ProfileSummary[]>;
   createProfile(input: CreateProfileInput): Promise<ProfileSummary>;
   selectProfile(input: SelectProfileInput): Promise<ProfileSummary>;

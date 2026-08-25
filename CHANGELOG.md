@@ -10,6 +10,18 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 - Idempotent provider rule reconciliation.
 - Durable unsubscribe and recoverable stale-mail pruning.
 
+## [0.5.0] - 2026-08-25
+
+### Added
+
+- Address-scoped organization proposals with evidence, recency, representative samples, and deterministic revisions.
+- Local corrections for category, target path, and proposal inclusion before any mailbox change.
+
+### Changed
+
+- Organization proposals are grouped by confirmed address container and keep shared mail explicit.
+- Same-domain transactional, security, and promotional streams remain independently reviewable.
+
 ## [0.4.0] - 2026-08-25
 
 ### Added
@@ -31,5 +43,6 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 - Arbitrary message participants can no longer become user-owned identities merely by appearing in From, To, Cc, Bcc, Reply-To, or group-recipient fields.
 - Account and identity operations remain restricted to the active local profile through validated IPC contracts.
 
-[Unreleased]: https://github.com/Jerdann/sift/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Jerdann/sift/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Jerdann/sift/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Jerdann/sift/compare/v0.3.0...v0.4.0

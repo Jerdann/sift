@@ -69,6 +69,13 @@ import {
   accountSelectionInputSchema,
   mailAccountSummarySchema,
 } from '../shared/contracts/accounts';
+import {
+  type EditOrganizationProposal,
+  type OrganizationProposalScope,
+  editOrganizationProposalSchema,
+  organizationProposalSchema,
+  organizationProposalScopeSchema,
+} from '../shared/contracts/organization';
 
 const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
   getVersion: async () =>
@@ -94,6 +101,21 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
     accountIdentitySummarySchema.parse(await ipcRenderer.invoke(
       IPC_CHANNELS.identitiesUpdate,
       accountIdentityUpdateInputSchema.parse(input),
+    )),
+  getOrganizationProposal: async (input: OrganizationProposalScope) =>
+    organizationProposalSchema.nullable().parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.organizationProposalGet,
+      organizationProposalScopeSchema.parse(input),
+    )),
+  generateOrganizationProposal: async (input: OrganizationProposalScope) =>
+    organizationProposalSchema.parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.organizationProposalGenerate,
+      organizationProposalScopeSchema.parse(input),
+    )),
+  editOrganizationProposal: async (input: EditOrganizationProposal) =>
+    organizationProposalSchema.parse(await ipcRenderer.invoke(
+      IPC_CHANNELS.organizationProposalEdit,
+      editOrganizationProposalSchema.parse(input),
     )),
   listProfiles: async () =>
     z.array(profileSummarySchema).parse(

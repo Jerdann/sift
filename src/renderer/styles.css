@@ -632,7 +632,7 @@ select:focus-visible {
 .organization-flow-head { padding: 24px; display: flex; align-items: flex-start; justify-content: space-between; gap: 28px; border-bottom: 1px solid #2a323b; }
 .organization-flow-head h2 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
 .organization-flow-head p:last-child { margin: 8px 0 0; color: #6f7a78; font-size: 11px; }
-.organization-stages { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid #2a323b; background: #12161c; }
+.organization-stages { display: grid; grid-template-columns: repeat(2, 1fr); border-bottom: 1px solid #2a323b; background: #12161c; }
 .organization-stages button { min-height: 58px; border: 0; border-right: 1px solid #242b33; padding: 0 14px; display: flex; align-items: center; gap: 9px; cursor: pointer; color: #6f7a78; background: transparent; font-size: 11px; text-align: left; }
 .organization-stages button:last-child { border-right: 0; }
 .organization-stages button:hover { color: #a7b1ae; background: #171c23; }
@@ -884,10 +884,44 @@ select:focus-visible {
 .identity-container input[type='text'],
 .identity-container input:not([type]) { height: 34px; border: 1px solid #39434e; border-radius: 5px; padding: 0 10px; color: var(--text); background: #0e1116; }
 
+.account-organization-sequence { margin-bottom: 28px; }
+.account-organization-sequence > .readiness-panel:last-child { margin-bottom: 0; }
+.organization-editor { margin-bottom: 20px; overflow: hidden; }
+.proposal-revision { min-height: 54px; padding: 0 24px; display: flex; align-items: center; gap: 28px; border-bottom: 1px solid var(--line); background: #12161c; color: #a7b1ae; font-size: 10px; }
+.proposal-revision span { display: inline-flex; align-items: baseline; gap: 6px; }
+.proposal-revision b { color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 14px; }
+.proposal-revision small { margin-left: auto; color: #9aa5a2; font-family: 'IBM Plex Mono', monospace; font-size: 9px; }
+.proposal-scope-tabs { display: flex; gap: 0; overflow-x: auto; border-bottom: 1px solid var(--line); background: #10141a; }
+.proposal-scope-tabs button { min-width: 220px; min-height: 66px; padding: 12px 18px; display: grid; align-content: center; gap: 5px; border: 0; border-right: 1px solid #242b33; color: #a7b1ae; background: transparent; cursor: pointer; text-align: left; }
+.proposal-scope-tabs button:hover { color: var(--text); background: #171c23; }
+.proposal-scope-tabs button.active { color: var(--text); box-shadow: inset 0 -2px var(--green); background: #18201f; }
+.proposal-scope-tabs strong { overflow-wrap: anywhere; font-size: 11px; }
+.proposal-scope-tabs small { color: #9aa5a2; font-size: 9px; }
+.editable-proposal-list { padding: 0 24px 14px; }
+.editable-proposal-head,
+.editable-proposal-row { display: grid; grid-template-columns: 28px minmax(250px, 1.45fr) minmax(220px, 1fr) 130px; align-items: center; gap: 16px; border-bottom: 1px solid #242b33; }
+.editable-proposal-head { min-height: 36px; color: #9aa5a2; font-size: 9px; text-transform: uppercase; letter-spacing: .07em; }
+.editable-proposal-row { min-height: 92px; padding: 12px 0; }
+.editable-proposal-row.disabled { opacity: .56; }
+.editable-proposal-row > input[type='checkbox'] { accent-color: var(--green); }
+.editable-proposal-row > input:not([type='checkbox']),
+.proposal-evidence select { width: 100%; height: 36px; border: 1px solid #39434e; border-radius: 5px; padding: 0 10px; color: var(--text); background: #0e1116; }
+.proposal-evidence { min-width: 0; display: grid; gap: 6px; }
+.proposal-evidence select { width: min(220px, 100%); text-transform: capitalize; }
+.proposal-evidence > small { overflow: hidden; color: #9aa5a2; font-size: 9px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.proposal-evidence details { color: #a7b1ae; font-size: 9px; }
+.proposal-evidence summary { width: max-content; cursor: pointer; }
+.proposal-evidence ul { margin: 7px 0 0; padding: 0 0 0 16px; color: #9aa5a2; line-height: 1.55; }
+.proposal-activity { display: grid; justify-items: end; gap: 5px; text-align: right; }
+.proposal-activity b { font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+.proposal-activity small { color: #9aa5a2; font-size: 9px; line-height: 1.4; }
+
 @media (max-width: 1100px) {
   .account-row { grid-template-columns: 34px minmax(0, 1fr) 100px; }
   .account-row > b { display: none; }
   .owned-identity-row { grid-template-columns: 34px minmax(0, 1fr) 170px; }
   .identity-status { display: none; }
   .identity-container { grid-column: 2 / -1; }
+  .editable-proposal-head,
+  .editable-proposal-row { grid-template-columns: 28px minmax(220px, 1.25fr) minmax(180px, 1fr) 110px; gap: 12px; }
 }

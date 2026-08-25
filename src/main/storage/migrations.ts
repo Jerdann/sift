@@ -540,6 +540,53 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       PRAGMA legacy_alter_table = OFF;
     `,
   },
+  {
+    version: 15,
+    statements: `
+      CREATE TABLE organization_proposals (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton', 'gmail')),
+        connection_id TEXT NOT NULL,
+        analysis_id TEXT NOT NULL,
+        revision TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'draft' CHECK(state IN ('draft', 'approved', 'superseded')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX organization_proposals_scope_idx
+        ON organization_proposals(profile_id, provider, connection_id, updated_at DESC);
+
+      CREATE TABLE organization_proposal_items (
+        id TEXT PRIMARY KEY,
+        proposal_id TEXT NOT NULL REFERENCES organization_proposals(id) ON DELETE CASCADE,
+        scope_address TEXT,
+        container_name TEXT,
+        category TEXT NOT NULL,
+        target_path TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+        message_count INTEGER NOT NULL CHECK(message_count > 0),
+        latest_at TEXT,
+        confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+        evidence_json TEXT NOT NULL,
+        samples_json TEXT NOT NULL,
+        source_fingerprint TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX organization_proposal_items_plan_idx
+        ON organization_proposal_items(proposal_id, scope_address, message_count DESC);
+
+      CREATE TABLE organization_corrections (
+        id TEXT PRIMARY KEY,
+        proposal_id TEXT NOT NULL REFERENCES organization_proposals(id) ON DELETE CASCADE,
+        item_id TEXT NOT NULL REFERENCES organization_proposal_items(id) ON DELETE CASCADE,
+        prior_json TEXT NOT NULL,
+        corrected_json TEXT NOT NULL,
+        resulting_revision TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+    `,
+  },
 ]);
 
 export const applyMigrations = (

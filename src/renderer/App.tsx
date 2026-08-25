@@ -24,7 +24,7 @@ import type {
   ProtonDiscoverySummary,
 } from '../shared/contracts/proton';
 import type { ProtonAuditProgress } from '../shared/contracts/proton-audit';
-import type { MailboxAnalysisSummary } from '../shared/contracts/analysis';
+import type { MailboxAnalysisSummary, MailCategory } from '../shared/contracts/analysis';
 import type { CleanupPlan, CleanupProgress } from '../shared/contracts/cleanup';
 import type { SubscriptionDashboard, UnsubscribeProgress } from '../shared/contracts/unsubscribe';
 import { buildPortableRulePack } from '../core/rules/rule-pack';
@@ -35,6 +35,12 @@ import type {
   AccountIdentityUpdateInput,
   MailAccountSummary,
 } from '../shared/contracts/accounts';
+import type { EditOrganizationProposal, OrganizationProposal } from '../shared/contracts/organization';
+
+const mailCategoryOptions: MailCategory[] = [
+  'personal', 'security', 'accounts', 'transactions', 'finance', 'shopping', 'travel',
+  'games', 'subscriptions', 'promotions', 'social', 'suspicious', 'spam', 'other',
+];
 
 type PageId = 'overview' | 'accounts' | 'audit' | 'organize' | 'unsubscribe' | 'delete';
 const navItems: ReadonlyArray<{ id: PageId; label: string; icon: typeof Inbox }> = [
@@ -206,6 +212,9 @@ interface AppShellProps {
   onSelectAccount(account: MailAccountSummary): Promise<void>;
   onRefreshIdentities(account: MailAccountSummary): Promise<void>;
   onUpdateIdentity(input: AccountIdentityUpdateInput): Promise<void>;
+  proposals: Record<string, OrganizationProposal | null>;
+  onGenerateProposal(account: MailAccountSummary): Promise<void>;
+  onEditProposal(input: EditOrganizationProposal): Promise<void>;
   protonConnection: ProtonConnectionSummary | null;
   protonDiscovery: ProtonDiscoverySummary | null;
   onDiagnoseProton(credentials: BridgeCredentials): Promise<BridgeDiagnostic>;
@@ -638,10 +647,9 @@ const AnalysisPanel = ({
   );
 };
 
-type OrganizationStage = 'categories' | 'senders' | 'filters';
+type OrganizationStage = 'senders' | 'filters';
 
 const organizationStages: ReadonlyArray<{ id: OrganizationStage; label: string }> = [
-  { id: 'categories', label: 'Categories' },
   { id: 'senders', label: 'Sender cleanup' },
   { id: 'filters', label: 'Filters & apply' },
 ];
@@ -674,22 +682,16 @@ const ProtonOrganizationFlow = ({
   onResumeCleanup(planId: string, revision: string): Promise<void>;
   onContinue(): void;
 }) => {
-  const [stage, setStage] = useState<OrganizationStage>('categories');
+  const [stage, setStage] = useState<OrganizationStage>('senders');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [selectedAddress, setSelectedAddress] = useState('');
   const [exportStatus, setExportStatus] = useState('');
   const [senderLimit, setSenderLimit] = useState(25);
-
-  useEffect(() => {
-    if (!analysis?.addresses.length) return;
-    setSelectedAddress((current) => current || analysis.addresses[0]!.address);
-  }, [analysis]);
 
   if (!audit?.indexedMessages) return null;
   const analyze = async () => {
     setBusy(true); setError('');
-    try { await onAnalyze(); setStage('categories'); }
+    try { await onAnalyze(); setStage('senders'); }
     catch { setError('Sift could not rebuild the proposal. The saved scan is still available; try again.'); }
     finally { setBusy(false); }
   };
@@ -698,18 +700,6 @@ const ProtonOrganizationFlow = ({
   }
 
   const stageIndex = organizationStages.findIndex((item) => item.id === stage);
-  const currentAddress = selectedAddress || analysis.addresses[0]?.address || '';
-  const streamsForAddress = analysis.topStreams.filter((stream) => stream.receivingAddress === currentAddress);
-  const categoryRows = [...new Set(streamsForAddress.map((stream) => stream.category))].map((category) => {
-    const streams = streamsForAddress.filter((stream) => stream.category === category);
-    const standard = analysis.categories.find((item) => item.category === category);
-    return {
-      category,
-      label: standard?.label ?? category,
-      folder: standard?.proposedFolder ?? category,
-      messages: streams.reduce((sum, stream) => sum + stream.messageCount, 0),
-    };
-  }).sort((left, right) => right.messages - left.messages);
   const senders = [...new Set(analysis.topStreams.map((stream) => stream.senderDomain))].map((domain) => {
     const streams = analysis.topStreams.filter((stream) => stream.senderDomain === domain);
     const latestAt = streams.map((stream) => stream.latestAt).filter((value): value is string => Boolean(value)).sort().at(-1) ?? null;
@@ -723,7 +713,6 @@ const ProtonOrganizationFlow = ({
   const containers = Object.fromEntries(analysis.addresses
     .filter((identity) => identity.containerEnabled && identity.containerName?.trim())
     .map((identity) => [identity.address, identity.containerName!.trim()]));
-  const currentIdentity = analysis.addresses.find((identity) => identity.address === currentAddress);
   const rulePack = buildPortableRulePack(analysis);
 
   return <>
@@ -731,11 +720,9 @@ const ProtonOrganizationFlow = ({
       <div className="organization-flow-head"><div><p className="eyebrow">PROTON ORGANIZATION</p><h2 id="organization-flow-title">Shape one address at a time</h2><p>{analysis.uniqueMessages.toLocaleString()} inbound messages · {analysis.addresses.length} proven aliases · {analysis.classifierVersion}</p></div><button className="secondary-button" type="button" disabled={busy} onClick={() => void analyze()}>{busy ? 'Refreshing…' : 'Rebuild proposal'}</button></div>
       <nav className="organization-stages" aria-label="Organization proposal stages">{organizationStages.map((item, index) => <button key={item.id} type="button" className={stage === item.id ? 'active' : index < stageIndex ? 'complete' : ''} onClick={() => setStage(item.id)}><span>{index < stageIndex ? <Check size={13} /> : index + 1}</span>{item.label}</button>)}</nav>
 
-      {stage === 'categories' ? <div className="organization-stage"><div className="stage-intro"><span>1</span><div><h3>Review standard categories inside each confirmed address</h3><p>Switch addresses to see the proposal change. Containerized addresses receive paths such as Home & Joint/Money/Receipts.</p></div></div><div className="address-switcher" role="tablist" aria-label="Address category proposal">{analysis.addresses.map((identity) => <button role="tab" aria-selected={currentAddress === identity.address} className={currentAddress === identity.address ? 'active' : ''} key={identity.address} onClick={() => setSelectedAddress(identity.address)}>{identity.address}<small>{identity.messageCount.toLocaleString()} messages</small></button>)}</div>{categoryRows.length ? <div className="category-by-address"><div className="category-address-head"><strong>{currentAddress}</strong><span>{currentIdentity?.containerEnabled ? `${currentIdentity.containerName} / …` : 'Shared category structure'}</span></div>{categoryRows.map((row) => <div key={row.category}><strong>{row.label}</strong><span>{currentIdentity?.containerEnabled ? `${currentIdentity.containerName}/${row.folder}` : row.folder}</span><b>{row.messages.toLocaleString()}</b></div>)}</div> : <p className="analysis-empty-note">No confident category streams were found for this address.</p>}</div> : null}
+      {stage === 'senders' ? <div className="organization-stage"><div className="stage-intro"><span>1</span><div><h3>Catch the largest and stalest sender streams</h3><p>Volume shows the widest net. Last activity separates ongoing noise from abandoned history that is safer to remove in one batch.</p></div></div><div className="sender-review"><div className="sender-review-head"><span>Sender</span><span>Addresses</span><span>Last message</span><span>Suggested next move</span><span>Messages</span></div>{senders.slice(0, senderLimit).map((sender) => { const age = recency(sender.latestAt); const suggestion = age.days > 365 ? 'Delete old history' : age.days > 180 ? 'Review for deletion' : sender.messages > 100 ? 'Filter future mail' : 'Keep categorized'; return <div key={sender.domain}><strong>{sender.domain}</strong><span>{sender.addresses.length === 1 ? sender.addresses[0] : `${sender.addresses.length} addresses`}</span><small>{age.label}</small><b className={age.days > 180 ? 'stale' : ''}>{suggestion}</b><em>{sender.messages.toLocaleString()}</em></div>; })}</div>{senderLimit < Math.min(senders.length, 100) ? <button className="sender-expand" type="button" onClick={() => setSenderLimit((current) => Math.min(current + 25, 100))}>Show the next {Math.min(25, Math.min(senders.length, 100) - senderLimit)} senders</button> : null}</div> : null}
 
-      {stage === 'senders' ? <div className="organization-stage"><div className="stage-intro"><span>2</span><div><h3>Catch the largest and stalest sender streams</h3><p>Volume shows the widest net. Last activity separates ongoing noise from abandoned history that is safer to remove in one batch.</p></div></div><div className="sender-review"><div className="sender-review-head"><span>Sender</span><span>Addresses</span><span>Last message</span><span>Suggested next move</span><span>Messages</span></div>{senders.slice(0, senderLimit).map((sender) => { const age = recency(sender.latestAt); const suggestion = age.days > 365 ? 'Delete old history' : age.days > 180 ? 'Review for deletion' : sender.messages > 100 ? 'Filter future mail' : 'Keep categorized'; return <div key={sender.domain}><strong>{sender.domain}</strong><span>{sender.addresses.length === 1 ? sender.addresses[0] : `${sender.addresses.length} addresses`}</span><small>{age.label}</small><b className={age.days > 180 ? 'stale' : ''}>{suggestion}</b><em>{sender.messages.toLocaleString()}</em></div>; })}</div>{senderLimit < Math.min(senders.length, 100) ? <button className="sender-expand" type="button" onClick={() => setSenderLimit((current) => Math.min(current + 25, 100))}>Show the next {Math.min(25, Math.min(senders.length, 100) - senderLimit)} senders</button> : null}</div> : null}
-
-      {stage === 'filters' ? <div className="organization-stage"><div className="stage-intro"><span>3</span><div><h3>Turn the approved structure into folders and future rules</h3><p>{Object.keys(containers).length} address containers selected. The cleanup preview below uses those paths; future-rule exports stay conservative and omit ambiguous streams.</p></div></div><div className="filter-summary"><span><b>{rulePack.rules.length}</b><small>high-confidence future rules</small></span><span><b>{rulePack.skippedAmbiguousStreams}</b><small>ambiguous streams withheld</small></span><div><button className="secondary-button" type="button" onClick={() => void window.emailOrganizer.exportRulePack({ format: 'proton-sieve', source: 'proton' }).then((result) => setExportStatus(result.canceled ? '' : `Saved ${result.ruleCount} rules to ${result.path}`)).catch(() => setExportStatus('Rule export failed.'))}>Save Proton Sieve</button><button className="secondary-button" type="button" onClick={() => void window.emailOrganizer.exportRulePack({ format: 'portable-json', source: 'proton' }).then((result) => setExportStatus(result.canceled ? '' : `Saved rule pack to ${result.path}`)).catch(() => setExportStatus('Rule export failed.'))}>Save portable pack</button></div></div>{exportStatus ? <p className="export-status">{exportStatus}</p> : null}</div> : null}
+      {stage === 'filters' ? <div className="organization-stage"><div className="stage-intro"><span>2</span><div><h3>Turn the approved structure into folders and future rules</h3><p>{Object.keys(containers).length} address containers selected. The cleanup preview below uses those paths; future-rule exports stay conservative and omit ambiguous streams.</p></div></div><div className="filter-summary"><span><b>{rulePack.rules.length}</b><small>high-confidence future rules</small></span><span><b>{rulePack.skippedAmbiguousStreams}</b><small>ambiguous streams withheld</small></span><div><button className="secondary-button" type="button" onClick={() => void window.emailOrganizer.exportRulePack({ format: 'proton-sieve', source: 'proton' }).then((result) => setExportStatus(result.canceled ? '' : `Saved ${result.ruleCount} rules to ${result.path}`)).catch(() => setExportStatus('Rule export failed.'))}>Save Proton Sieve</button><button className="secondary-button" type="button" onClick={() => void window.emailOrganizer.exportRulePack({ format: 'portable-json', source: 'proton' }).then((result) => setExportStatus(result.canceled ? '' : `Saved rule pack to ${result.path}`)).catch(() => setExportStatus('Rule export failed.'))}>Save portable pack</button></div></div>{exportStatus ? <p className="export-status">{exportStatus}</p> : null}</div> : null}
 
       <div className="organization-flow-actions"><button className="secondary-button" type="button" disabled={stageIndex === 0} onClick={() => setStage(organizationStages[stageIndex - 1]!.id)}>Back</button>{stageIndex < organizationStages.length - 1 ? <button className="primary-button compact" type="button" onClick={() => setStage(organizationStages[stageIndex + 1]!.id)}>Continue to {organizationStages[stageIndex + 1]!.label.toLowerCase()}</button> : <button className="primary-button compact" type="button" onClick={onContinue}>Continue to unsubscribe</button>}</div>
     </section>
@@ -997,6 +984,48 @@ const IdentityReview = ({ account, identities, onRefresh, onUpdate }: {
   );
 };
 
+const OrganizationProposalEditor = ({ account, proposal, onGenerate, onEdit }: {
+  account: MailAccountSummary;
+  proposal: OrganizationProposal | null;
+  onGenerate(account: MailAccountSummary): Promise<void>;
+  onEdit(input: EditOrganizationProposal): Promise<void>;
+}) => {
+  const [selectedScope, setSelectedScope] = useState<string>('');
+  const [draftPaths, setDraftPaths] = useState<Record<string, string>>({});
+  const [busyKey, setBusyKey] = useState('');
+  const [error, setError] = useState('');
+  const scopes = proposal ? [...new Set(proposal.items.map((item) => item.scopeAddress ?? ''))] : [];
+  const currentScope = scopes.includes(selectedScope) ? selectedScope : scopes[0] ?? '';
+  const items = proposal?.items.filter((item) => (item.scopeAddress ?? '') === currentScope) ?? [];
+  const save = async (item: OrganizationProposal['items'][number], changes: Partial<Pick<EditOrganizationProposal, 'category' | 'targetPath' | 'enabled'>>) => {
+    if (!proposal) return;
+    setBusyKey(item.id); setError('');
+    try {
+      await onEdit({
+        proposalId: proposal.id,
+        revision: proposal.revision,
+        itemId: item.id,
+        category: changes.category ?? item.category,
+        targetPath: changes.targetPath ?? draftPaths[item.id] ?? item.targetPath,
+        enabled: changes.enabled ?? item.enabled,
+      });
+    } catch {
+      setError('This proposal changed before the correction could be saved. Reload it and try again; no mailbox changes were made.');
+    } finally { setBusyKey(''); }
+  };
+  return (
+    <section className="readiness-panel organization-editor" aria-labelledby={`proposal-${account.id}`}>
+      <div className="panel-header"><div><p className="eyebrow">{account.provider.toUpperCase()} · {account.label}</p><h2 id={`proposal-${account.id}`}>Shape the filing plan</h2></div><button className="secondary-button" type="button" disabled={busyKey === 'generate'} onClick={() => { setBusyKey('generate'); setError(''); void onGenerate(account).catch(() => setError('Sift needs a completed mailbox scan before it can build this proposal.')).finally(() => setBusyKey('')); }}>{busyKey === 'generate' ? 'Building proposal…' : proposal ? 'Rebuild from mailbox' : 'Build organization proposal'}</button></div>
+      {!proposal ? <div className="analysis-empty"><p>Generate a local draft grouped by confirmed address containers. Every category stays editable, and nothing moves until a later approval step.</p></div> : <>
+        <div className="proposal-revision"><span><b>{proposal.items.filter((item) => item.enabled).length}</b> active categories</span><span><b>{proposal.items.reduce((sum, item) => sum + item.messageCount, 0).toLocaleString()}</b> affected messages</span><small>Draft revision {proposal.revision.slice(0, 10)}</small></div>
+        <div className="proposal-scope-tabs" role="tablist" aria-label={`Organization scopes for ${account.label}`}>{scopes.map((scope) => { const scopeItems = proposal.items.filter((item) => (item.scopeAddress ?? '') === scope); const container = scopeItems.find((item) => item.containerName)?.containerName; return <button key={scope || 'shared'} role="tab" aria-selected={currentScope === scope} className={currentScope === scope ? 'active' : ''} type="button" onClick={() => setSelectedScope(scope)}><strong>{scope || 'Shared mail'}</strong><small>{container ? `${container} container` : scope ? 'Shared category tree' : 'No confirmed address match'} · {scopeItems.reduce((sum, item) => sum + item.messageCount, 0).toLocaleString()} messages</small></button>; })}</div>
+        <div className="editable-proposal-list"><div className="editable-proposal-head"><span>Use</span><span>Category and evidence</span><span>Target path</span><span>Activity</span></div>{items.map((item) => { const age = recency(item.latestAt); return <div className={item.enabled ? 'editable-proposal-row' : 'editable-proposal-row disabled'} key={item.id}><input aria-label={`Include ${item.category}`} type="checkbox" checked={item.enabled} disabled={busyKey === item.id} onChange={(event) => void save(item, { enabled: event.target.checked })}/><span className="proposal-evidence"><select aria-label={`Category for ${item.targetPath}`} value={item.category} disabled={busyKey === item.id} onChange={(event) => void save(item, { category: event.target.value as MailCategory })}>{mailCategoryOptions.map((category) => <option key={category} value={category}>{category.replace('_', ' ')}</option>)}</select><small>{item.evidence.slice(0, 3).join(' · ') || 'Classifier evidence unavailable'}</small>{item.samples.length ? <details><summary>{item.samples.length} representative subject{item.samples.length === 1 ? '' : 's'}</summary><ul>{item.samples.map((sample) => <li key={sample}>{sample}</li>)}</ul></details> : null}</span><input aria-label={`Target path for ${item.category}`} value={draftPaths[item.id] ?? item.targetPath} disabled={busyKey === item.id} onChange={(event) => setDraftPaths((current) => ({ ...current, [item.id]: event.target.value.replace(/\\/g, '').slice(0, 192) }))} onBlur={() => { const targetPath = draftPaths[item.id]; if (targetPath && targetPath !== item.targetPath) void save(item, { targetPath }); }}/><span className="proposal-activity"><b>{item.messageCount.toLocaleString()}</b><small>{age.label} · {Math.round(item.confidence * 100)}% confidence</small></span></div>; })}</div>
+      </>}
+      {error ? <p className="connection-error" role="alert">{error}</p> : null}
+    </section>
+  );
+};
+
 const AppShell = ({
   profileName,
   onSwitchProfile,
@@ -1005,6 +1034,9 @@ const AppShell = ({
   onSelectAccount,
   onRefreshIdentities,
   onUpdateIdentity,
+  proposals,
+  onGenerateProposal,
+  onEditProposal,
   protonConnection,
   protonDiscovery,
   onDiagnoseProton,
@@ -1046,7 +1078,7 @@ const AppShell = ({
   const [activePage, setActivePage] = useState<PageId>('overview');
   const connectedCount = accounts.length;
   const scannedCount = Number(Boolean(protonAudit?.indexedMessages)) + Number(Boolean(gmailAudit?.indexedMessages));
-  const organizedCount = Number(Boolean(cleanupPlan)) + Number(Boolean(gmailOrganization));
+  const organizedCount = Object.values(proposals).filter(Boolean).length;
   const pageLabel = navItems.find((item) => item.id === activePage)?.label ?? 'Overview';
   const emptyAccounts = accounts.length === 0;
   const selectedAccounts = accounts.filter((account) => account.selected);
@@ -1087,7 +1119,7 @@ const AppShell = ({
 
           {activePage === 'audit' ? <>{taskIntro('Map the mailbox before you prune it.', 'Scan message history into a private inventory of senders, dates, folders, and bounded text evidence. A scan changes nothing in the mailbox and can resume after interruption.')}{emptyAccounts ? prerequisite('Connect an account first', 'Sift needs a mailbox connection before it can build an inventory.', 'accounts', 'Open accounts') : <><GmailConnectionPanel connection={gmailConnection} audit={gmailAudit} onConnect={onConnectGmail} onDisconnect={onDisconnectGmail} onAudit={onStartGmailAudit}/><ProtonAuditPanel discovery={protonDiscovery} audit={protonAudit} onStart={onStartProtonAudit} onPause={onPauseProtonAudit} onResume={onResumeProtonAudit}/></>}</> : null}
 
-          {activePage === 'organize' ? <>{taskIntro('Turn mailbox history into a durable system.', 'Confirm your real addresses first, decide which purposes stay separate, then narrow the proposal through categories, stale senders, filters, and exact provider actions.')}{!protonAudit?.indexedMessages && !gmailAudit?.indexedMessages ? prerequisite('Scan at least one mailbox', 'Organization proposals are learned from the message inventory, not from a generic template.', emptyAccounts ? 'accounts' : 'audit', emptyAccounts ? 'Connect an account' : 'Open scan') : <>{selectedAccounts.map((account) => <IdentityReview key={account.id} account={account} identities={identities[account.id] ?? []} onRefresh={onRefreshIdentities} onUpdate={onUpdateIdentity}/>)}<AnalysisPanel provider="gmail" audit={gmailAudit} analysis={gmailAnalysis} onAnalyze={onAnalyzeGmail}/><GmailOrganizationPanel analysis={gmailAnalysis} plan={gmailOrganization} onGenerate={onGenerateGmailOrganization} onApprove={onApproveGmailOrganization}/><ProtonOrganizationFlow audit={protonAudit} analysis={analysis} cleanupPlan={cleanupPlan} onAnalyze={onAnalyzeMailbox} onGenerateCleanup={onGenerateCleanup} onApproveCleanup={onApproveCleanup} onResumeCleanup={onResumeCleanup} onContinue={() => setActivePage('unsubscribe')} /></>}</> : null}
+          {activePage === 'organize' ? <>{taskIntro('Turn mailbox history into a durable system.', 'Confirm your real addresses first, then correct the address-scoped filing plan before Sift builds any provider rules or moves a message.')}{!protonAudit?.indexedMessages && !gmailAudit?.indexedMessages ? prerequisite('Scan at least one mailbox', 'Organization proposals are learned from the message inventory, not from a generic template.', emptyAccounts ? 'accounts' : 'audit', emptyAccounts ? 'Connect an account' : 'Open scan') : <>{selectedAccounts.map((account) => <div className="account-organization-sequence" key={account.id}><IdentityReview account={account} identities={identities[account.id] ?? []} onRefresh={onRefreshIdentities} onUpdate={onUpdateIdentity}/><OrganizationProposalEditor account={account} proposal={proposals[account.id] ?? null} onGenerate={onGenerateProposal} onEdit={onEditProposal}/></div>)}<GmailOrganizationPanel analysis={gmailAnalysis} plan={gmailOrganization} onGenerate={onGenerateGmailOrganization} onApprove={onApproveGmailOrganization}/><ProtonOrganizationFlow audit={protonAudit} analysis={analysis} cleanupPlan={cleanupPlan} onAnalyze={onAnalyzeMailbox} onGenerateCleanup={onGenerateCleanup} onApproveCleanup={onApproveCleanup} onResumeCleanup={onResumeCleanup} onContinue={() => setActivePage('unsubscribe')} /></>}</> : null}
 
           {activePage === 'unsubscribe' ? <>{taskIntro('Stop the mail you never wanted to keep.', 'Find authenticated mailing lists, protect receipts and account notices, and send approved one-click unsubscribe requests without confirming your address to suspected spam.')}{!analysis && !gmailAnalysis ? prerequisite('Build an organization proposal first', 'Sift needs classified sender streams to separate safe subscriptions from protected and suspicious mail.', emptyAccounts ? 'accounts' : scannedCount ? 'organize' : 'audit', emptyAccounts ? 'Connect an account' : scannedCount ? 'Open organize' : 'Open scan') : <><UnsubscribePanel provider="gmail" analysis={gmailAnalysis} dashboard={gmailSubscriptions} onScan={onScanGmailSubscriptions} onStart={onStartGmailUnsubscribe} onResume={async()=>undefined}/><UnsubscribePanel analysis={analysis} dashboard={subscriptions} onScan={onScanSubscriptions} onStart={onStartUnsubscribe} onResume={onResumeUnsubscribe}/>{analysis ? <section className="next-action"><span><strong>Finish with stale history</strong><small>Unsubscribing stops future mail. The last pass identifies old, non-critical sender history that can move to recoverable Trash.</small></span><button className="primary-button compact" type="button" onClick={() => setActivePage('delete')}>Continue to Trash review</button></section> : null}</>}</> : null}
 
@@ -1117,6 +1149,7 @@ export const App = () => {
   const [gmailSubscriptions,setGmailSubscriptions]=useState<SubscriptionDashboard|null>(null);
   const [accounts, setAccounts] = useState<MailAccountSummary[]>([]);
   const [identities, setIdentities] = useState<Record<string, AccountIdentitySummary[]>>({});
+  const [proposals, setProposals] = useState<Record<string, OrganizationProposal | null>>({});
 
   const loadWorkspace = async () => {
     const [connection, discovery, audit, mailboxAnalysis, currentCleanupPlan, currentDeletionPlan, currentSubscriptions, currentGmail, currentGmailAudit, currentGmailAnalysis, currentGmailOrganization, currentGmailSubscriptions, currentAccounts] = await Promise.all([
@@ -1142,7 +1175,12 @@ export const App = () => {
       account.id,
       await window.emailOrganizer.listAccountIdentities({ provider: account.provider, connectionId: account.id }),
     ] as const));
+    const proposalEntries = await Promise.all(currentAccounts.map(async (account) => [
+      account.id,
+      await window.emailOrganizer.getOrganizationProposal({ provider: account.provider, connectionId: account.id }),
+    ] as const));
     setIdentities(Object.fromEntries(identityEntries));
+    setProposals(Object.fromEntries(proposalEntries));
   };
 
   useEffect(() => {
@@ -1260,6 +1298,7 @@ export const App = () => {
   const refreshIdentities = async (account: MailAccountSummary) => {
     const refreshed = await window.emailOrganizer.refreshAccountIdentities({ provider: account.provider, connectionId: account.id });
     setIdentities((current) => ({ ...current, [account.id]: refreshed }));
+    setProposals((current) => ({ ...current, [account.id]: null }));
   };
   const updateIdentity = async (input: AccountIdentityUpdateInput) => {
     const updated = await window.emailOrganizer.updateAccountIdentity(input);
@@ -1272,6 +1311,20 @@ export const App = () => {
     } else {
       setAnalysis(protonAudit?.indexedMessages ? await window.emailOrganizer.analyzeMailbox() : await window.emailOrganizer.getMailboxAnalysis());
     }
+    setProposals((current) => ({ ...current, [input.connectionId]: null }));
+  };
+  const generateProposal = async (account: MailAccountSummary) => {
+    if (account.provider === 'gmail' && gmailAudit?.indexedMessages) {
+      setGmailAnalysis(await window.emailOrganizer.analyzeGmail());
+    } else if (account.provider === 'proton' && protonAudit?.indexedMessages) {
+      setAnalysis(await window.emailOrganizer.analyzeMailbox());
+    }
+    const proposal = await window.emailOrganizer.generateOrganizationProposal({ provider: account.provider, connectionId: account.id });
+    setProposals((current) => ({ ...current, [account.id]: proposal }));
+  };
+  const editProposal = async (input: EditOrganizationProposal) => {
+    const proposal = await window.emailOrganizer.editOrganizationProposal(input);
+    setProposals((current) => ({ ...current, [proposal.connectionId]: proposal }));
   };
   const startGmailAudit = async () => setGmailAudit(await window.emailOrganizer.startGmailAudit());
   const analyzeGmail = async () => setGmailAnalysis(await window.emailOrganizer.analyzeGmail());
@@ -1293,6 +1346,9 @@ export const App = () => {
       onSelectAccount={selectAccount}
       onRefreshIdentities={refreshIdentities}
       onUpdateIdentity={updateIdentity}
+      proposals={proposals}
+      onGenerateProposal={generateProposal}
+      onEditProposal={editProposal}
       protonConnection={protonConnection}
       protonDiscovery={protonDiscovery}
       onDiagnoseProton={(credentials) => window.emailOrganizer.diagnoseProtonBridge(credentials)}
