@@ -3,6 +3,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 interface Migration {
   version: number;
   statements: string;
+  foreignKeysOff?: boolean;
 }
 
 export const MIGRATIONS: readonly Migration[] = Object.freeze([
@@ -455,11 +456,96 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       CREATE INDEX cleanup_actions_plan_state_idx ON cleanup_actions(plan_id, state);
     `,
   },
+  {
+    version: 14,
+    foreignKeysOff: true,
+    statements: `
+      PRAGMA legacy_alter_table = ON;
+
+      DROP INDEX provider_connections_profile_idx;
+      ALTER TABLE provider_connections RENAME TO provider_connections_v13;
+      CREATE TABLE provider_connections (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK (provider IN ('proton')),
+        host TEXT NOT NULL CHECK (host IN ('127.0.0.1', '::1', 'localhost')),
+        port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
+        username TEXT NOT NULL,
+        security TEXT NOT NULL CHECK (security IN ('starttls', 'tls', 'plain')),
+        secret_ref_id TEXT NOT NULL REFERENCES secret_refs(id) ON DELETE RESTRICT,
+        state TEXT NOT NULL CHECK (state IN ('connected', 'attention')),
+        last_connected_at TEXT,
+        last_error_category TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO provider_connections SELECT * FROM provider_connections_v13;
+      DROP TABLE provider_connections_v13;
+      CREATE INDEX provider_connections_profile_idx ON provider_connections(profile_id, provider);
+      CREATE UNIQUE INDEX provider_connections_identity_idx
+        ON provider_connections(profile_id, provider, host, port, username);
+
+      DROP INDEX gmail_connections_profile_idx;
+      ALTER TABLE gmail_connections RENAME TO gmail_connections_v13;
+      CREATE TABLE gmail_connections (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        email TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        secret_ref_id TEXT NOT NULL REFERENCES secret_refs(id) ON DELETE RESTRICT,
+        state TEXT NOT NULL CHECK(state IN ('connected', 'attention')),
+        connected_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO gmail_connections SELECT * FROM gmail_connections_v13;
+      DROP TABLE gmail_connections_v13;
+      CREATE INDEX gmail_connections_profile_idx ON gmail_connections(profile_id);
+      CREATE UNIQUE INDEX gmail_connections_identity_idx ON gmail_connections(profile_id, email);
+
+      CREATE TABLE account_selections (
+        profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton', 'gmail')),
+        connection_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(profile_id, provider)
+      );
+
+      INSERT INTO account_selections(profile_id, provider, connection_id, updated_at)
+      SELECT profile_id, 'proton', id, updated_at FROM provider_connections;
+      INSERT INTO account_selections(profile_id, provider, connection_id, updated_at)
+      SELECT profile_id, 'gmail', id, updated_at FROM gmail_connections;
+
+      CREATE TABLE account_identities (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton', 'gmail')),
+        connection_id TEXT NOT NULL,
+        normalized_address TEXT NOT NULL,
+        evidence_json TEXT NOT NULL DEFAULT '[]',
+        sent_from_count INTEGER NOT NULL DEFAULT 0 CHECK(sent_from_count >= 0),
+        delivered_to_count INTEGER NOT NULL DEFAULT 0 CHECK(delivered_to_count >= 0),
+        provider_evidence INTEGER NOT NULL DEFAULT 0 CHECK(provider_evidence IN (0, 1)),
+        last_seen_at TEXT,
+        user_status TEXT NOT NULL DEFAULT 'unreviewed'
+          CHECK(user_status IN ('unreviewed', 'confirmed', 'rejected')),
+        container_enabled INTEGER NOT NULL DEFAULT 0 CHECK(container_enabled IN (0, 1)),
+        container_name TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(connection_id, normalized_address)
+      );
+      CREATE INDEX account_identities_profile_connection_idx
+        ON account_identities(profile_id, provider, connection_id, user_status);
+
+      PRAGMA legacy_alter_table = OFF;
+    `,
+  },
 ]);
 
 export const applyMigrations = (
   database: BetterSqlite3.Database,
   now: () => string = () => new Date().toISOString(),
+  throughVersion = Number.POSITIVE_INFINITY,
 ): void => {
   database.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -479,10 +565,26 @@ export const applyMigrations = (
   );
 
   for (const migration of MIGRATIONS) {
+    if (migration.version > throughVersion) continue;
     if (applied.has(migration.version)) continue;
-    database.transaction(() => {
-      database.exec(migration.statements);
-      record.run(migration.version, now());
-    })();
+    const apply = database.transaction(() => {
+        database.exec(migration.statements);
+        record.run(migration.version, now());
+      });
+    if (!migration.foreignKeysOff) {
+      apply();
+      continue;
+    }
+    database.pragma('foreign_keys = OFF');
+    try {
+      apply();
+    } finally {
+      database.pragma('legacy_alter_table = OFF');
+      database.pragma('foreign_keys = ON');
+    }
+    const violations = database.pragma('foreign_key_check') as unknown[];
+    if (violations.length) {
+      throw new Error(`Migration ${migration.version} left ${violations.length} foreign-key violation(s)`);
+    }
   }
 };

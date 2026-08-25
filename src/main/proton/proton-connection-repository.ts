@@ -19,6 +19,7 @@ interface ProtonConnectionRow {
   state: 'connected' | 'attention';
   last_connected_at: string | null;
   last_error_category: BridgeDiagnosticCategory | null;
+  updated_at: string;
 }
 
 export class ProtonConnectionRepository {
@@ -46,8 +47,21 @@ export class ProtonConnectionRepository {
     return row ? this.#summary(row) : null;
   }
 
-  getCredentials(): BridgeCredentials | null {
-    const row = this.#getRow();
+  list(): ProtonConnectionSummary[] {
+    return (this.#database.prepare(`
+      SELECT * FROM provider_connections
+      WHERE profile_id = ? AND provider = 'proton'
+      ORDER BY updated_at DESC, username
+    `).all(this.#profileId) as ProtonConnectionRow[]).map((row) => this.#summary(row));
+  }
+
+  getById(connectionId: string): ProtonConnectionSummary | null {
+    const row = this.#getRow(connectionId);
+    return row ? this.#summary(row) : null;
+  }
+
+  getCredentials(connectionId?: string): BridgeCredentials | null {
+    const row = this.#getRow(connectionId);
     if (!row) return null;
     return {
       host: row.host,
@@ -59,7 +73,7 @@ export class ProtonConnectionRepository {
   }
 
   save(credentials: BridgeCredentials): ProtonConnectionSummary {
-    const previous = this.#getRow();
+    const previous = this.#getRowByIdentity(credentials);
     const timestamp = this.#now();
     const secret = this.#vault.store(
       this.#profileId,
@@ -76,10 +90,7 @@ export class ProtonConnectionRepository {
              secret_ref_id, state, last_connected_at, last_error_category,
              created_at, updated_at
            ) VALUES (?, ?, 'proton', ?, ?, ?, ?, ?, 'connected', ?, NULL, ?, ?)
-           ON CONFLICT(profile_id, provider) DO UPDATE SET
-             host = excluded.host,
-             port = excluded.port,
-             username = excluded.username,
+           ON CONFLICT(profile_id, provider, host, port, username) DO UPDATE SET
              security = excluded.security,
              secret_ref_id = excluded.secret_ref_id,
              state = 'connected',
@@ -105,37 +116,89 @@ export class ProtonConnectionRepository {
     }
 
     if (previous) this.#vault.delete(this.#profileId, previous.secret_ref_id);
-    return this.get()!;
+    this.select(id);
+    return this.getById(id)!;
   }
 
-  markAttention(category: BridgeDiagnosticCategory): void {
+  select(connectionId: string): ProtonConnectionSummary {
+    const row = this.#getRow(connectionId);
+    if (!row) throw new Error('Proton connection was not found');
+    this.#database.prepare(`
+      INSERT INTO account_selections(profile_id, provider, connection_id, updated_at)
+      VALUES (?, 'proton', ?, ?)
+      ON CONFLICT(profile_id, provider) DO UPDATE SET
+        connection_id=excluded.connection_id, updated_at=excluded.updated_at
+    `).run(this.#profileId, connectionId, this.#now());
+    return this.#summary(row);
+  }
+
+  markAttention(category: BridgeDiagnosticCategory, connectionId?: string): void {
+    const row = this.#getRow(connectionId);
+    if (!row) return;
     this.#database
       .prepare(
         `UPDATE provider_connections
          SET state = 'attention', last_error_category = ?, updated_at = ?
-         WHERE profile_id = ? AND provider = 'proton'`,
+         WHERE id = ? AND profile_id = ? AND provider = 'proton'`,
       )
-      .run(category, this.#now(), this.#profileId);
+      .run(category, this.#now(), row.id, this.#profileId);
   }
 
   disconnect(connectionId: string): void {
-    const row = this.#getRow();
-    if (!row || row.id !== connectionId) throw new Error('Proton connection was not found');
+    const row = this.#getRow(connectionId);
+    if (!row) throw new Error('Proton connection was not found');
     this.#database
       .prepare(
         "DELETE FROM provider_connections WHERE id = ? AND profile_id = ? AND provider = 'proton'",
       )
       .run(connectionId, this.#profileId);
     this.#vault.delete(this.#profileId, row.secret_ref_id);
+    const selected = this.#database.prepare(
+      "SELECT connection_id FROM account_selections WHERE profile_id = ? AND provider = 'proton'",
+    ).get(this.#profileId) as { connection_id: string } | undefined;
+    if (selected?.connection_id !== connectionId) return;
+    const fallback = this.#database.prepare(`
+      SELECT id FROM provider_connections
+      WHERE profile_id = ? AND provider = 'proton'
+      ORDER BY updated_at DESC, username LIMIT 1
+    `).get(this.#profileId) as { id: string } | undefined;
+    if (fallback) this.select(fallback.id);
+    else this.#database.prepare(
+      "DELETE FROM account_selections WHERE profile_id = ? AND provider = 'proton'",
+    ).run(this.#profileId);
   }
 
-  #getRow(): ProtonConnectionRow | null {
+  #getRow(connectionId?: string): ProtonConnectionRow | null {
+    if (connectionId) {
+      return (
+        (this.#database.prepare(`
+          SELECT * FROM provider_connections
+          WHERE id = ? AND profile_id = ? AND provider = 'proton'
+        `).get(connectionId, this.#profileId) as ProtonConnectionRow | undefined) ?? null
+      );
+    }
     return (
       (this.#database
         .prepare(
-          "SELECT * FROM provider_connections WHERE profile_id = ? AND provider = 'proton'",
+          `SELECT provider_connections.* FROM provider_connections
+           LEFT JOIN account_selections ON account_selections.profile_id = provider_connections.profile_id
+             AND account_selections.provider = 'proton'
+             AND account_selections.connection_id = provider_connections.id
+           WHERE provider_connections.profile_id = ? AND provider_connections.provider = 'proton'
+           ORDER BY CASE WHEN account_selections.connection_id IS NULL THEN 1 ELSE 0 END,
+             provider_connections.updated_at DESC, provider_connections.username
+           LIMIT 1`,
         )
         .get(this.#profileId) as ProtonConnectionRow | undefined) ?? null
+    );
+  }
+
+  #getRowByIdentity(credentials: BridgeCredentials): ProtonConnectionRow | null {
+    return (
+      (this.#database.prepare(`
+        SELECT * FROM provider_connections
+        WHERE profile_id = ? AND provider = 'proton' AND host = ? AND port = ? AND username = ?
+      `).get(this.#profileId, credentials.host, credentials.port, credentials.username) as ProtonConnectionRow | undefined) ?? null
     );
   }
 
