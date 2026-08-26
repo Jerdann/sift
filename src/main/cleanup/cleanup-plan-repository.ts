@@ -1,6 +1,7 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import { createHash, randomUUID } from 'node:crypto';
 import type { JobRepository } from '../jobs/job-repository';
+import { isSameProtonFolder } from '../proton/proton-paths';
 import { CATEGORY_PRESENTATION } from '../../core/classification/mail-classifier';
 import type { MailCategory } from '../../shared/contracts/analysis';
 import { type CleanupPlan, cleanupPlanSchema, type GenerateCleanupInput } from '../../shared/contracts/cleanup';
@@ -30,6 +31,8 @@ interface ProposalItemRow {
 export interface CleanupActionRecord {
   id: string;
   planId: string;
+  messageRowId: string;
+  connectionId: string;
   category: MailCategory;
   sourcePath: string;
   uidValidity: string;
@@ -40,6 +43,11 @@ export interface CleanupActionRecord {
   resultingPath: string | null;
   resultingUidValidity: string | null;
   resultingUid: number | null;
+}
+
+export interface CleanupTargetRecord {
+  targetPath: string;
+  actionKind: CleanupActionRecord['actionKind'];
 }
 
 export class CleanupPlanRepository {
@@ -114,7 +122,7 @@ export class CleanupPlanRepository {
         targetPath: input.kind === 'trash' ? 'Trash' : effectiveCategory === 'spam' ? 'Spam' : categoryPath,
         actionKind: input.kind === 'trash' ? 'native_trash' as const : effectiveCategory === 'spam' ? 'native_spam' as const : 'sort_read_archive' as const,
       };
-    });
+    }).filter((action) => action.actionKind !== 'sort_read_archive' || !isSameProtonFolder(action.source_path, action.targetPath));
     const revision = createHash('sha256').update(JSON.stringify(actionValues.map((action) => [
       action.canonical_key, action.source_path, action.uid_validity, action.uid, action.targetPath, action.actionKind,
     ]))).digest('hex');
@@ -237,6 +245,8 @@ export class CleanupPlanRepository {
     return {
       id: String(row.id),
       planId: String(row.plan_id),
+      messageRowId: String(row.message_row_id),
+      connectionId: String(row.connection_id),
       category: row.category as MailCategory,
       sourcePath: String(row.source_path),
       uidValidity: String(row.uid_validity),
@@ -250,9 +260,26 @@ export class CleanupPlanRepository {
     };
   }
 
+  targets(planId: string): CleanupTargetRecord[] {
+    const plan = this.#database.prepare(`
+      SELECT cleanup_plans.id FROM cleanup_plans
+      JOIN provider_connections pc ON pc.id=cleanup_plans.connection_id
+      WHERE cleanup_plans.id=? AND pc.profile_id=?
+    `).get(planId, this.#profileId);
+    if (!plan) throw new Error('Cleanup plan was not found');
+    return (this.#database.prepare(`
+      SELECT DISTINCT target_path,action_kind FROM cleanup_actions
+      WHERE plan_id=? ORDER BY target_path,action_kind
+    `).all(planId) as Array<{ target_path: string; action_kind: CleanupActionRecord['actionKind'] }>).map((row) => ({
+      targetPath: row.target_path,
+      actionKind: row.action_kind,
+    }));
+  }
+
   markRunning(actionId: string, priorFlags: readonly string[]): void {
     this.#database.prepare(`
-      UPDATE cleanup_actions SET state = 'running', prior_flags_json = ?, updated_at = ? WHERE id = ?
+      UPDATE cleanup_actions SET state = 'running',
+        prior_flags_json = COALESCE(prior_flags_json, ?), updated_at = ? WHERE id = ?
     `).run(JSON.stringify(priorFlags), this.#now(), actionId);
   }
 
@@ -262,13 +289,85 @@ export class CleanupPlanRepository {
     errorCode: string | null = null,
     receipt?: { path: string; uidValidity: string; uid: number; flags: readonly string[] },
   ): void {
+    const timestamp = this.#now();
+    this.#database.transaction(() => {
+      this.#database.prepare(`
+        UPDATE cleanup_actions SET state=?,error_code=?,resulting_path=?,resulting_uid_validity=?,
+          resulting_uid=?,resulting_flags_json=?,updated_at=? WHERE id=?
+      `).run(
+        state, errorCode, receipt?.path ?? null, receipt?.uidValidity ?? null, receipt?.uid ?? null,
+        receipt ? JSON.stringify([...receipt.flags].sort()) : null, timestamp, actionId,
+      );
+      if (!receipt || state !== 'succeeded') return;
+      this.#syncIndexedLocation(actionId, receipt, timestamp);
+    })();
+  }
+
+  markMovePending(actionId: string, pointer: { path: string; uid: number }): void {
     this.#database.prepare(`
-      UPDATE cleanup_actions SET state=?,error_code=?,resulting_path=?,resulting_uid_validity=?,
-        resulting_uid=?,resulting_flags_json=?,updated_at=? WHERE id=?
-    `).run(
-      state, errorCode, receipt?.path ?? null, receipt?.uidValidity ?? null, receipt?.uid ?? null,
-      receipt ? JSON.stringify([...receipt.flags].sort()) : null, this.#now(), actionId,
-    );
+      UPDATE cleanup_actions SET state='running',error_code=NULL,resulting_path=?,
+        resulting_uid=?,resulting_uid_validity=NULL,resulting_flags_json=NULL,updated_at=?
+      WHERE id=?
+    `).run(pointer.path, pointer.uid, this.#now(), actionId);
+  }
+
+  markUndoSucceeded(
+    actionId: string,
+    receipt: { path: string; uidValidity: string; uid: number; flags: readonly string[] },
+  ): void {
+    const timestamp = this.#now();
+    this.#database.transaction(() => {
+      this.#database.prepare(
+        "UPDATE cleanup_actions SET undo_state='succeeded',undo_error_code=NULL,updated_at=? WHERE id=?",
+      ).run(timestamp, actionId);
+      this.#syncIndexedLocation(actionId, receipt, timestamp);
+    })();
+  }
+
+  #syncIndexedLocation(
+    actionId: string,
+    receipt: { path: string; uidValidity: string; uid: number; flags: readonly string[] },
+    timestamp: string,
+  ): void {
+      const action = this.action(actionId);
+      let container = this.#database.prepare(`
+        SELECT id FROM mail_containers
+        WHERE connection_id=? AND lower(provider_container_id)=lower(?)
+      `).get(action.connectionId, receipt.path) as { id: string } | undefined;
+      if (!container) {
+        container = { id: this.#createId() };
+        const specialUse = action.actionKind === 'native_spam' ? '\\Junk'
+          : action.actionKind === 'native_trash' ? '\\Trash'
+          : null;
+        this.#database.prepare(`
+          INSERT INTO mail_containers(
+            id,connection_id,profile_id,provider_container_id,display_name,delimiter,
+            special_use,flags_json,message_count,unread_count,uid_validity,uid_next,observed_at
+          ) VALUES (?,?,?,?,?,'/',?,'[]',0,0,?,?,?)
+        `).run(
+          container.id, action.connectionId, this.#profileId, receipt.path,
+          receipt.path.split('/').at(-1) ?? receipt.path, specialUse,
+          receipt.uidValidity, receipt.uid + 1, timestamp,
+        );
+      }
+      this.#database.prepare(`
+        UPDATE mail_containers SET uid_validity=?,uid_next=MAX(uid_next,?),observed_at=?
+        WHERE id=?
+      `).run(receipt.uidValidity, receipt.uid + 1, timestamp, container.id);
+      const occupied = this.#database.prepare(`
+        SELECT id FROM indexed_messages
+        WHERE connection_id=? AND container_id=? AND uid_validity=? AND uid=?
+      `).get(action.connectionId, container.id, receipt.uidValidity, receipt.uid) as { id: string } | undefined;
+      if (!occupied || occupied.id === action.messageRowId) {
+        this.#database.prepare(`
+          UPDATE indexed_messages SET container_id=?,uid_validity=?,uid=?,flags_json=?,indexed_at=?
+          WHERE id=? AND connection_id=?
+        `).run(
+          container.id, receipt.uidValidity, receipt.uid,
+          JSON.stringify([...receipt.flags].sort()), timestamp,
+          action.messageRowId, action.connectionId,
+        );
+      }
   }
 
   retry(planId: string, actionIds: readonly string[]): CleanupPlan {

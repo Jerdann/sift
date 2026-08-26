@@ -7,6 +7,36 @@ import {
 } from '../proton/proton-mutation-client';
 import type { CleanupPlanRepository } from './cleanup-plan-repository';
 
+const PROTON_CLEANUP_BATCH_SIZE = 100;
+
+const providerMessage = (error: unknown): string =>
+  (error instanceof Error ? error.message : String(error)).toLowerCase();
+
+export const cleanupTargetErrorCode = (error: unknown): string => {
+  const message = providerMessage(error);
+  if (
+    message.includes('invalid mailbox name') ||
+    message.includes('operation not allowed') ||
+    message.includes('proton_folders_root_missing')
+  ) return 'proton_target_rejected';
+  if (
+    message.includes('econnrefused') ||
+    message.includes('connection closed') ||
+    message.includes('timeout')
+  ) return 'proton_bridge_unavailable';
+  return 'proton_target_preparation_failed';
+};
+
+export const cleanupActionErrorCode = (error: unknown): string => {
+  const message = providerMessage(error);
+  if (
+    message.includes('econnrefused') ||
+    message.includes('connection closed') ||
+    message.includes('timeout')
+  ) return 'proton_bridge_unavailable';
+  return 'provider_action_failed';
+};
+
 export class CleanupRunner {
   readonly #jobs: JobRepository;
   readonly #plans: CleanupPlanRepository;
@@ -32,6 +62,29 @@ export class CleanupRunner {
     return () => this.#listeners.delete(listener);
   }
 
+  async prepareTargets(planId: string): Promise<void> {
+    const credentials = this.#connections.getCredentials();
+    if (!credentials) throw new Error('proton_not_connected');
+    const client = await this.#createClient(credentials);
+    try {
+      await client.connect();
+      try {
+        for (const target of this.#plans.targets(planId)) {
+          await client.prepareTarget(
+            target.targetPath,
+            target.actionKind === 'native_spam',
+            target.actionKind === 'native_trash',
+          );
+        }
+      } catch (error) {
+        const errorCode = cleanupTargetErrorCode(error);
+        throw new Error(errorCode, { cause: error });
+      }
+    } finally {
+      await client.close().catch(() => undefined);
+    }
+  }
+
   async run(jobId: string): Promise<CleanupProgress> {
     const credentials = this.#connections.getCredentials();
     if (!credentials) throw new Error('proton_not_connected');
@@ -40,42 +93,162 @@ export class CleanupRunner {
     const targets = new Map<string, string>();
     try {
       await client.connect();
-      for (;;) {
-        const item = this.#jobs.claimNextPending(jobId);
-        if (!item) break;
-        const action = this.#plans.action(item.itemKey);
-        this.#currentTarget = action.targetPath;
+      try {
+        for (const target of this.#plans.targets(planId)) {
+          const targetKey = `${target.actionKind}:${target.targetPath}`;
+          targets.set(targetKey, await client.prepareTarget(
+            target.targetPath,
+            target.actionKind === 'native_spam',
+            target.actionKind === 'native_trash',
+          ));
+        }
+      } catch (error) {
+        const errorCode = cleanupTargetErrorCode(error);
+        this.#jobs.blockPendingJob(jobId, errorCode);
         this.#emit(planId);
-        try {
-          const prior = await client.inspect(action.sourcePath, action.uid);
-          if (!prior || prior.uidValidity !== action.uidValidity) {
-            this.#plans.markResult(action.id, 'verification_mismatch', 'source_message_changed');
-            this.#jobs.transitionItem(item.id, 'verification_mismatch', { errorCode: 'source_message_changed' });
+        throw new Error(errorCode, { cause: error });
+      }
+      let verificationDeferred = false;
+      for (;;) {
+        const items = this.#jobs.claimNextPendingBatch(jobId, PROTON_CLEANUP_BATCH_SIZE);
+        if (!items.length) break;
+        const groups = new Map<string, Array<{ item: (typeof items)[number]; action: ReturnType<CleanupPlanRepository['action']> }>>();
+        for (const item of items) {
+          const action = this.#plans.action(item.itemKey);
+          const key = `${action.sourcePath}\0${action.actionKind}\0${action.targetPath}`;
+          const group = groups.get(key) ?? [];
+          group.push({ item, action });
+          groups.set(key, group);
+        }
+        for (const group of groups.values()) {
+          if (verificationDeferred) break;
+          group.sort((left, right) => left.action.uid - right.action.uid);
+          const representative = group[0]!.action;
+          this.#currentTarget = representative.targetPath;
+          this.#emit(planId);
+
+          const moved = group.filter(({ action }) =>
+            action.resultingPath !== null && action.resultingUid !== null && action.resultingUidValidity === null,
+          );
+          if (moved.length) {
+            const byTarget = new Map<string, typeof moved>();
+            for (const entry of moved) {
+              const targetGroup = byTarget.get(entry.action.resultingPath!) ?? [];
+              targetGroup.push(entry);
+              byTarget.set(entry.action.resultingPath!, targetGroup);
+            }
+            for (const [targetPath, targetGroup] of byTarget) {
+              let resulting: Map<number, { uidValidity: string; flags: string[] }>;
+              try {
+                resulting = await client.inspectMany(targetPath, targetGroup.map(({ action }) => action.resultingUid!));
+              } catch {
+                this.#jobs.requeueRunning(jobId, 'provider_verification_pending');
+                verificationDeferred = true;
+                this.#emit(planId);
+                break;
+              }
+              for (const { item, action } of targetGroup) {
+                const state = resulting.get(action.resultingUid!);
+                if (!state) continue;
+                this.#plans.markResult(action.id, 'succeeded', null, {
+                  path: targetPath,
+                  uid: action.resultingUid!,
+                  ...state,
+                });
+                this.#jobs.transitionItem(item.id, 'succeeded', {
+                  result: { operation: 'proton-cleanup-action', verified: true },
+                });
+              }
+              if (targetGroup.some(({ action }) => !resulting.has(action.resultingUid!))) {
+                this.#jobs.requeueRunning(jobId, 'provider_verification_pending');
+                verificationDeferred = true;
+                this.#emit(planId);
+                break;
+              }
+            }
+          }
+          if (verificationDeferred) break;
+
+          const fresh = group.filter(({ action }) =>
+            action.resultingPath === null || action.resultingUid === null,
+          );
+          if (!fresh.length) continue;
+          let inspected: Map<number, { uidValidity: string; flags: string[] }>;
+          try {
+            inspected = await client.inspectMany(representative.sourcePath, fresh.map(({ action }) => action.uid));
+          } catch (error) {
+            const errorCode = cleanupActionErrorCode(error);
+            for (const { item, action } of fresh) this.#failAction(item.id, action.id, errorCode);
             this.#emit(planId);
             continue;
           }
-          this.#plans.markRunning(action.id, prior.flags);
-          const targetKey = `${action.actionKind}:${action.targetPath}`;
-          let target = targets.get(targetKey);
-          if (!target) {
-            target = await client.prepareTarget(
-              action.targetPath,
-              action.actionKind === 'native_spam',
-              action.actionKind === 'native_trash',
-            );
-            targets.set(targetKey, target);
+          const ready: typeof fresh = [];
+          for (const entry of fresh) {
+            const prior = inspected.get(entry.action.uid);
+            if (!prior || prior.uidValidity !== entry.action.uidValidity) {
+              this.#plans.markResult(entry.action.id, 'verification_mismatch', 'source_message_changed');
+              this.#jobs.transitionItem(entry.item.id, 'verification_mismatch', { errorCode: 'source_message_changed' });
+              continue;
+            }
+            this.#plans.markRunning(entry.action.id, prior.flags);
+            ready.push(entry);
           }
-          const applied = await client.apply(action.sourcePath, action.uid, target);
-          if (!applied || applied.path !== target) throw new Error('provider_verification_failed');
-          this.#plans.markResult(action.id, 'succeeded', null, applied);
-          this.#jobs.transitionItem(item.id, 'succeeded', {
-            result: { operation: 'proton-cleanup-action', verified: true },
-          });
-        } catch {
-          this.#plans.markResult(action.id, 'failed', 'provider_action_failed');
-          this.#jobs.transitionItem(item.id, 'failed', { errorCode: 'provider_action_failed' });
+          if (!ready.length) {
+            this.#emit(planId);
+            continue;
+          }
+          const targetKey = `${representative.actionKind}:${representative.targetPath}`;
+          let target = targets.get(targetKey);
+          let pointers: Map<number, { path: string; uid: number }>;
+          try {
+            if (!target) {
+              target = await client.prepareTarget(
+                representative.targetPath,
+                representative.actionKind === 'native_spam',
+                representative.actionKind === 'native_trash',
+              );
+              targets.set(targetKey, target);
+            }
+            pointers = await client.moveMany(representative.sourcePath, ready.map(({ action }) => action.uid), target);
+          } catch {
+            this.#jobs.requeueRunning(jobId, 'provider_move_state_unknown');
+            verificationDeferred = true;
+            this.#emit(planId);
+            break;
+          }
+          for (const { action } of ready) {
+            const pointer = pointers.get(action.uid);
+            if (pointer) this.#plans.markMovePending(action.id, pointer);
+          }
+
+          let resulting: Map<number, { uidValidity: string; flags: string[] }>;
+          try {
+            resulting = await client.inspectMany(target, [...pointers.values()].map((pointer) => pointer.uid));
+          } catch {
+            this.#jobs.requeueRunning(jobId, 'provider_verification_pending');
+            verificationDeferred = true;
+            this.#emit(planId);
+            break;
+          }
+          for (const { item, action } of ready) {
+            const pointer = pointers.get(action.uid);
+            const state = pointer ? resulting.get(pointer.uid) : null;
+            if (!pointer || !state) continue;
+            this.#plans.markResult(action.id, 'succeeded', null, { ...pointer, ...state });
+            this.#jobs.transitionItem(item.id, 'succeeded', {
+              result: { operation: 'proton-cleanup-action', verified: true },
+            });
+          }
+          if (ready.some(({ action }) => {
+            const pointer = pointers.get(action.uid);
+            return !pointer || !resulting.has(pointer.uid);
+          })) {
+            this.#jobs.requeueRunning(jobId, 'provider_verification_pending');
+            verificationDeferred = true;
+          }
+          this.#emit(planId);
         }
-        this.#emit(planId);
+        if (verificationDeferred) break;
       }
     } finally {
       this.#currentTarget = null;
@@ -112,7 +285,7 @@ export class CleanupRunner {
           if (!restored || restored.path !== action.sourcePath || JSON.stringify(restored.flags) !== JSON.stringify(expectedFlags)) {
             throw new Error('provider_undo_verification_failed');
           }
-          this.#plans.markUndo(action.id, 'succeeded');
+          this.#plans.markUndoSucceeded(action.id, restored);
           this.#jobs.transitionItem(item.id, 'succeeded', { result: { operation: 'proton-cleanup-action', verified: true } });
         } catch {
           this.#plans.markUndo(action.id, 'failed', 'provider_undo_failed');
@@ -138,5 +311,10 @@ export class CleanupRunner {
   #emit(planId: string) {
     const progress = this.progress(planId);
     for (const listener of this.#listeners) listener(progress);
+  }
+
+  #failAction(itemId: string, actionId: string, errorCode = 'provider_action_failed'): void {
+    this.#plans.markResult(actionId, 'failed', errorCode);
+    this.#jobs.transitionItem(itemId, 'failed', { errorCode });
   }
 }

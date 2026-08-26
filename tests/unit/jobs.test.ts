@@ -63,6 +63,49 @@ describe('durable jobs', () => {
     context.database.close();
   });
 
+  it('claims a durable batch in order with one attempt per item', () => {
+    const context = openTestDatabase();
+    const repository = new JobRepository(context.database);
+    const job = repository.createJob({
+      profileId,
+      kind: 'proton-cleanup',
+      idempotencyKey: 'cleanup:batch-claim',
+      itemKeys: ['one', 'two', 'three', 'four'],
+    });
+
+    const claimed = repository.claimNextPendingBatch(job.id, 3);
+
+    expect(claimed.map((item) => item.itemKey)).toEqual(['one', 'two', 'three']);
+    expect(claimed.every((item) => item.state === 'running' && item.attempts === 1)).toBe(true);
+    expect(repository.getProgress(job.id).counts).toMatchObject({ pending: 1, running: 3 });
+    expect(() => repository.claimNextPendingBatch(job.id, 501)).toThrow('batch size');
+    context.database.close();
+  });
+
+  it('requeues an uncertain running batch without replaying completed items', () => {
+    const context = openTestDatabase();
+    const repository = new JobRepository(context.database);
+    const job = repository.createJob({
+      profileId,
+      kind: 'proton-cleanup',
+      idempotencyKey: 'cleanup:uncertain-batch',
+      itemKeys: ['one', 'two', 'three'],
+    });
+    const claimed = repository.claimNextPendingBatch(job.id, 3);
+    repository.transitionItem(claimed[0]!.id, 'succeeded', {
+      result: { operation: 'proton-cleanup-action', verified: true },
+    });
+
+    expect(repository.requeueRunning(job.id, 'provider_verification_pending')).toBe(2);
+    expect(repository.getProgress(job.id)).toMatchObject({
+      state: 'pending',
+      errorCode: 'provider_verification_pending',
+      counts: { succeeded: 1, pending: 2, running: 0 },
+    });
+    expect(repository.claimNextPendingBatch(job.id, 3).map((item) => item.itemKey)).toEqual(['two', 'three']);
+    context.database.close();
+  });
+
   it('recovers interrupted items and never replays verified successes', async () => {
     const firstContext = openTestDatabase();
     const firstRepository = new JobRepository(firstContext.database);

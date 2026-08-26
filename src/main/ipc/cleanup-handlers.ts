@@ -72,10 +72,13 @@ export const registerCleanupHandlers = ({
     if (!current.connection) throw new Error('proton_not_connected');
     return cleanupPlanSchema.parse(current.plans.generate(current.connection.id, input));
   });
-  ipcMain.handle(IPC_CHANNELS.cleanupApprove, (event, rawInput: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.cleanupApprove, async (event, rawInput: unknown) => {
     trust(event);
     const input = approveCleanupInputSchema.parse(rawInput);
     const current = services();
+    const draft = current.plans.get(input.planId);
+    if (draft.state !== 'draft' || draft.revision !== input.revision) throw new Error('cleanup_plan_changed');
+    await current.runner.prepareTargets(draft.id);
     const plan = current.plans.approve(input.planId, input.revision);
     if (!plan.job) throw new Error('cleanup_job_missing');
     run(event, plan.job.id, plan.id, current);

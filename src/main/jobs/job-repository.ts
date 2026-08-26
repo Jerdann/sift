@@ -118,33 +118,41 @@ export class JobRepository {
   }
 
   claimNextPending(jobId: string): DurableJobItem | null {
+    return this.claimNextPendingBatch(jobId, 1)[0] ?? null;
+  }
+
+  claimNextPendingBatch(jobId: string, limit: number): DurableJobItem[] {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+      throw new Error('Job claim batch size must be between 1 and 500');
+    }
     return this.#database.transaction(() => {
-      const row = this.#database
+      const rows = this.#database
         .prepare(
           `SELECT * FROM job_items
            WHERE job_id = ? AND state = 'pending'
-           ORDER BY rowid LIMIT 1`,
+           ORDER BY rowid LIMIT ?`,
         )
-        .get(jobId) as Record<string, unknown> | undefined;
-      if (!row) return null;
+        .all(jobId, limit) as Record<string, unknown>[];
+      if (!rows.length) return [];
       const timestamp = this.#now();
-      this.#database
-        .prepare(
-          `UPDATE job_items
-           SET state = 'running', attempts = attempts + 1, updated_at = ?
-           WHERE id = ? AND state = 'pending'`,
-        )
-        .run(timestamp, row.id);
+      const claim = this.#database.prepare(
+        `UPDATE job_items
+         SET state = 'running', attempts = attempts + 1, updated_at = ?
+         WHERE id = ? AND state = 'pending'`,
+      );
+      for (const row of rows) claim.run(timestamp, row.id);
       this.#database
         .prepare(
           `UPDATE jobs SET state = 'running', started_at = COALESCE(started_at, ?)
+             , error_code = NULL
            WHERE id = ? AND state = 'pending'`,
         )
         .run(timestamp, jobId);
-      this.#appendAudit(jobId, String(row.id), 'job_item.running', {});
-      return this.#itemFromRow(
-        this.#database.prepare('SELECT * FROM job_items WHERE id = ?').get(row.id) as Record<string, unknown>,
-      );
+      const readClaimed = this.#database.prepare('SELECT * FROM job_items WHERE id = ?');
+      return rows.map((row) => {
+        this.#appendAudit(jobId, String(row.id), 'job_item.running', {});
+        return this.#itemFromRow(readClaimed.get(row.id) as Record<string, unknown>);
+      });
     })();
   }
 
@@ -212,6 +220,40 @@ export class JobRepository {
         .prepare("UPDATE jobs SET state = 'pending' WHERE id = ? AND state = 'running'")
         .run(jobId);
       this.#appendAudit(jobId, null, 'job.paused', {});
+    })();
+  }
+
+  blockPendingJob(jobId: string, errorCode: string): void {
+    this.#database.transaction(() => {
+      const running = this.#database.prepare(
+        "SELECT COUNT(*) count FROM job_items WHERE job_id=? AND state='running'",
+      ).get(jobId) as { count: number };
+      if (running.count > 0) throw new Error('job_blocked_with_running_items');
+      this.#database.prepare(
+        "UPDATE jobs SET state='pending',error_code=? WHERE id=?",
+      ).run(errorCode, jobId);
+      this.#appendAudit(jobId, null, 'job.blocked', { errorCode });
+    })();
+  }
+
+  requeueRunning(jobId: string, errorCode: string): number {
+    return this.#database.transaction(() => {
+      const running = this.#database.prepare(
+        "SELECT id FROM job_items WHERE job_id=? AND state='running'",
+      ).all(jobId) as Array<{ id: string }>;
+      if (!running.length) return 0;
+      const timestamp = this.#now();
+      this.#database.prepare(
+        "UPDATE job_items SET state='pending',error_code=?,updated_at=? WHERE job_id=? AND state='running'",
+      ).run(errorCode, timestamp, jobId);
+      this.#database.prepare(
+        "UPDATE jobs SET state='pending',error_code=? WHERE id=?",
+      ).run(errorCode, jobId);
+      for (const item of running) {
+        this.#appendAudit(jobId, item.id, 'job_item.requeued', { errorCode });
+      }
+      this.#appendAudit(jobId, null, 'job.requeued', { errorCode, itemCount: running.length });
+      return running.length;
     })();
   }
 

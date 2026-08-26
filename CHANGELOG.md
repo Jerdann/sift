@@ -4,6 +4,15 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-26
+
+### Changed
+
+- Proton cleanup now verifies and moves messages in durable batches of up to 100 per source folder, replacing per-message mailbox locks and IMAP round trips while retaining individual receipts, retries, and Undo state.
+- Proton organization destinations now resolve beneath Bridge's required `Folders/` namespace, are preflighted before any message is claimed, and stop with an actionable structural error instead of failing every action.
+- Successful Proton moves now update the local message index and future plans skip messages already in their approved folder.
+- Provider move pointers are saved before destination verification, so an interrupted batch resumes by verifying the existing moves instead of moving the same messages twice.
+
 ## [1.2.0] - 2026-08-26
 
 ### Added

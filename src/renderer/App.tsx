@@ -1924,17 +1924,31 @@ const CleanupPanel = ({
     setError("");
     try {
       await action();
-    } catch {
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
       setError(
-        "Cleanup stopped safely. Completed actions remain recorded; failed actions can be retried from their checkpoint.",
+        message.includes("proton_target_rejected")
+          ? "Proton rejected a required folder. No messages moved. Rebuild this plan after checking the proposed folder hierarchy."
+          : message.includes("proton_bridge_unavailable")
+            ? "Proton Bridge became unavailable. No unverified work will continue; reopen Bridge, then resume from the checkpoint."
+            : "Cleanup stopped safely. Completed actions remain recorded; failed actions can be retried from their checkpoint.",
       );
     } finally {
       setBusy(false);
     }
   };
   const running = plan?.job?.state === "running";
-  const resumable = plan?.job?.state === "pending" && plan.state !== "draft";
-  const retryable = plan?.failedActions ?? [];
+  const jobTargetBlocked = plan?.job?.errorCode?.startsWith("proton_target_") ?? false;
+  const resumable = plan?.job?.state === "pending" && plan.state !== "draft" && !jobTargetBlocked;
+  const blockedFailures = (plan?.failedActions ?? []).filter((action) =>
+    action.errorCode?.startsWith("proton_target_"),
+  );
+  const retryable = (plan?.failedActions ?? []).filter((action) =>
+    action.state === "failed" && !action.errorCode?.startsWith("proton_target_"),
+  );
+  const changedSourceCount = (plan?.failedActions ?? []).filter(
+    (action) => action.state === "verification_mismatch",
+  ).length;
   const canUndo = plan?.job?.state === "succeeded" && !plan.undoJob;
   const trash = mode === "trash";
   return (
@@ -2088,6 +2102,25 @@ const CleanupPanel = ({
                 max={100}
                 value={plan.undoJob?.percent ?? plan.job.percent}
               />
+              {jobTargetBlocked || blockedFailures.length ? (
+                <div className="cleanup-structural-error" role="alert">
+                  <strong>Proton rejected the destination structure</strong>
+                  <small>
+                    No affected messages moved. Sift stopped before continuing;
+                    rebuild the plan after correcting its folder hierarchy.
+                  </small>
+                </div>
+              ) : null}
+              {changedSourceCount ? (
+                <div className="cleanup-structural-error" role="status">
+                  <strong>Mailbox state changed after this plan was built</strong>
+                  <small>
+                    {changedSourceCount.toLocaleString()} actions no longer match
+                    their scanned source message. Run Scan again and rebuild the
+                    cleanup plan instead of retrying them.
+                  </small>
+                </div>
+              ) : null}
               <div className="cleanup-job-actions">
                 {resumable ? (
                   <button
