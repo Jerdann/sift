@@ -1,7 +1,7 @@
 {
   "name": "sift",
   "productName": "Sift",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "A local-first email audit and organization desktop app.",
   "author": "Sift Contributors",
   "private": true,
@@ -22,6 +22,7 @@
     "test": "pnpm test:unit && pnpm test:e2e",
     "audit:public": "node scripts/audit-public.mjs",
     "verify:release": "node scripts/verify-release.mjs",
+    "verify:performance": "pnpm build && node scripts/verify-performance.mjs",
     "build": "vite build --config vite.renderer.config.ts && vite build --config vite.preload.config.ts && vite build --config vite.main.config.ts",
     "package": "electron-forge package --arch=x64",
     "make": "electron-forge make --arch=x64",

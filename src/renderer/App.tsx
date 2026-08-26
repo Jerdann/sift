@@ -8,6 +8,7 @@ import {
   Inbox,
   LockKeyhole,
   ListFilter,
+  LifeBuoy,
   MailPlus,
   Search,
   ShieldCheck,
@@ -58,6 +59,13 @@ import type {
   OutlookConnectionSummary,
 } from "../shared/contracts/outlook";
 import { rankStaleStreams } from "../core/pruning/stale-stream-ranking";
+import type {
+  BackupResult,
+  DiagnosticsExportResult,
+  DiagnosticsSummary,
+  RebuildIndexResult,
+  RestoreResult,
+} from "../shared/contracts/recovery";
 
 const mailCategoryOptions: MailCategory[] = [
   "personal",
@@ -84,7 +92,8 @@ type PageId =
   | "organize"
   | "rules"
   | "unsubscribe"
-  | "delete";
+  | "delete"
+  | "recovery";
 const navItems: ReadonlyArray<{
   id: PageId;
   label: string;
@@ -98,6 +107,7 @@ const navItems: ReadonlyArray<{
   { id: "rules", label: "Rules", icon: ListFilter },
   { id: "unsubscribe", label: "Unsubscribe", icon: Tags },
   { id: "delete", label: "Trash review", icon: Archive },
+  { id: "recovery", label: "Recovery", icon: LifeBuoy },
 ];
 
 const BrandMark = () => (
@@ -392,6 +402,12 @@ interface AppShellProps {
     jobId: string,
     candidateIds: string[],
   ): Promise<void>;
+  diagnostics: DiagnosticsSummary | null;
+  onCheckDiagnostics(): Promise<DiagnosticsSummary>;
+  onExportDiagnostics(): Promise<DiagnosticsExportResult>;
+  onCreateBackup(): Promise<BackupResult>;
+  onRestoreBackup(): Promise<RestoreResult | null>;
+  onRebuildIndex(): Promise<RebuildIndexResult>;
 }
 
 interface ProtonConnectionPanelProps {
@@ -2592,7 +2608,9 @@ const GmailOrganizationPanel = ({
                   <button
                     className="primary-button compact"
                     disabled={busy}
-                    onClick={() => void act(() => onApprove(plan.id, plan.revision))}
+                    onClick={() =>
+                      void act(() => onApprove(plan.id, plan.revision))
+                    }
                   >
                     Resume Microsoft actions
                   </button>
@@ -3301,7 +3319,9 @@ const AccountWorkspace = ({
                   <small>
                     {account.provider === "gmail"
                       ? "Gmail · OAuth connection"
-                      : "Proton Mail · local Bridge connection"}
+                      : account.provider === "outlook"
+                        ? "Outlook / Hotmail · OAuth connection"
+                        : "Proton Mail · local Bridge connection"}
                     {account.connectedAt
                       ? ` · connected ${new Date(account.connectedAt).toLocaleDateString()}`
                       : ""}
@@ -3347,7 +3367,11 @@ const AccountWorkspace = ({
                 key={`cap-${account.id}`}
               >
                 <strong>
-                  {account.provider === "gmail" ? "Gmail" : "Proton"}
+                  {account.provider === "gmail"
+                    ? "Gmail"
+                    : account.provider === "outlook"
+                      ? "Outlook"
+                      : "Proton"}
                 </strong>
                 <span>{account.capabilities.organization}</span>
                 <span>
@@ -4141,6 +4165,277 @@ const RuleReconciliationPanel = ({
   );
 };
 
+const RecoveryPanel = ({
+  diagnostics,
+  onCheck,
+  onExport,
+  onBackup,
+  onRestore,
+  onRebuild,
+}: {
+  diagnostics: DiagnosticsSummary | null;
+  onCheck(): Promise<DiagnosticsSummary>;
+  onExport(): Promise<DiagnosticsExportResult>;
+  onBackup(): Promise<BackupResult>;
+  onRestore(): Promise<RestoreResult | null>;
+  onRebuild(): Promise<RebuildIndexResult>;
+}) => {
+  const [busy, setBusy] = useState<
+    "check" | "export" | "backup" | "restore" | "rebuild" | null
+  >(null);
+  const [restoreConfirmation, setRestoreConfirmation] = useState("");
+  const [rebuildConfirmation, setRebuildConfirmation] = useState("");
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const run = async (action: typeof busy, task: () => Promise<string>) => {
+    if (!action) return;
+    setBusy(action);
+    setError("");
+    try {
+      setNotice(await task());
+    } catch (cause) {
+      setNotice("");
+      setError(cause instanceof Error ? cause.message : "The action failed.");
+    } finally {
+      setBusy(null);
+    }
+  };
+  const indexedTotal = diagnostics
+    ? Object.values(diagnostics.indexedMessages).reduce(
+        (sum, count) => sum + count,
+        0,
+      )
+    : 0;
+
+  return (
+    <>
+      <section
+        className="readiness-panel recovery-panel"
+        aria-labelledby="health-title"
+      >
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">LOCAL HEALTH</p>
+            <h2 id="health-title">Know the workspace is sound</h2>
+          </div>
+          <span className="secured-label">
+            <LockKeyhole size={14} /> Counts only—no mail content
+          </span>
+        </div>
+        {diagnostics ? (
+          <div className="recovery-metrics">
+            <div>
+              <b>{diagnostics.integrity === "ok" ? "PASS" : "FAIL"}</b>
+              <span>database integrity</span>
+            </div>
+            <div>
+              <b>{diagnostics.foreignKeyViolations}</b>
+              <span>relationship errors</span>
+            </div>
+            <div>
+              <b>{indexedTotal.toLocaleString()}</b>
+              <span>indexed messages</span>
+            </div>
+            <div>
+              <b>v{diagnostics.appVersion}</b>
+              <span>Sift version</span>
+            </div>
+          </div>
+        ) : (
+          <p className="recovery-copy">
+            Run a local integrity check before a major cleanup or update. The
+            shareable report contains version, platform, counts, and health
+            results—never addresses, subjects, senders, paths, or credentials.
+          </p>
+        )}
+        <div className="panel-action connection-actions">
+          <button
+            className="primary-button compact"
+            type="button"
+            disabled={busy !== null}
+            onClick={() =>
+              void run("check", async () => {
+                const result = await onCheck();
+                return result.integrity === "ok"
+                  ? "Local database integrity passed."
+                  : "The integrity check found a problem. Create a backup before continuing.";
+              })
+            }
+          >
+            {busy === "check" ? "Checking…" : "Check local health"}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={busy !== null}
+            onClick={() =>
+              void run("export", async () => {
+                const result = await onExport();
+                return result.canceled
+                  ? "Diagnostic export canceled."
+                  : "Content-free diagnostic report saved.";
+              })
+            }
+          >
+            {busy === "export" ? "Exporting…" : "Export safe diagnostics"}
+          </button>
+        </div>
+      </section>
+
+      <section
+        className="readiness-panel recovery-panel"
+        aria-labelledby="backup-title"
+      >
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">ENCRYPTED BACKUP</p>
+            <h2 id="backup-title">
+              Protect the local profile before big changes
+            </h2>
+          </div>
+          <span className="secured-label">
+            <ShieldCheck size={14} /> Windows-protected key
+          </span>
+        </div>
+        <p className="recovery-copy">
+          A backup includes the local index, decisions, connection records, and
+          already-encrypted provider secrets. Its encryption key is protected by
+          Windows, so restore it with the same Windows user on this device.
+          Provider mail itself remains with the provider.
+        </p>
+        <div className="panel-action connection-actions">
+          <button
+            className="primary-button compact"
+            type="button"
+            disabled={busy !== null}
+            onClick={() =>
+              void run("backup", async () => {
+                const result = await onBackup();
+                return result.canceled
+                  ? "Backup canceled."
+                  : `Encrypted backup created (${Math.ceil(result.bytes / 1024).toLocaleString()} KB).`;
+              })
+            }
+          >
+            {busy === "backup" ? "Encrypting…" : "Create encrypted backup"}
+          </button>
+        </div>
+        <div className="recovery-confirmation">
+          <label>
+            <span>Restore confirmation</span>
+            <input
+              value={restoreConfirmation}
+              onChange={(event) => setRestoreConfirmation(event.target.value)}
+              placeholder="Type RESTORE LOCAL PROFILE"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <button
+            className="secondary-button danger"
+            type="button"
+            disabled={
+              busy !== null || restoreConfirmation !== "RESTORE LOCAL PROFILE"
+            }
+            onClick={() =>
+              void run("restore", async () => {
+                const result = await onRestore();
+                setRestoreConfirmation("");
+                return result
+                  ? `Profile restored and verified with ${result.secretFiles} encrypted secret file${result.secretFiles === 1 ? "" : "s"}.`
+                  : "Restore canceled.";
+              })
+            }
+          >
+            {busy === "restore" ? "Restoring…" : "Choose backup and restore"}
+          </button>
+        </div>
+      </section>
+
+      <section
+        className="readiness-panel recovery-panel"
+        aria-labelledby="rebuild-title"
+      >
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">LOCAL INDEX REBUILD</p>
+            <h2 id="rebuild-title">
+              Start the analysis over without touching mail
+            </h2>
+          </div>
+        </div>
+        <p className="recovery-copy">
+          Rebuild clears downloaded metadata, classifications, proposals, and
+          incomplete cleanup jobs. It preserves provider connections, encrypted
+          credentials, Sift-managed rule ownership, unsubscribe history, and all
+          mail held by Proton, Google, or Microsoft. You will need to scan
+          again.
+        </p>
+        <div className="recovery-confirmation">
+          <label>
+            <span>Rebuild confirmation</span>
+            <input
+              value={rebuildConfirmation}
+              onChange={(event) => setRebuildConfirmation(event.target.value)}
+              placeholder="Type REBUILD LOCAL INDEX"
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </label>
+          <button
+            className="secondary-button danger"
+            type="button"
+            disabled={
+              busy !== null || rebuildConfirmation !== "REBUILD LOCAL INDEX"
+            }
+            onClick={() =>
+              void run("rebuild", async () => {
+                const result = await onRebuild();
+                setRebuildConfirmation("");
+                return `Cleared ${result.clearedMessages.toLocaleString()} indexed messages; ${result.preservedConnections} connections and ${result.preservedManagedRules} managed rules preserved.`;
+              })
+            }
+          >
+            {busy === "rebuild" ? "Rebuilding…" : "Rebuild local index"}
+          </button>
+        </div>
+      </section>
+
+      <section
+        className="recovery-guidance"
+        aria-label="Update and removal guidance"
+      >
+        <div>
+          <strong>Updates and rollback</strong>
+          <p>
+            Completed GitHub releases update automatically. If a release causes
+            a problem, create a backup and reinstall an earlier version from the
+            Releases page; the profile schema refuses incompatible restores.
+          </p>
+        </div>
+        <div>
+          <strong>Before uninstalling on a shared computer</strong>
+          <p>
+            Disconnect provider accounts first. Removing Sift may leave its
+            encrypted local profile data in Windows application storage, so do
+            not treat uninstall alone as secure data erasure.
+          </p>
+        </div>
+      </section>
+      {notice ? (
+        <p className="recovery-notice" role="status">
+          {notice}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="connection-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </>
+  );
+};
+
 const AppShell = ({
   profileName,
   onSwitchProfile,
@@ -4227,6 +4522,12 @@ const AppShell = ({
   onStartOutlookUnsubscribe,
   onResumeOutlookUnsubscribe,
   onRetryOutlookUnsubscribe,
+  diagnostics,
+  onCheckDiagnostics,
+  onExportDiagnostics,
+  onCreateBackup,
+  onRestoreBackup,
+  onRebuildIndex,
 }: AppShellProps) => {
   const [activePage, setActivePage] = useState<PageId>("overview");
   const connectedCount = accounts.length;
@@ -4857,6 +5158,23 @@ const AppShell = ({
               )}
             </>
           ) : null}
+
+          {activePage === "recovery" ? (
+            <>
+              {taskIntro(
+                "Keep the pruning workspace recoverable.",
+                "Check local health, export a content-free support report, create an encrypted profile backup, restore safely, or rebuild only the local index when analysis needs a clean start.",
+              )}
+              <RecoveryPanel
+                diagnostics={diagnostics}
+                onCheck={onCheckDiagnostics}
+                onExport={onExportDiagnostics}
+                onBackup={onCreateBackup}
+                onRestore={onRestoreBackup}
+                onRebuild={onRebuildIndex}
+              />
+            </>
+          ) : null}
         </main>
       </div>
     </div>
@@ -4919,6 +5237,9 @@ export const App = () => {
   const [rulePlans, setRulePlans] = useState<
     Record<string, RuleReconciliationPlan | null>
   >({});
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsSummary | null>(
+    null,
+  );
 
   const loadWorkspace = async () => {
     const [
@@ -4942,6 +5263,7 @@ export const App = () => {
       currentOutlookDeletion,
       currentOutlookSubscriptions,
       currentAccounts,
+      currentDiagnostics,
     ] = await Promise.all([
       window.emailOrganizer.getProtonConnection(),
       window.emailOrganizer.getProtonDiscovery(),
@@ -4963,6 +5285,7 @@ export const App = () => {
       window.emailOrganizer.getOutlookDeletionPlan(),
       window.emailOrganizer.getOutlookSubscriptionDashboard(),
       window.emailOrganizer.listMailAccounts(),
+      window.emailOrganizer.getDiagnostics(),
     ]);
     setProtonConnection(connection);
     setProtonDiscovery(discovery);
@@ -4984,6 +5307,7 @@ export const App = () => {
     setOutlookOrganization(currentOutlookOrganization);
     setOutlookDeletion(currentOutlookDeletion);
     setOutlookSubscriptions(currentOutlookSubscriptions);
+    setDiagnostics(currentDiagnostics);
     const identityEntries = await Promise.all(
       currentAccounts.map(
         async (account) =>
@@ -5377,6 +5701,27 @@ export const App = () => {
     });
     setSubscriptions(progress.dashboard);
   };
+  const checkDiagnostics = async () => {
+    const result = await window.emailOrganizer.getDiagnostics();
+    setDiagnostics(result);
+    return result;
+  };
+  const exportDiagnostics = () => window.emailOrganizer.exportDiagnostics();
+  const createBackup = () => window.emailOrganizer.createEncryptedBackup();
+  const restoreBackup = async () => {
+    const result = await window.emailOrganizer.restoreEncryptedBackup({
+      confirmation: "RESTORE LOCAL PROFILE",
+    });
+    if (result) await loadWorkspace();
+    return result;
+  };
+  const rebuildIndex = async () => {
+    const result = await window.emailOrganizer.rebuildLocalIndex({
+      confirmation: "REBUILD LOCAL INDEX",
+    });
+    await loadWorkspace();
+    return result;
+  };
   const updateIdentity = async (input: AccountIdentityUpdateInput) => {
     const updated = await window.emailOrganizer.updateAccountIdentity(input);
     setIdentities((current) => ({
@@ -5658,6 +6003,12 @@ export const App = () => {
       onStartOutlookUnsubscribe={startOutlookUnsubscribe}
       onResumeOutlookUnsubscribe={resumeOutlookUnsubscribe}
       onRetryOutlookUnsubscribe={retryOutlookUnsubscribe}
+      diagnostics={diagnostics}
+      onCheckDiagnostics={checkDiagnostics}
+      onExportDiagnostics={exportDiagnostics}
+      onCreateBackup={createBackup}
+      onRestoreBackup={restoreBackup}
+      onRebuildIndex={rebuildIndex}
     />
   ) : (
     <ProfilePicker

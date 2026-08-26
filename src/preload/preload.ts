@@ -128,6 +128,17 @@ import {
   ruleManagementScopeSchema,
   ruleReconciliationPlanSchema,
 } from "../shared/contracts/rule-management";
+import {
+  type RebuildIndexInput,
+  type RestoreProfileInput,
+  backupResultSchema,
+  diagnosticsExportResultSchema,
+  diagnosticsSummarySchema,
+  rebuildIndexInputSchema,
+  rebuildIndexResultSchema,
+  restoreProfileInputSchema,
+  restoreResultSchema,
+} from "../shared/contracts/recovery";
 
 const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
   getVersion: async () =>
@@ -762,6 +773,34 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
     return () =>
       ipcRenderer.removeListener(IPC_CHANNELS.unsubscribeProgress, wrapped);
   },
+  getDiagnostics: async () =>
+    diagnosticsSummarySchema.parse(
+      await ipcRenderer.invoke(IPC_CHANNELS.recoveryDiagnosticsGet),
+    ),
+  exportDiagnostics: async () =>
+    diagnosticsExportResultSchema.parse(
+      await ipcRenderer.invoke(IPC_CHANNELS.recoveryDiagnosticsExport),
+    ),
+  createEncryptedBackup: async () =>
+    backupResultSchema.parse(
+      await ipcRenderer.invoke(IPC_CHANNELS.recoveryBackupCreate),
+    ),
+  restoreEncryptedBackup: async (input: RestoreProfileInput) =>
+    restoreResultSchema
+      .nullable()
+      .parse(
+        await ipcRenderer.invoke(
+          IPC_CHANNELS.recoveryBackupRestore,
+          restoreProfileInputSchema.parse(input),
+        ),
+      ),
+  rebuildLocalIndex: async (input: RebuildIndexInput) =>
+    rebuildIndexResultSchema.parse(
+      await ipcRenderer.invoke(
+        IPC_CHANNELS.recoveryIndexRebuild,
+        rebuildIndexInputSchema.parse(input),
+      ),
+    ),
 });
 
 contextBridge.exposeInMainWorld("emailOrganizer", bridge);

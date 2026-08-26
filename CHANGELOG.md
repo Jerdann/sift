@@ -4,6 +4,33 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-25
+
+### Added
+
+- A dedicated Recovery workspace with repeatable local database health checks and a content-free JSON diagnostic export that contains version, platform, schema, integrity, and count data only.
+- Authenticated AES-256-GCM local-profile backups whose random keys are protected by the current Windows user's OS encryption, plus same-profile restore with checksum, schema, integrity, foreign-key, and encrypted-secret-set validation.
+- Staged restore with automatic rollback until the restored profile opens successfully.
+- An explicit local-index rebuild that clears downloaded metadata and derived proposals while preserving provider connections, encrypted credentials, managed-rule ownership, unsubscribe history, and all provider mail.
+- Production bundle performance budgets and clean-profile onboarding assertions for independent Gmail, Outlook/Hotmail, and Proton workflows.
+- Public recovery, rollback, uninstall, and shared-computer guidance.
+
+### Changed
+
+- The guided navigation now includes Recovery as its own action-oriented page.
+- Release verification now gates renderer, preload, and main-process bundle sizes in addition to type, unit, Electron, privacy, packaging, and runtime checks.
+
+### Fixed
+
+- Outlook and Hotmail accounts are identified correctly in the shared account list instead of falling through to Proton copy.
+
+### Security
+
+- Backup restore is limited to the same generated local profile and OS-protected key context, rejects oversized or malformed payloads, validates authenticated encryption metadata, and refuses newer unsupported database schemas.
+- Recovery confirmations are schema-locked to exact phrases before restore or index rebuild can run.
+- Diagnostic reports exclude profile IDs, local paths, addresses, domains, subjects, message identifiers, headers, bodies, and secrets by construction and by privacy-canary tests.
+- The production dependency audit reports no known vulnerabilities for v1.0.0.
+
 ## [0.9.0] - 2026-08-25
 
 ### Added
@@ -135,7 +162,8 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 - Arbitrary message participants can no longer become user-owned identities merely by appearing in From, To, Cc, Bcc, Reply-To, or group-recipient fields.
 - Account and identity operations remain restricted to the active local profile through validated IPC contracts.
 
-[Unreleased]: https://github.com/Jerdann/sift/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Jerdann/sift/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Jerdann/sift/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/Jerdann/sift/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Jerdann/sift/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Jerdann/sift/compare/v0.6.0...v0.7.0

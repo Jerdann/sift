@@ -31,20 +31,77 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         name: "Connect through Google’s consent screen",
       }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Connect through Microsoft sign-in" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Connect Proton Bridge" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("OAuth client ID")).toBeVisible();
+    await expect(page.getByLabel("Application (client) ID")).toBeVisible();
+    await expect(page.getByLabel("Bridge local host")).toHaveValue("127.0.0.1");
+    await expect(
+      page.getByRole("button", { name: "Open Google sign-in" }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Open Microsoft sign-in" }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Test connection" }),
+    ).toBeVisible();
     await page.screenshot({
       path: "test-results/accounts-workspace.png",
       fullPage: true,
     });
+    await page.getByRole("button", { name: "Recovery", exact: true }).click();
+    await expect(
+      page.getByRole("heading", {
+        name: "Keep the pruning workspace recoverable.",
+      }),
+    ).toBeVisible();
+    await expect(page.getByText("Counts only—no mail content")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Choose backup and restore" }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("button", { name: "Rebuild local index" }),
+    ).toBeDisabled();
+    await page.screenshot({
+      path: "test-results/recovery-workspace.png",
+      fullPage: true,
+    });
+    const accessibleControls = await page.evaluate(() =>
+      [...document.querySelectorAll("button,input,select")]
+        .filter((element) => {
+          const style = getComputedStyle(element);
+          return style.display !== "none" && style.visibility !== "hidden";
+        })
+        .every((element) => {
+          if (element instanceof HTMLButtonElement) {
+            return Boolean(
+              element.getAttribute("aria-label") ||
+                element.title ||
+                element.textContent?.trim(),
+            );
+          }
+          return Boolean(
+            element.getAttribute("aria-label") ||
+              element.getAttribute("aria-labelledby") ||
+              element.closest("label"),
+          );
+        }),
+    );
+    expect(accessibleControls).toBe(true);
     await expect(
       page.getByRole("button", { name: "Addresses", exact: true }),
     ).toBeVisible();
     await page.setViewportSize({ width: 700, height: 900 });
-    await page.getByRole("button", { name: "Overview", exact: true }).click();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth + 1,
       ),
     ).toBe(true);
+    await page.getByRole("button", { name: "Overview", exact: true }).click();
     await page.screenshot({
       path: "test-results/guided-flow-compact.png",
       fullPage: true,
@@ -76,6 +133,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "connectGmail",
         "connectOutlook",
         "connectProtonBridge",
+        "createEncryptedBackup",
         "createProfile",
         "diagnoseProtonBridge",
         "disconnectGmail",
@@ -83,6 +141,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "disconnectProtonBridge",
         "discoverProtonMailbox",
         "editOrganizationProposal",
+        "exportDiagnostics",
         "exportProtonRulePlan",
         "exportRulePack",
         "generateCleanupPlan",
@@ -94,6 +153,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "generateRulePlan",
         "getCleanupPlan",
         "getCurrentProtonAudit",
+        "getDiagnostics",
         "getGmailAnalysis",
         "getGmailAudit",
         "getGmailConnection",
@@ -129,8 +189,10 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "onProtonAuditProgress",
         "onUnsubscribeProgress",
         "pauseProtonAudit",
+        "rebuildLocalIndex",
         "refreshAccountIdentities",
         "refreshRuleInventory",
+        "restoreEncryptedBackup",
         "resumeBulkUnsubscribe",
         "resumeCleanupPlan",
         "resumeGmailBulkUnsubscribe",

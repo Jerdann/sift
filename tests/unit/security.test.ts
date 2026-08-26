@@ -215,6 +215,11 @@ describe("desktop security boundary", () => {
       "resumeBulkUnsubscribe",
       "retryBulkUnsubscribe",
       "onUnsubscribeProgress",
+      "getDiagnostics",
+      "exportDiagnostics",
+      "createEncryptedBackup",
+      "restoreEncryptedBackup",
+      "rebuildLocalIndex",
     ]);
 
     const preload = readFileSync(resolve("src/preload/preload.ts"), "utf8");

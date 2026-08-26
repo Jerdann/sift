@@ -80,6 +80,15 @@ import type {
   OutlookDisconnectInput,
   OutlookOAuthInput,
 } from "./contracts/outlook";
+import type {
+  BackupResult,
+  DiagnosticsExportResult,
+  DiagnosticsSummary,
+  RebuildIndexInput,
+  RebuildIndexResult,
+  RestoreProfileInput,
+  RestoreResult,
+} from "./contracts/recovery";
 
 export const IPC_CHANNELS = Object.freeze({
   appGetVersion: "app:get-version",
@@ -177,6 +186,11 @@ export const IPC_CHANNELS = Object.freeze({
   unsubscribeScan: "unsubscribe:scan",
   unsubscribeStart: "unsubscribe:start",
   unsubscribeRetry: "unsubscribe:retry",
+  recoveryDiagnosticsGet: "recovery:diagnostics:get",
+  recoveryDiagnosticsExport: "recovery:diagnostics:export",
+  recoveryBackupCreate: "recovery:backup:create",
+  recoveryBackupRestore: "recovery:backup:restore",
+  recoveryIndexRebuild: "recovery:index:rebuild",
 } as const);
 
 export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
@@ -275,6 +289,11 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   "resumeBulkUnsubscribe",
   "retryBulkUnsubscribe",
   "onUnsubscribeProgress",
+  "getDiagnostics",
+  "exportDiagnostics",
+  "createEncryptedBackup",
+  "restoreEncryptedBackup",
+  "rebuildLocalIndex",
 ] as const);
 
 export interface EmailOrganizerBridge {
@@ -451,6 +470,13 @@ export interface EmailOrganizerBridge {
   onUnsubscribeProgress(
     listener: (progress: UnsubscribeProgress) => void,
   ): () => void;
+  getDiagnostics(): Promise<DiagnosticsSummary>;
+  exportDiagnostics(): Promise<DiagnosticsExportResult>;
+  createEncryptedBackup(): Promise<BackupResult>;
+  restoreEncryptedBackup(
+    input: RestoreProfileInput,
+  ): Promise<RestoreResult | null>;
+  rebuildLocalIndex(input: RebuildIndexInput): Promise<RebuildIndexResult>;
 }
 
 declare global {

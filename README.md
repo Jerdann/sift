@@ -13,6 +13,7 @@ The working desktop build supports:
 - Outlook, Hotmail, and Microsoft 365 mail through Microsoft public-client OAuth with PKCE: resumable metadata-only Graph audit, provider-backed aliases, immutable message IDs, nested folders, live inbox-rule reconciliation, verified historical moves, native Junk and recoverable Deleted Items, authenticated one-click unsubscribe, and exact folder/read-state Undo.
 - Provider-neutral local profiles and portable JSON rule packs, so separate people and mailboxes do not share data or credentials.
 - A guided connect → scan → addresses → organize → rules → unsubscribe → Trash flow, with one decision and action stage per page.
+- A Recovery workspace with content-free health reports, same-Windows-user encrypted profile backups, verified restore with rollback, and a local-index rebuild that preserves connections, managed rules, and unsubscribe history.
 
 No permanent deletion is implemented. The final cleanup pass moves only approved stale history to the provider's recoverable Trash. Personal, security, account, transaction, finance, suspicious, uncertain, and mixed-use sender streams are excluded from that pass.
 
@@ -42,9 +43,12 @@ pnpm typecheck
 pnpm test:unit
 pnpm test:e2e
 pnpm test
+pnpm verify:performance
 ```
 
 All fixtures are synthetic. End-to-end tests use a newly generated temporary profile root and remove it after the Electron process closes.
+
+See [Recovery and maintenance](docs/RECOVERY.md) for backup boundaries, verified restore, index rebuild, update rollback, and uninstall guidance.
 
 ## Windows package
 
