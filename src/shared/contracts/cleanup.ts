@@ -3,6 +3,8 @@ import { jobProgressSchema } from './jobs';
 import { mailCategorySchema } from './analysis';
 
 export const cleanupImpactSchema = z.object({
+  scopeAddress: z.string().email().nullable(),
+  containerName: z.string().nullable(),
   category: mailCategorySchema,
   targetFolder: z.string(),
   action: z.enum(['sort_read_archive', 'native_spam', 'native_trash']),
@@ -23,6 +25,7 @@ export const cleanupPlanSchema = z.object({
   spamCount: z.number().int().nonnegative(),
   trashCount: z.number().int().nonnegative(),
   skippedCount: z.number().int().nonnegative(),
+  requiresRebuild: z.boolean(),
   impacts: z.array(cleanupImpactSchema),
   job: jobProgressSchema.nullable(),
   undoJob: jobProgressSchema.nullable(),

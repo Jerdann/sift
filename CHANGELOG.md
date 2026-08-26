@@ -4,6 +4,24 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-26
+
+### Added
+
+- Organize now starts with an existing-setup decision that inventories Proton custom folders and labels, separates “keep current structure” from a staged “start fresh” transition, and requires confirmation that old server-side filters are disabled before continuing with replacement.
+- Proton cleanup previews now present the shared filing tree and every enabled alias container as separate, numbered action sets with their own address, destination, action, and message totals.
+
+### Changed
+
+- Start-fresh planning now sequences migration into the reviewed replacement structure before any legacy-container retirement; populated custom folders are never deleted blind before their messages have a verified destination.
+- Older cleanup plans that selected Proton’s virtual All Mail view are identified as unsafe to resume and instead direct the user to rebuild from the mailbox while preserving already verified actions.
+
+### Fixed
+
+- Proton mailbox discovery now recognizes special-use roles reported in IMAP flags as well as `specialUse`, so the virtual All Mail view can never become a mutable cleanup source.
+- Physical Inbox or folder copies now win deduplication over virtual All Mail copies, preventing Bridge from rejecting an approved batch with `operation not allowed` after earlier Inbox batches succeed.
+- Explicit provider rejections for Seen or Move commands now fail only the affected batch with an actionable error instead of remaining indefinitely paused as an unknown move state.
+
 ## [1.2.1] - 2026-08-26
 
 ### Changed

@@ -991,6 +991,13 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       );
     `,
   },
+  {
+    version: 27,
+    statements: `
+      ALTER TABLE cleanup_actions ADD COLUMN scope_address TEXT;
+      ALTER TABLE cleanup_actions ADD COLUMN container_name TEXT;
+    `,
+  },
 ]);
 
 export const applyMigrations = (

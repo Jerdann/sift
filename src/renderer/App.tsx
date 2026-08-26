@@ -1549,12 +1549,14 @@ const AnalysisPanel = ({
   );
 };
 
-type OrganizationStage = "senders" | "apply";
+type OrganizationStage = "strategy" | "senders" | "apply";
+type OrganizationTransitionMode = "preserve" | "replace";
 
 const organizationStages: ReadonlyArray<{
   id: OrganizationStage;
   label: string;
 }> = [
+  { id: "strategy", label: "Existing setup" },
   { id: "senders", label: "Sender cleanup" },
   { id: "apply", label: "Apply history" },
 ];
@@ -1606,6 +1608,7 @@ const senderRecommendation = (
 
 const ProtonOrganizationFlow = ({
   audit,
+  discovery,
   analysis,
   cleanupPlan,
   onAnalyze,
@@ -1617,6 +1620,7 @@ const ProtonOrganizationFlow = ({
   onContinue,
 }: {
   audit: ProtonAuditProgress | null;
+  discovery: ProtonDiscoverySummary | null;
   analysis: MailboxAnalysisSummary | null;
   cleanupPlan: CleanupPlan | null;
   onAnalyze(): Promise<void>;
@@ -1627,7 +1631,10 @@ const ProtonOrganizationFlow = ({
   onUndoCleanup(planId: string): Promise<void>;
   onContinue(): void;
 }) => {
-  const [stage, setStage] = useState<OrganizationStage>("senders");
+  const [stage, setStage] = useState<OrganizationStage>("strategy");
+  const [transitionMode, setTransitionMode] =
+    useState<OrganizationTransitionMode>("preserve");
+  const [filtersHandled, setFiltersHandled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [senderLimit, setSenderLimit] = useState(25);
@@ -1638,7 +1645,7 @@ const ProtonOrganizationFlow = ({
     setError("");
     try {
       await onAnalyze();
-      setStage("senders");
+      setStage("strategy");
     } catch {
       setError(
         "Sift could not rebuild the proposal. The saved scan is still available; try again.",
@@ -1710,6 +1717,17 @@ const ProtonOrganizationFlow = ({
       )
       .map((identity) => [identity.address, identity.containerName!.trim()]),
   );
+  const customFolders =
+    discovery?.mailboxes.filter((mailbox) =>
+      mailbox.path.toLowerCase().startsWith(`folders${mailbox.delimiter}`),
+    ) ?? [];
+  const customLabels =
+    discovery?.mailboxes.filter((mailbox) =>
+      mailbox.path.toLowerCase().startsWith(`labels${mailbox.delimiter}`),
+    ) ?? [];
+  const populatedLegacyContainers = [...customFolders, ...customLabels].filter(
+    (mailbox) => mailbox.messageCount > 0,
+  ).length;
 
   return (
     <>
@@ -1761,10 +1779,91 @@ const ProtonOrganizationFlow = ({
           ))}
         </nav>
 
-        {stage === "senders" ? (
+        {stage === "strategy" ? (
           <div className="organization-stage">
             <div className="stage-intro">
               <span>1</span>
+              <div>
+                <h3>Choose how Sift transitions the existing organization</h3>
+                <p>
+                  Proton Bridge exposes {customFolders.length} custom folders
+                  and {customLabels.length} labels. Server-side Proton filters
+                  are not visible through Bridge, so replacing an old setup
+                  includes one explicit manual filter step.
+                </p>
+              </div>
+            </div>
+            <div className="organization-strategy-grid">
+              <button
+                type="button"
+                className={transitionMode === "preserve" ? "active" : ""}
+                onClick={() => {
+                  setTransitionMode("preserve");
+                  setFiltersHandled(false);
+                }}
+              >
+                <span>Keep current structure</span>
+                <strong>Add Sift beside it</strong>
+                <small>
+                  Existing folders and labels remain. New shared and
+                  alias-specific filing destinations are created as needed.
+                </small>
+              </button>
+              <button
+                type="button"
+                className={transitionMode === "replace" ? "active" : ""}
+                onClick={() => setTransitionMode("replace")}
+              >
+                <span>Start fresh</span>
+                <strong>Replace the old organization</strong>
+                <small>
+                  Inventory the old setup, disable its filters, migrate mail
+                  into the approved Sift structure, then retire legacy folders
+                  and labels after verification.
+                </small>
+              </button>
+            </div>
+            {transitionMode === "replace" ? (
+              <div className="organization-reset-plan">
+                <div>
+                  <span>Detected legacy structure</span>
+                  <strong>
+                    {customFolders.length} folders · {customLabels.length} labels
+                  </strong>
+                  <small>
+                    {populatedLegacyContainers} currently contain messages.
+                    Proton system folders are always protected.
+                  </small>
+                </div>
+                <ol>
+                  <li>Snapshot the current structure for recovery.</li>
+                  <li>Disable old server-side filters in Proton settings.</li>
+                  <li>Create and verify the approved replacement structure.</li>
+                  <li>Move history, then remove obsolete custom containers.</li>
+                </ol>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={filtersHandled}
+                    onChange={(event) => setFiltersHandled(event.target.checked)}
+                  />
+                  <span>
+                    <strong>I disabled the old Proton filters</strong>
+                    <small>
+                      This prevents an existing rule from filing new mail into
+                      a legacy folder while Sift performs the transition.
+                    </small>
+                  </span>
+                </label>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {stage === "senders" ? (
+          <div className="organization-stage">
+            <div className="stage-intro">
+              <span>2</span>
               <div>
                 <h3>Catch the largest and stalest sender streams</h3>
                 <p>
@@ -1837,7 +1936,7 @@ const ProtonOrganizationFlow = ({
         {stage === "apply" ? (
           <div className="organization-stage">
             <div className="stage-intro">
-              <span>2</span>
+              <span>3</span>
               <div>
                 <h3>Apply the approved structure to existing Proton history</h3>
                 <p>
@@ -1863,6 +1962,11 @@ const ProtonOrganizationFlow = ({
             <button
               className="primary-button compact"
               type="button"
+              disabled={
+                stage === "strategy" &&
+                transitionMode === "replace" &&
+                !filtersHandled
+              }
               onClick={() => setStage(organizationStages[stageIndex + 1]!.id)}
             >
               Continue to{" "}
@@ -1927,7 +2031,9 @@ const CleanupPanel = ({
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(
-        message.includes("proton_target_rejected")
+        message.includes("cleanup_plan_virtual_source_rebuild_required")
+          ? "This plan came from an older scan that treated Proton All Mail as movable. Rebuild the mailbox analysis and cleanup preview; the 19 completed actions remain recorded."
+          : message.includes("proton_target_rejected")
           ? "Proton rejected a required folder. No messages moved. Rebuild this plan after checking the proposed folder hierarchy."
           : message.includes("proton_bridge_unavailable")
             ? "Proton Bridge became unavailable. No unverified work will continue; reopen Bridge, then resume from the checkpoint."
@@ -1939,18 +2045,66 @@ const CleanupPanel = ({
   };
   const running = plan?.job?.state === "running";
   const jobTargetBlocked = plan?.job?.errorCode?.startsWith("proton_target_") ?? false;
-  const resumable = plan?.job?.state === "pending" && plan.state !== "draft" && !jobTargetBlocked;
+  const resumable = plan?.job?.state === "pending" && plan.state !== "draft" && !jobTargetBlocked && !plan.requiresRebuild;
   const blockedFailures = (plan?.failedActions ?? []).filter((action) =>
     action.errorCode?.startsWith("proton_target_"),
   );
-  const retryable = (plan?.failedActions ?? []).filter((action) =>
-    action.state === "failed" && !action.errorCode?.startsWith("proton_target_"),
-  );
+  const retryable = plan?.requiresRebuild
+    ? []
+    : (plan?.failedActions ?? []).filter((action) =>
+        action.state === "failed" && !action.errorCode?.startsWith("proton_target_"),
+      );
   const changedSourceCount = (plan?.failedActions ?? []).filter(
     (action) => action.state === "verification_mismatch",
   ).length;
   const canUndo = plan?.job?.state === "succeeded" && !plan.undoJob;
   const trash = mode === "trash";
+  const impactGroups = (() => {
+    if (!plan) return [];
+    if (trash) {
+      return [{
+        key: "trash",
+        eyebrow: "Selected stale history",
+        title: "Proton Trash",
+        detail: "One reversible provider action set.",
+        impacts: plan.impacts,
+      }];
+    }
+    const groups: Array<{
+      key: string;
+      eyebrow: string;
+      title: string;
+      detail: string;
+      impacts: CleanupPlan["impacts"];
+    }> = [];
+    const shared = plan.impacts.filter((impact) => !impact.containerName);
+    if (shared.length) {
+      groups.push({
+        key: "shared",
+        eyebrow: "Action set 1 · Shared mailbox structure",
+        title: "General filing tree",
+        detail: "Mail not routed into a dedicated alias container is filed into these shared destinations.",
+        impacts: shared,
+      });
+    }
+    const byContainer = new Map<string, CleanupPlan["impacts"]>();
+    for (const impact of plan.impacts.filter((candidate) => candidate.containerName)) {
+      const key = `${impact.scopeAddress ?? "unknown"}:${impact.containerName}`;
+      byContainer.set(key, [...(byContainer.get(key) ?? []), impact]);
+    }
+    let setNumber = groups.length + 1;
+    for (const [key, impacts] of byContainer) {
+      groups.push({
+        key,
+        eyebrow: `Action set ${setNumber} · Alias container`,
+        title: impacts[0]?.containerName ?? "Dedicated alias",
+        detail: `${impacts[0]?.scopeAddress ?? "Selected alias"} is filed beneath this dedicated container. These are additional moves, separate from the shared filing set.`,
+        impacts,
+      });
+      setNumber += 1;
+    }
+    return groups;
+  })();
   return (
     <section
       className="readiness-panel cleanup-panel"
@@ -2013,34 +2167,54 @@ const CleanupPanel = ({
               <span>left untouched</span>
             </div>
           </div>
-          <div
-            className="proposal-table"
-            role="table"
-            aria-label="Cleanup impact"
-          >
-            <div className="cleanup-impact-row cleanup-impact-head">
-              <span>Category</span>
-              <span>Destination</span>
-              <span>Action</span>
-              <span>Messages</span>
-            </div>
-            {plan.impacts.map((impact) => (
-              <div
-                className="cleanup-impact-row"
-                key={`${impact.category}:${impact.targetFolder}`}
-              >
-                <strong>{impact.category}</strong>
-                <span>{impact.targetFolder}</span>
-                <small>
-                  {impact.action === "native_spam"
-                    ? "Report / move to Spam"
-                    : impact.action === "native_trash"
-                      ? "Move to provider Trash"
-                      : "Mark read · move · archive"}
-                </small>
-                <b>{impact.messageCount.toLocaleString()}</b>
-              </div>
-            ))}
+          <div className="cleanup-impact-groups">
+            {impactGroups.map((group) => {
+              const messageCount = group.impacts.reduce(
+                (sum, impact) => sum + impact.messageCount,
+                0,
+              );
+              return (
+                <section className="cleanup-impact-group" key={group.key}>
+                  <header>
+                    <div>
+                      <span>{group.eyebrow}</span>
+                      <strong>{group.title}</strong>
+                      <small>{group.detail}</small>
+                    </div>
+                    <b>{messageCount.toLocaleString()} messages</b>
+                  </header>
+                  <div
+                    className="proposal-table"
+                    role="table"
+                    aria-label={`${group.title} cleanup impact`}
+                  >
+                    <div className="cleanup-impact-row cleanup-impact-head">
+                      <span>Category</span>
+                      <span>Destination</span>
+                      <span>Exact action</span>
+                      <span>Messages</span>
+                    </div>
+                    {group.impacts.map((impact) => (
+                      <div
+                        className="cleanup-impact-row"
+                        key={`${impact.scopeAddress}:${impact.category}:${impact.targetFolder}`}
+                      >
+                        <strong>{impact.category}</strong>
+                        <span>{impact.targetFolder}</span>
+                        <small>
+                          {impact.action === "native_spam"
+                            ? "Report / move to Spam"
+                            : impact.action === "native_trash"
+                              ? "Move to provider Trash"
+                              : "Mark read · move · archive"}
+                        </small>
+                        <b>{impact.messageCount.toLocaleString()}</b>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
           </div>
           {plan.state === "draft" ? (
             <div className="cleanup-approval">
@@ -2055,7 +2229,7 @@ const CleanupPanel = ({
                   <small>
                     {trash
                       ? "Move only the listed non-critical messages into Proton’s native Trash folder. Nothing is permanently erased."
-                      : "Create the listed folders, mark selected messages read, move/archive them, and route only the listed high-confidence junk through Proton Spam."}
+                      : `Apply ${impactGroups.length} independent action ${impactGroups.length === 1 ? "set" : "sets"}: create the listed destinations, then mark read, move, and archive only the messages shown in each set.`}
                   </small>
                 </span>
               </label>
@@ -2102,6 +2276,16 @@ const CleanupPanel = ({
                 max={100}
                 value={plan.undoJob?.percent ?? plan.job.percent}
               />
+              {plan.requiresRebuild ? (
+                <div className="cleanup-structural-error" role="alert">
+                  <strong>Rebuild this older cleanup plan</strong>
+                  <small>
+                    Its scan selected Proton’s virtual All Mail view as a move
+                    source. Sift will not resume it. Rebuild the mailbox analysis
+                    and preview; already verified actions remain recorded.
+                  </small>
+                </div>
+              ) : null}
               {jobTargetBlocked || blockedFailures.length ? (
                 <div className="cleanup-structural-error" role="alert">
                   <strong>Proton rejected the destination structure</strong>
@@ -5502,6 +5686,7 @@ const AppShell = ({
                   ))}
                   <ProtonOrganizationFlow
                     audit={protonAudit}
+                    discovery={protonDiscovery}
                     analysis={analysis}
                     cleanupPlan={cleanupPlan}
                     onAnalyze={onAnalyzeMailbox}

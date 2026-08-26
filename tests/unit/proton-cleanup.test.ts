@@ -137,6 +137,60 @@ describe('approved Proton cleanup', () => {
     expect(cleanupActionErrorCode(new Error('operation not allowed'))).toBe('provider_action_failed');
   });
 
+  it('never builds mutable actions from a mailbox carrying the virtual All role in flags', () => {
+    const current = setup();
+    const virtualId = '62cb8ee0-794d-4076-9a7f-98261cb796c4';
+    current.profile.database.prepare(`
+      INSERT INTO mail_containers(
+        id,connection_id,profile_id,provider_container_id,display_name,delimiter,
+        special_use,flags_json,message_count,unread_count,uid_validity,uid_next,observed_at
+      ) VALUES (?,?,?,?,?,'/',NULL,'["\\\\All","\\\\Noinferiors"]',1,1,'9',2,'2026-08-26T12:00:00.000Z')
+    `).run(virtualId, current.connection.id, current.profile.profile.id, 'All Mail', 'All Mail');
+    current.profile.database.prepare(`
+      INSERT INTO indexed_messages(
+        id,connection_id,container_id,uid_validity,uid,message_id,received_at,subject,
+        sender_json,recipients_json,headers_json,flags_json,size_bytes,body_text,body_truncated,indexed_at
+      ) VALUES (?,?,?,'9',1,'<virtual-only>','2026-08-25T12:00:00.000Z','Social digest',
+        '["notice@network.example"]','["owner@pm.test"]','{"delivered-to":"owner@pm.test"}','[]',100,NULL,0,'2026-08-26T12:00:00.000Z')
+    `).run('f2ecf443-3df0-41c3-8e0d-d315fc87316f', current.connection.id, virtualId);
+    analyzeMailbox(current.profile.database, current.profile.profile.id, current.connection.id);
+    new OrganizationProposalRepository(current.profile.database, current.profile.profile.id)
+      .generate('proton', current.connection.id);
+
+    const plan = current.plans.generate(current.connection.id, {
+      kind: 'organize', containers: {}, trashSenderDomains: [],
+    });
+    expect((current.profile.database.prepare(
+      "SELECT COUNT(*) count FROM cleanup_actions WHERE plan_id=? AND source_path='All Mail'",
+    ).get(plan.id) as { count: number }).count).toBe(0);
+    expect(plan.skippedCount).toBeGreaterThan(0);
+    current.profile.database.close();
+  });
+
+  it('blocks an older saved plan that contains a virtual All Mail source', () => {
+    const current = setup();
+    current.profile.database.prepare(`
+      INSERT INTO mail_containers(
+        id,connection_id,profile_id,provider_container_id,display_name,delimiter,
+        special_use,flags_json,message_count,unread_count,uid_validity,uid_next,observed_at
+      ) VALUES ('41d82cc6-588a-4cf0-bdf1-3709ce88f0d8',?,?, 'All Mail','All Mail','/',NULL,
+        '["\\\\All"]',4,4,'9',5,'2026-08-26T12:00:00.000Z')
+    `).run(current.connection.id, current.profile.profile.id);
+    const plan = current.plans.generate(current.connection.id, {
+      kind: 'organize', containers: {}, trashSenderDomains: [],
+    });
+    current.profile.database.prepare(`
+      UPDATE cleanup_actions SET source_path='All Mail' WHERE id=(
+        SELECT id FROM cleanup_actions WHERE plan_id=? ORDER BY rowid LIMIT 1
+      )
+    `).run(plan.id);
+
+    expect(current.plans.get(plan.id).requiresRebuild).toBe(true);
+    expect(() => current.plans.assertMutableSources(plan.id))
+      .toThrow('cleanup_plan_virtual_source_rebuild_required');
+    current.profile.database.close();
+  });
+
   it('uses the corrected address-scoped proposal instead of raw classifier destinations', () => {
     const current = setup();
     const proposals = new OrganizationProposalRepository(current.profile.database, current.profile.profile.id);
@@ -151,7 +205,10 @@ describe('approved Proton cleanup', () => {
       enabled: true,
     });
     const plan = current.plans.generate(current.connection.id, { kind: 'organize', containers: {}, trashSenderDomains: [] });
-    expect(plan.impacts).toContainEqual(expect.objectContaining({ category: 'accounts', targetFolder: 'Primary/Important/Joint accounts', messageCount: 2 }));
+    expect(plan.impacts).toContainEqual(expect.objectContaining({
+      scopeAddress: 'owner@pm.test', containerName: 'Primary', category: 'accounts',
+      targetFolder: 'Primary/Important/Joint accounts', messageCount: 2,
+    }));
     current.profile.database.close();
   });
 

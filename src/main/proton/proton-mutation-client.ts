@@ -95,11 +95,12 @@ export class ImapFlowMutationClient implements ProtonMutationClientPort {
     const lock = await this.#client.getMailboxLock(sourcePath, { description: 'Sift approved cleanup' });
     try {
       const seen = await this.#client.messageFlagsAdd([...uids], ['\\Seen'], { uid: true });
-      if (!seen) return pointers;
+      if (!seen) throw new Error('provider_seen_rejected');
       const moved = await this.#client.messageMove([...uids], targetPath, { uid: true });
-      uidMap = moved ? moved.uidMap : undefined;
+      if (!moved) throw new Error('provider_move_rejected');
+      uidMap = moved.uidMap;
     } finally { lock.release(); }
-    if (!uidMap?.size) return pointers;
+    if (!uidMap?.size) throw new Error('provider_move_receipt_missing');
     for (const sourceUid of uids) {
       const targetUid = uidMap.get(sourceUid);
       if (targetUid) pointers.set(sourceUid, { path: targetPath, uid: targetUid });

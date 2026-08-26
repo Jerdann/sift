@@ -30,6 +30,10 @@ export const cleanupTargetErrorCode = (error: unknown): string => {
 export const cleanupActionErrorCode = (error: unknown): string => {
   const message = providerMessage(error);
   if (
+    message.includes('provider_seen_rejected') ||
+    message.includes('provider_move_rejected')
+  ) return 'provider_action_rejected';
+  if (
     message.includes('econnrefused') ||
     message.includes('connection closed') ||
     message.includes('timeout')
@@ -63,6 +67,7 @@ export class CleanupRunner {
   }
 
   async prepareTargets(planId: string): Promise<void> {
+    this.#plans.assertMutableSources(planId);
     const credentials = this.#connections.getCredentials();
     if (!credentials) throw new Error('proton_not_connected');
     const client = await this.#createClient(credentials);
@@ -89,6 +94,7 @@ export class CleanupRunner {
     const credentials = this.#connections.getCredentials();
     if (!credentials) throw new Error('proton_not_connected');
     const planId = this.#plans.planIdForJob(jobId);
+    this.#plans.assertMutableSources(planId);
     const client = await this.#createClient(credentials);
     const targets = new Map<string, string>();
     try {
@@ -210,7 +216,13 @@ export class CleanupRunner {
               targets.set(targetKey, target);
             }
             pointers = await client.moveMany(representative.sourcePath, ready.map(({ action }) => action.uid), target);
-          } catch {
+          } catch (error) {
+            const errorCode = cleanupActionErrorCode(error);
+            if (errorCode === 'provider_action_rejected') {
+              for (const { item, action } of ready) this.#failAction(item.id, action.id, errorCode);
+              this.#emit(planId);
+              continue;
+            }
             this.#jobs.requeueRunning(jobId, 'provider_move_state_unknown');
             verificationDeferred = true;
             this.#emit(planId);

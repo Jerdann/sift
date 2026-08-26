@@ -40,7 +40,8 @@ export const analyzeMailbox = (
     WHERE indexed_messages.connection_id = ?
     ORDER BY indexed_messages.received_at DESC,
       CASE WHEN lower(mail_containers.provider_container_id) = 'inbox' THEN 0
-           WHEN lower(COALESCE(mail_containers.special_use, '')) = '\\all' THEN 2
+           WHEN lower(COALESCE(mail_containers.special_use, '')) = '\\all'
+             OR lower(mail_containers.flags_json) LIKE '%\\\\all%' THEN 2
            ELSE 1 END,
       indexed_messages.uid DESC
   `).all(connectionId) as IndexedRow[];

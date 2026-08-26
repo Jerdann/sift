@@ -42,4 +42,19 @@ describe('Proton mutation folder namespace', () => {
     await expect(client.prepareTarget('Games', false)).resolves.toBe('Folders/Games');
     expect(mailboxCreate).not.toHaveBeenCalled();
   });
+
+  it('turns an explicit provider MOVE rejection into a safe item failure', async () => {
+    const release = vi.fn();
+    const imap = {
+      getMailboxLock: vi.fn(async () => ({ release })),
+      messageFlagsAdd: vi.fn(async () => true),
+      messageMove: vi.fn(async () => false),
+    } as unknown as ImapFlow;
+    const client = new ImapFlowMutationClient(imap);
+
+    await expect(client.moveMany('All Mail', [42], 'Folders/Social')).rejects.toThrow(
+      'provider_move_rejected',
+    );
+    expect(release).toHaveBeenCalledOnce();
+  });
 });

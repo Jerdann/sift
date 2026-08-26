@@ -52,7 +52,7 @@ describe('local mailbox analysis', () => {
       capabilities: ['IMAP4rev1'],
       mailboxes: [
         { path: 'INBOX', name: 'Inbox', delimiter: '/', specialUse: '\\Inbox', flags: [], messageCount: 3, unreadCount: 3, uidValidity: '1', uidNext: 4 },
-        { path: 'All Mail', name: 'All Mail', delimiter: '/', specialUse: '\\All', flags: [], messageCount: 1, unreadCount: 1, uidValidity: '2', uidNext: 2 },
+        { path: 'All Mail', name: 'All Mail', delimiter: '/', specialUse: null, flags: ['\\All'], messageCount: 1, unreadCount: 1, uidValidity: '2', uidNext: 2 },
         { path: 'Sent', name: 'Sent', delimiter: '/', specialUse: '\\Sent', flags: [], messageCount: 1, unreadCount: 0, uidValidity: '3', uidNext: 2 },
       ],
       addresses: [
@@ -94,6 +94,12 @@ describe('local mailbox analysis', () => {
     }
     const result = analyzeMailbox(profile.database, profileId, connection.id);
     expect(result.uniqueMessages).toBe(4);
+    expect(profile.database.prepare(`
+      SELECT mc.provider_container_id path FROM message_classifications c
+      JOIN indexed_messages im ON im.id=c.message_row_id
+      JOIN mail_containers mc ON mc.id=im.container_id
+      WHERE c.canonical_key=(SELECT canonical_key FROM message_classifications WHERE message_row_id=? LIMIT 1)
+    `).get('fa2570e3-bdef-4d41-8931-301ba7185801')).toEqual({ path: 'INBOX' });
     expect(result.categories.map((item) => [item.category, item.messageCount])).toEqual(expect.arrayContaining([
       ['transactions', 1], ['security', 1], ['promotions', 1],
     ]));

@@ -16,12 +16,14 @@ interface CandidateRow {
   receiving_addresses_json: string;
   source_path: string;
   special_use: string | null;
+  container_flags_json: string;
   uid_validity: string;
   uid: number;
 }
 
 interface ProposalItemRow {
   scope_address: string | null;
+  container_name: string | null;
   source_category: MailCategory;
   category: MailCategory;
   target_path: string;
@@ -76,7 +78,8 @@ export class CleanupPlanRepository {
     const candidates = this.#database.prepare(`
       SELECT ma.id AS analysis_id, mc.message_row_id, mc.canonical_key,
              mc.category, mc.sender_domain, mc.confidence, mc.receiving_addresses_json, im.uid_validity, im.uid,
-             containers.provider_container_id AS source_path, containers.special_use
+             containers.provider_container_id AS source_path, containers.special_use,
+             containers.flags_json AS container_flags_json
       FROM mailbox_analyses ma
       JOIN message_classifications mc ON mc.analysis_id = ma.id
       JOIN indexed_messages im ON im.id = mc.message_row_id
@@ -89,7 +92,7 @@ export class CleanupPlanRepository {
     const proposal = input.kind === 'organize' ? this.#database.prepare("SELECT id,revision FROM organization_proposals WHERE profile_id=? AND provider='proton' AND connection_id=? AND state='draft' ORDER BY updated_at DESC,rowid DESC LIMIT 1")
       .get(this.#profileId, connectionId) as { id: string; revision: string } | undefined : undefined;
     if (input.kind === 'organize' && !proposal) throw new Error('organization_proposal_required');
-    const proposalItems = proposal ? this.#database.prepare('SELECT scope_address,source_category,category,target_path,enabled FROM organization_proposal_items WHERE proposal_id=?')
+    const proposalItems = proposal ? this.#database.prepare('SELECT scope_address,container_name,source_category,category,target_path,enabled FROM organization_proposal_items WHERE proposal_id=?')
       .all(proposal.id) as ProposalItemRow[] : [];
     const proposalBySource = new Map<string, ProposalItemRow[]>();
     for (const item of proposalItems) proposalBySource.set(item.source_category, [...(proposalBySource.get(item.source_category) ?? []), item]);
@@ -100,10 +103,14 @@ export class CleanupPlanRepository {
         .filter((item) => !item.scope_address || receiving.has(item.scope_address.toLowerCase()))
         .sort((left, right) => Number(Boolean(right.scope_address)) - Number(Boolean(left.scope_address)) || (left.scope_address ?? '').localeCompare(right.scope_address ?? ''))[0] ?? null;
     };
-    const excludedSpecialUse = new Set(['\\all', '\\sent', '\\drafts', '\\trash', '\\junk']);
+    const excludedContainerRoles = new Set(['\\all', '\\sent', '\\drafts', '\\trash', '\\junk']);
     const trashDomains = new Set(input.trashSenderDomains.map((domain) => domain.toLowerCase()));
     const actionable = candidates.filter((candidate) => {
-      if (excludedSpecialUse.has(candidate.special_use?.toLowerCase() ?? '')) return false;
+      const roles = new Set([
+        candidate.special_use?.toLowerCase() ?? '',
+        ...(JSON.parse(candidate.container_flags_json) as string[]).map((flag) => flag.toLowerCase()),
+      ]);
+      if ([...roles].some((role) => excludedContainerRoles.has(role))) return false;
       if (input.kind === 'trash') {
         return trashDomains.has(candidate.sender_domain.toLowerCase()) &&
           !['personal', 'security', 'accounts', 'transactions', 'finance', 'suspicious'].includes(candidate.category);
@@ -118,6 +125,8 @@ export class CleanupPlanRepository {
       const categoryPath = item?.target_path ?? CATEGORY_PRESENTATION[effectiveCategory].folder;
       return {
         ...candidate,
+        scopeAddress: item?.scope_address ?? null,
+        containerName: item?.container_name ?? null,
         category: effectiveCategory,
         targetPath: input.kind === 'trash' ? 'Trash' : effectiveCategory === 'spam' ? 'Spam' : categoryPath,
         actionKind: input.kind === 'trash' ? 'native_trash' as const : effectiveCategory === 'spam' ? 'native_spam' as const : 'sort_read_archive' as const,
@@ -137,13 +146,15 @@ export class CleanupPlanRepository {
       const insert = this.#database.prepare(`
         INSERT INTO cleanup_actions(
           id, plan_id, message_row_id, canonical_key, category, source_path,
-          uid_validity, uid, target_path, action_kind, state, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+          uid_validity, uid, target_path, action_kind, scope_address, container_name,
+          state, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
       `);
       for (const action of actionValues) {
         insert.run(
           this.#createId(), planId, action.message_row_id, action.canonical_key, action.category,
-          action.source_path, action.uid_validity, action.uid, action.targetPath, action.actionKind, timestamp,
+          action.source_path, action.uid_validity, action.uid, action.targetPath, action.actionKind,
+          action.scopeAddress, action.containerName, timestamp,
         );
       }
     })();
@@ -173,11 +184,24 @@ export class CleanupPlanRepository {
     } | undefined;
     if (!row) throw new Error('Cleanup plan was not found');
     const impacts = this.#database.prepare(`
-      SELECT category, target_path, action_kind, COUNT(*) AS message_count
+      SELECT scope_address,container_name,category, target_path, action_kind, COUNT(*) AS message_count
       FROM cleanup_actions WHERE plan_id = ?
-      GROUP BY category, target_path, action_kind ORDER BY message_count DESC
-    `).all(planId) as Array<{ category: MailCategory; target_path: string; action_kind: 'sort_read_archive' | 'native_spam' | 'native_trash'; message_count: number }>;
+      GROUP BY scope_address,container_name,category,target_path,action_kind
+      ORDER BY CASE WHEN container_name IS NULL THEN 0 ELSE 1 END,container_name,message_count DESC
+    `).all(planId) as Array<{ scope_address: string | null; container_name: string | null; category: MailCategory; target_path: string; action_kind: 'sort_read_archive' | 'native_spam' | 'native_trash'; message_count: number }>;
     const actionCount = impacts.reduce((sum, impact) => sum + impact.message_count, 0);
+    const requiresRebuild = Boolean(this.#database.prepare(`
+      SELECT 1 FROM cleanup_actions ca
+      JOIN cleanup_plans cp ON cp.id=ca.plan_id
+      JOIN mail_containers mc ON mc.connection_id=cp.connection_id
+        AND lower(mc.provider_container_id)=lower(ca.source_path)
+      WHERE ca.plan_id=? AND ca.state!='succeeded'
+        AND (
+          lower(COALESCE(mc.special_use,''))='\\all'
+          OR lower(mc.flags_json) LIKE '%\\\\all%'
+        )
+      LIMIT 1
+    `).get(planId));
     return cleanupPlanSchema.parse({
       id: row.id,
       connectionId: row.connection_id,
@@ -192,7 +216,10 @@ export class CleanupPlanRepository {
       spamCount: impacts.filter((impact) => impact.action_kind === 'native_spam').reduce((sum, impact) => sum + impact.message_count, 0),
       trashCount: impacts.filter((impact) => impact.action_kind === 'native_trash').reduce((sum, impact) => sum + impact.message_count, 0),
       skippedCount: row.skipped_count,
+      requiresRebuild,
       impacts: impacts.map((impact) => ({
+        scopeAddress: impact.scope_address,
+        containerName: impact.container_name,
         category: impact.category,
         targetFolder: impact.target_path,
         action: impact.action_kind,
@@ -210,6 +237,12 @@ export class CleanupPlanRepository {
         errorCode: action.error_code,
       })),
     });
+  }
+
+  assertMutableSources(planId: string): void {
+    if (this.get(planId).requiresRebuild) {
+      throw new Error('cleanup_plan_virtual_source_rebuild_required');
+    }
   }
 
   approve(planId: string, revision: string): CleanupPlan {
