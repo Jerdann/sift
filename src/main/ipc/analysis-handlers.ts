@@ -24,6 +24,7 @@ import { assertTrustedIpcSender } from "../window-security";
 import {
   exportProtonRulePlanSchema,
   protonRuleExportResultSchema,
+  ruleReconciliationPlanSchema,
 } from "../../shared/contracts/rule-management";
 import { RuleReconciliationRepository } from "../rules/rule-reconciliation-repository";
 import { OutlookConnectionRepository } from "../outlook/outlook-connection-repository";
@@ -189,11 +190,21 @@ export const registerAnalysisHandlers = ({
       ),
     });
   });
+  ipcMain.handle(IPC_CHANNELS.rulePlanConfirmProton, (event, rawInput) => {
+    trust(event);
+    const input = exportProtonRulePlanSchema.parse(rawInput);
+    const context = profileSession.requireActiveContext();
+    return ruleReconciliationPlanSchema.parse(
+      new RuleReconciliationRepository(context.database, context.profile.id)
+        .confirmProtonImport(input.planId, input.revision),
+    );
+  });
 
   return () => {
     ipcMain.removeHandler(IPC_CHANNELS.analysisGet);
     ipcMain.removeHandler(IPC_CHANNELS.analysisRun);
     ipcMain.removeHandler(IPC_CHANNELS.rulesExport);
     ipcMain.removeHandler(IPC_CHANNELS.rulePlanExportProton);
+    ipcMain.removeHandler(IPC_CHANNELS.rulePlanConfirmProton);
   };
 };

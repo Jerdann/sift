@@ -110,6 +110,56 @@ describe('provider rule inventory and reconciliation', () => {
     profile.database.close();
   });
 
+  it('can explicitly replace unmatched external rules while retaining exact matches', () => {
+    const { profile, connection, rules } = setup();
+    const desired = rules.desired('gmail', connection.id).rules;
+    const exact = providerSnapshot('existing-exact', desired[0]!);
+    const unrelated = {
+      providerRuleId: 'external-unrelated',
+      fingerprint: sha256('external-unrelated'),
+      criteria: { from: '@old-noise.example', to: null, subject: null, query: null, negatedQuery: null, hasAttachment: null },
+      action: { addLabels: ['Old'], removeLabels: [] },
+    };
+    rules.saveInventory('gmail', connection.id, 'live_api', [exact, unrelated], 1_000, ['INBOX', 'Old']);
+
+    const plan = rules.generate('gmail', connection.id, true);
+    expect(plan.operations.find((operation) => operation.kind === 'adopt')?.prior?.providerRuleId)
+      .toBe('existing-exact');
+    expect(plan.operations).toContainEqual(expect.objectContaining({
+      kind: 'remove',
+      desired: null,
+      prior: expect.objectContaining({ providerRuleId: 'external-unrelated', ownership: 'external' }),
+    }));
+    profile.database.close();
+  });
+
+  it('creates a quiet-inbox rule for a repeated uncertain sender stream', () => {
+    const { profile, profileId, connection, rules } = setup();
+    const insert = profile.database.prepare(`INSERT INTO gmail_indexed_messages(
+      id,connection_id,gmail_message_id,thread_id,received_at,subject,sender_json,recipients_json,
+      headers_json,label_ids_json,size_bytes,indexed_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,'[]',100,'2026-08-25T12:00:00.000Z')`);
+    for (let index = 0; index < 3; index += 1) {
+      const id = `8bedbe5c-1c80-4e82-a566-72bb60c8e90${index}`;
+      insert.run(
+        id, connection.id, id, `thread-unsorted-${index}`, '2026-08-25T10:00:00.000Z',
+        `Generic update ${index}`, '["updates@company.example"]', '["owner@example.test"]',
+        '{"delivered-to":"owner@example.test"}',
+      );
+    }
+    new GmailAnalysisService(profile.database, profileId).analyze(connection);
+    new OrganizationProposalRepository(profile.database, profileId).generate('gmail', connection.id);
+
+    const desired = rules.desired('gmail', connection.id).rules.find(
+      (rule) => rule.senderDomain === 'company.example',
+    );
+    expect(desired).toMatchObject({
+      category: 'other', targetPath: 'Primary/Review/Unsorted',
+      markRead: true, archive: true, observedMessages: 3,
+    });
+    profile.database.close();
+  });
+
   it('uses a stable identity when a correction requires replacing a managed rule', () => {
     const { profile, profileId, connection, rules } = setup();
     const firstDesired = rules.desired('gmail', connection.id).rules.find((rule) => rule.category === 'promotions')!;
@@ -151,6 +201,7 @@ describe('provider rule inventory and reconciliation', () => {
     expect(inventory).toMatchObject({ provider: 'gmail', capability: 'live_api', providerLimit: 1_000 });
     expect(inventory.rules[0]).toMatchObject({ providerRuleId: 'provider-filter-1', ownership: 'external' });
     expect(inventory.rules[0]?.action.addLabels).toEqual(['Primary/Promotions']);
+    expect(inventory.containers).toEqual(['Primary/Promotions']);
     const providerReads = fetchPort.mock.calls.filter((call) => String(call[0]).includes('gmail.googleapis.com'));
     expect(providerReads.every((call) => !call[1]?.method || call[1]?.method === 'GET')).toBe(true);
     profile.database.close();

@@ -59,6 +59,16 @@ export interface RuleOperationRecord {
 }
 
 const parseJson = <T>(value: unknown): T => JSON.parse(String(value)) as T;
+const safeStringArray = (value: unknown): string[] => {
+  try {
+    const parsed = parseJson<unknown>(value ?? '[]');
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+};
 
 export class RuleReconciliationRepository {
   readonly #database: BetterSqlite3.Database;
@@ -89,6 +99,7 @@ export class RuleReconciliationRepository {
     capability: RuleInventory["capability"],
     snapshots: Array<Omit<ProviderRuleSnapshot, "stableKey" | "ownership">>,
     providerLimit: number | null,
+    containers: readonly string[] = [],
   ): RuleInventory {
     this.#assertConnection(provider, connectionId);
     const managed = this.#managed(provider, connectionId);
@@ -109,7 +120,7 @@ export class RuleReconciliationRepository {
     this.#database.transaction(() => {
       this.#database
         .prepare(
-          "INSERT INTO rule_inventories(id,profile_id,provider,connection_id,capability,provider_limit,captured_at) VALUES (?,?,?,?,?,?,?)",
+          "INSERT INTO rule_inventories(id,profile_id,provider,connection_id,capability,provider_limit,captured_at,containers_json) VALUES (?,?,?,?,?,?,?,?)",
         )
         .run(
           inventoryId,
@@ -119,6 +130,7 @@ export class RuleReconciliationRepository {
           capability,
           providerLimit,
           capturedAt,
+          JSON.stringify([...new Set(containers)].sort()),
         );
       const insert = this.#database.prepare(
         "INSERT INTO rule_inventory_items(id,inventory_id,provider_rule_id,stable_key,fingerprint,ownership,criteria_json,action_json) VALUES (?,?,?,?,?,?,?,?)",
@@ -155,6 +167,16 @@ export class RuleReconciliationRepository {
     return row ? this.getInventory(row.id) : null;
   }
 
+  protonContainerPaths(connectionId: string): string[] {
+    this.#assertConnection('proton', connectionId);
+    return (this.#database.prepare(`
+      SELECT provider_container_id FROM mail_containers
+      WHERE connection_id=? ORDER BY provider_container_id
+    `).all(connectionId) as Array<{ provider_container_id: string }>).map(
+      (row) => row.provider_container_id,
+    );
+  }
+
   managedExportSnapshots(
     connectionId: string,
   ): Array<Omit<ProviderRuleSnapshot, "stableKey" | "ownership">> {
@@ -186,6 +208,7 @@ export class RuleReconciliationRepository {
       capability: inventory.capability,
       capturedAt: inventory.captured_at,
       providerLimit: inventory.provider_limit,
+      containers: safeStringArray(inventory.containers_json),
       rules: items.map((item) => ({
         providerRuleId: item.provider_rule_id,
         stableKey: item.stable_key,
@@ -245,9 +268,14 @@ export class RuleReconciliationRepository {
       );
       const dominant = ordered[0]!;
       const total = ordered.reduce((sum, item) => sum + item.message_count, 0);
+      const repeatedUnsorted =
+        dominant.category === "other" &&
+        dominant.message_count >= 3 &&
+        dominant.confidence >= 0.45;
       if (
         dominant.message_count / total < 0.75 ||
-        dominant.confidence < (dominant.category === "spam" ? 0.94 : 0.82)
+        (!repeatedUnsorted &&
+          dominant.confidence < (dominant.category === "spam" ? 0.94 : 0.82))
       )
         continue;
       const item = itemBySource.get(
@@ -255,7 +283,7 @@ export class RuleReconciliationRepository {
       );
       if (
         !item?.enabled ||
-        ["personal", "suspicious", "other"].includes(item.category)
+        ["personal", "suspicious"].includes(item.category)
       )
         continue;
       const spam = item.category === "spam";
@@ -287,6 +315,7 @@ export class RuleReconciliationRepository {
   generate(
     provider: AccountProvider,
     connectionId: string,
+    replaceExternalRules = false,
   ): RuleReconciliationPlan {
     const inventory = this.getCurrentInventory(provider, connectionId);
     if (!inventory) throw new Error("rule_inventory_required");
@@ -302,6 +331,11 @@ export class RuleReconciliationRepository {
       inventory.rules
         .filter((rule) => rule.ownership === "external")
         .map((rule) => [rule.fingerprint, rule]),
+    );
+    const unmatchedExternal = new Map(
+      inventory.rules
+        .filter((rule) => rule.ownership === "external")
+        .map((rule) => [rule.providerRuleId, rule]),
     );
     const operations: Array<
       Omit<
@@ -341,6 +375,7 @@ export class RuleReconciliationRepository {
         });
       } else {
         const exact = externalByFingerprint.get(rule.fingerprint) ?? null;
+        if (exact) unmatchedExternal.delete(exact.providerRuleId);
         operations.push({
           stableKey: rule.stableKey,
           kind: exact ? "adopt" : "create",
@@ -366,6 +401,21 @@ export class RuleReconciliationRepository {
           parseJson(current.desired_json),
         ),
       });
+    }
+    if (replaceExternalRules && provider !== 'proton') {
+      for (const prior of unmatchedExternal.values()) {
+        operations.push({
+          stableKey: sha256([
+            'retire-external-rule',
+            prior.providerRuleId,
+            prior.fingerprint,
+          ]),
+          kind: 'remove',
+          desired: null,
+          prior,
+          priorManaged: null,
+        });
+      }
     }
     operations.sort((left, right) =>
       left.stableKey.localeCompare(right.stableKey),
@@ -532,6 +582,33 @@ export class RuleReconciliationRepository {
         "UPDATE rule_reconciliation_plans SET state='approved',approved_at=?,job_id=? WHERE id=?",
       )
       .run(now, job.id, planId);
+    return this.getPlan(planId);
+  }
+
+  confirmProtonImport(planId: string, revision: string): RuleReconciliationPlan {
+    const plan = this.getPlan(planId);
+    if (
+      plan.provider !== "proton" ||
+      plan.revision !== revision ||
+      plan.state !== "approved"
+    ) {
+      throw new Error("proton_rule_plan_changed");
+    }
+    const exported = this.#database.prepare(`
+      SELECT id FROM proton_rule_exports
+      WHERE profile_id=? AND connection_id=? AND plan_id=? AND revision=?
+        AND import_status='awaiting_manual_import'
+      ORDER BY rowid DESC LIMIT 1
+    `).get(this.#profileId, plan.connectionId, planId, revision) as { id: string } | undefined;
+    if (!exported) throw new Error("proton_rule_export_required");
+    this.#database.transaction(() => {
+      this.#database.prepare(
+        "UPDATE proton_rule_exports SET import_status='confirmed_imported' WHERE id=?",
+      ).run(exported.id);
+      this.#database.prepare(
+        "UPDATE rule_reconciliation_plans SET state='completed' WHERE id=?",
+      ).run(planId);
+    })();
     return this.getPlan(planId);
   }
 
@@ -875,9 +952,9 @@ export class RuleReconciliationRepository {
         );
       this.#database
         .prepare(
-          "UPDATE rule_reconciliation_plans SET state='completed',approved_at=? WHERE id=?",
+          "UPDATE rule_reconciliation_plans SET state=?,approved_at=? WHERE id=?",
         )
-        .run(now, planId);
+        .run(plan.operations.length ? "approved" : "completed", now, planId);
     })();
     if (
       rules.length !==

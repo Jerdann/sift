@@ -15,6 +15,7 @@ export const cleanupPlanSchema = z.object({
   id: z.uuid(),
   connectionId: z.uuid(),
   kind: z.enum(['organize', 'trash']),
+  existingSetup: z.enum(['extend', 'reuse', 'replace']),
   revision: z.string(),
   proposalId: z.uuid().nullable(),
   proposalRevision: z.string().length(64).nullable(),
@@ -35,6 +36,14 @@ export const cleanupPlanSchema = z.object({
     state: z.enum(['failed', 'verification_mismatch']),
     errorCode: z.string().nullable(),
   })),
+  legacyContainers: z.array(z.object({
+    id: z.uuid(),
+    providerPath: z.string().min(1),
+    kind: z.enum(['folder', 'label']),
+    observedMessages: z.number().int().nonnegative(),
+    state: z.enum(['pending', 'running', 'retired', 'retained_nonempty', 'failed']),
+    errorCode: z.string().nullable(),
+  })),
 });
 
 export const approveCleanupInputSchema = z.object({
@@ -44,6 +53,7 @@ export const approveCleanupInputSchema = z.object({
 
 export const generateCleanupInputSchema = z.object({
   kind: z.enum(['organize', 'trash']).default('organize'),
+  existingSetup: z.enum(['extend', 'reuse', 'replace']).default('extend'),
   containers: z.record(
     z.string().email(),
     z.string().trim().min(1).max(64).regex(/^[^\\/\0]+$/),
@@ -69,7 +79,12 @@ export const cleanupProgressSchema = z.object({
 });
 
 export type CleanupPlan = z.infer<typeof cleanupPlanSchema>;
-export type GenerateCleanupInput = z.infer<typeof generateCleanupInputSchema>;
+export type GenerateCleanupInput = Omit<
+  z.infer<typeof generateCleanupInputSchema>,
+  'existingSetup'
+> & {
+  existingSetup?: 'extend' | 'reuse' | 'replace';
+};
 export type GetCleanupInput = z.infer<typeof getCleanupInputSchema>;
 export type ApproveCleanupInput = z.infer<typeof approveCleanupInputSchema>;
 export type RetryCleanupInput = z.infer<typeof retryCleanupInputSchema>;

@@ -109,7 +109,7 @@ export class GmailOrganizationRepository {
           ? { id: `trash\0${message.sender_domain}\0${[...addresses].sort()[0] ?? ''}\0${message.source_category}`, scope_address: [...addresses].sort()[0] ?? null, source_category: message.source_category, category: message.source_category, target_path: 'TRASH', enabled: 1, confidence: message.confidence }
           : undefined
         : candidates[0];
-      if (!item || !item.enabled || message.confidence < 0.7 || (kind === 'organize' && ['other', 'personal', 'suspicious'].includes(item.category))) {
+      if (!item || !item.enabled) {
         skipped += 1;
         continue;
       }
@@ -150,10 +150,9 @@ export class GmailOrganizationRepository {
       for (const group of normalized) {
         const impactId = this.#createId();
         const spam = kind !== 'trash' && group.item.category === 'spam';
-        const security = group.item.category === 'security';
         insertImpact.run(
           impactId, planId, group.item.scope_address, group.item.source_category, group.item.category,
-          kind === 'trash' ? 'TRASH' : spam ? 'SPAM' : group.item.target_path, kind === 'trash' || !security ? 1 : 0, kind === 'trash' || !security ? 1 : 0, spam ? 1 : 0,
+          kind === 'trash' ? 'TRASH' : spam ? 'SPAM' : group.item.target_path, 1, 1, spam ? 1 : 0,
           group.item.confidence, group.messages.length, kind === 'trash' ? 1 : 0,
         );
         for (let offset = 0; offset < group.messages.length; offset += 100) {

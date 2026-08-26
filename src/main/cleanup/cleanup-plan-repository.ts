@@ -1,7 +1,7 @@
 import type BetterSqlite3 from 'better-sqlite3';
 import { createHash, randomUUID } from 'node:crypto';
 import type { JobRepository } from '../jobs/job-repository';
-import { isSameProtonFolder } from '../proton/proton-paths';
+import { isSameProtonFolder, protonFolderPath } from '../proton/proton-paths';
 import { CATEGORY_PRESENTATION } from '../../core/classification/mail-classifier';
 import type { MailCategory } from '../../shared/contracts/analysis';
 import { type CleanupPlan, cleanupPlanSchema, type GenerateCleanupInput } from '../../shared/contracts/cleanup';
@@ -52,6 +52,15 @@ export interface CleanupTargetRecord {
   actionKind: CleanupActionRecord['actionKind'];
 }
 
+export interface CleanupLegacyContainerRecord {
+  id: string;
+  planId: string;
+  providerPath: string;
+  kind: 'folder' | 'label';
+  observedMessages: number;
+  state: 'pending' | 'running' | 'retired' | 'retained_nonempty' | 'failed';
+}
+
 export class CleanupPlanRepository {
   readonly #database: BetterSqlite3.Database;
   readonly #jobs: JobRepository;
@@ -75,6 +84,7 @@ export class CleanupPlanRepository {
   get profileId(): string { return this.#profileId; }
 
   generate(connectionId: string, input: GenerateCleanupInput): CleanupPlan {
+    const existingSetup = input.existingSetup ?? 'extend';
     const candidates = this.#database.prepare(`
       SELECT ma.id AS analysis_id, mc.message_row_id, mc.canonical_key,
              mc.category, mc.sender_domain, mc.confidence, mc.receiving_addresses_json, im.uid_validity, im.uid,
@@ -116,7 +126,10 @@ export class CleanupPlanRepository {
           !['personal', 'security', 'accounts', 'transactions', 'finance', 'suspicious'].includes(candidate.category);
       }
       const item = proposedItem(candidate);
-      return Boolean(item?.enabled) && candidate.confidence >= 0.7 && !['other', 'suspicious', 'personal'].includes(item!.category);
+      // The proposal is the explicit historical-cleanup boundary. Every enabled
+      // category is filed and marked read during the approved initial pass;
+      // conservative confidence thresholds still apply later to future rules.
+      return Boolean(item?.enabled);
     });
     const planId = this.#createId();
     const actionValues = actionable.map((candidate) => {
@@ -132,17 +145,52 @@ export class CleanupPlanRepository {
         actionKind: input.kind === 'trash' ? 'native_trash' as const : effectiveCategory === 'spam' ? 'native_spam' as const : 'sort_read_archive' as const,
       };
     }).filter((action) => action.actionKind !== 'sort_read_archive' || !isSameProtonFolder(action.source_path, action.targetPath));
-    const revision = createHash('sha256').update(JSON.stringify(actionValues.map((action) => [
-      action.canonical_key, action.source_path, action.uid_validity, action.uid, action.targetPath, action.actionKind,
-    ]))).digest('hex');
+    const targetPaths = actionValues
+      .filter((action) => action.actionKind === 'sort_read_archive')
+      .map((action) => action.targetPath);
+    const legacyContainers = existingSetup === 'replace'
+      ? (this.#database.prepare(`
+          SELECT provider_container_id,delimiter,special_use,message_count
+          FROM mail_containers WHERE connection_id=?
+          ORDER BY length(provider_container_id) DESC,provider_container_id
+        `).all(connectionId) as Array<{
+          provider_container_id: string; delimiter: string; special_use: string | null; message_count: number;
+        }>).flatMap((container) => {
+          if (container.special_use) return [];
+          const delimiter = container.delimiter || '/';
+          const parts = container.provider_container_id.split(delimiter).filter(Boolean);
+          const root = parts[0]?.toLowerCase();
+          if (!['folders', 'labels'].includes(root ?? '') || parts.length < 2) return [];
+          const providerTargets = targetPaths.map((target) => protonFolderPath(target, delimiter).toLowerCase());
+          const path = container.provider_container_id.toLowerCase();
+          if (providerTargets.some((target) => target === path || target.startsWith(`${path.toLowerCase()}${delimiter}`))) return [];
+          return [{
+            id: this.#createId(),
+            providerPath: container.provider_container_id,
+            kind: root === 'labels' ? 'label' as const : 'folder' as const,
+            observedMessages: container.message_count,
+          }];
+        })
+      : [];
+    const revision = createHash('sha256').update(JSON.stringify({
+      existingSetup,
+      actions: actionValues.map((action) => [
+        action.canonical_key, action.source_path, action.uid_validity, action.uid, action.targetPath, action.actionKind,
+      ]),
+      legacyContainers: legacyContainers.map((container) => [container.providerPath, container.observedMessages]),
+    })).digest('hex');
     const timestamp = this.#now();
     this.#database.transaction(() => {
       this.#database.prepare("DELETE FROM cleanup_plans WHERE connection_id = ? AND plan_kind = ? AND state = 'draft'").run(connectionId, input.kind);
       this.#database.prepare(`
         INSERT INTO cleanup_plans(
-          id, connection_id, analysis_id, revision, state, skipped_count, created_at, plan_kind, proposal_id, proposal_revision
-        ) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)
-      `).run(planId, connectionId, analysisId, revision, candidates.length - actionValues.length, timestamp, input.kind, proposal?.id ?? null, proposal?.revision ?? null);
+          id, connection_id, analysis_id, revision, state, skipped_count, created_at, plan_kind,
+          proposal_id, proposal_revision, existing_setup
+        ) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)
+      `).run(
+        planId, connectionId, analysisId, revision, candidates.length - actionValues.length,
+        timestamp, input.kind, proposal?.id ?? null, proposal?.revision ?? null, existingSetup,
+      );
       const insert = this.#database.prepare(`
         INSERT INTO cleanup_actions(
           id, plan_id, message_row_id, canonical_key, category, source_path,
@@ -155,6 +203,17 @@ export class CleanupPlanRepository {
           this.#createId(), planId, action.message_row_id, action.canonical_key, action.category,
           action.source_path, action.uid_validity, action.uid, action.targetPath, action.actionKind,
           action.scopeAddress, action.containerName, timestamp,
+        );
+      }
+      const insertLegacy = this.#database.prepare(`
+        INSERT INTO cleanup_legacy_containers(
+          id,plan_id,provider_path,container_kind,observed_messages,state,updated_at
+        ) VALUES (?,?,?,?,?,'pending',?)
+      `);
+      for (const container of legacyContainers) {
+        insertLegacy.run(
+          container.id, planId, container.providerPath, container.kind,
+          container.observedMessages, timestamp,
         );
       }
     })();
@@ -179,7 +238,7 @@ export class CleanupPlanRepository {
       WHERE cleanup_plans.id = ? AND pc.profile_id = ?
     `).get(planId, this.#profileId) as {
       id: string; connection_id: string; revision: string; state: CleanupPlan['state']; plan_kind: CleanupPlan['kind'];
-      proposal_id: string | null; proposal_revision: string | null;
+      proposal_id: string | null; proposal_revision: string | null; existing_setup: 'extend' | 'reuse' | 'replace';
       skipped_count: number; job_id: string | null; undo_job_id: string | null; created_at: string; approved_at: string | null;
     } | undefined;
     if (!row) throw new Error('Cleanup plan was not found');
@@ -210,6 +269,7 @@ export class CleanupPlanRepository {
       id: row.id,
       connectionId: row.connection_id,
       kind: row.plan_kind,
+      existingSetup: row.existing_setup,
       revision: row.revision,
       proposalId: row.proposal_id,
       proposalRevision: row.proposal_revision,
@@ -240,6 +300,21 @@ export class CleanupPlanRepository {
         state: action.state,
         errorCode: action.error_code,
       })),
+      legacyContainers: (this.#database.prepare(`
+        SELECT id,provider_path,container_kind,observed_messages,state,error_code
+        FROM cleanup_legacy_containers WHERE plan_id=?
+        ORDER BY length(provider_path) DESC,provider_path
+      `).all(planId) as Array<{
+        id: string; provider_path: string; container_kind: 'folder' | 'label'; observed_messages: number;
+        state: CleanupLegacyContainerRecord['state']; error_code: string | null;
+      }>).map((container) => ({
+        id: container.id,
+        providerPath: container.provider_path,
+        kind: container.container_kind,
+        observedMessages: container.observed_messages,
+        state: container.state,
+        errorCode: container.error_code,
+      })),
     });
   }
 
@@ -259,11 +334,16 @@ export class CleanupPlanRepository {
       if (!current || current.id !== planScope.proposal_id || current.revision !== planScope.proposal_revision) throw new Error('cleanup_plan_changed');
     }
     const actions = this.#database.prepare('SELECT id FROM cleanup_actions WHERE plan_id = ? ORDER BY rowid').all(planId) as Array<{ id: string }>;
+    const legacyContainers = this.#database.prepare('SELECT id FROM cleanup_legacy_containers WHERE plan_id=? ORDER BY rowid')
+      .all(planId) as Array<{ id: string }>;
     const job = this.#jobs.createJob({
       profileId: this.#profileId,
       kind: 'proton-cleanup',
       idempotencyKey: `cleanup:${planId}:${revision}`,
-      itemKeys: actions.map((action) => action.id),
+      itemKeys: [
+        ...actions.map((action) => action.id),
+        ...legacyContainers.map((container) => `retire:${container.id}`),
+      ],
     });
     this.#database.prepare(`
       UPDATE cleanup_plans SET state = 'approved', approved_at = ?, job_id = ? WHERE id = ?
@@ -295,6 +375,34 @@ export class CleanupPlanRepository {
       resultingUidValidity: row.resulting_uid_validity ? String(row.resulting_uid_validity) : null,
       resultingUid: row.resulting_uid ? Number(row.resulting_uid) : null,
     };
+  }
+
+  legacyContainer(containerId: string): CleanupLegacyContainerRecord {
+    const row = this.#database.prepare(`
+      SELECT clc.*,cp.id AS plan_id FROM cleanup_legacy_containers clc
+      JOIN cleanup_plans cp ON cp.id=clc.plan_id
+      JOIN provider_connections pc ON pc.id=cp.connection_id
+      WHERE clc.id=? AND pc.profile_id=?
+    `).get(containerId, this.#profileId) as Record<string, unknown> | undefined;
+    if (!row) throw new Error('Cleanup legacy container was not found');
+    return {
+      id: String(row.id),
+      planId: String(row.plan_id),
+      providerPath: String(row.provider_path),
+      kind: row.container_kind as CleanupLegacyContainerRecord['kind'],
+      observedMessages: Number(row.observed_messages),
+      state: row.state as CleanupLegacyContainerRecord['state'],
+    };
+  }
+
+  markLegacyContainer(
+    containerId: string,
+    state: CleanupLegacyContainerRecord['state'],
+    errorCode: string | null = null,
+  ): void {
+    this.#database.prepare(`
+      UPDATE cleanup_legacy_containers SET state=?,error_code=?,updated_at=? WHERE id=?
+    `).run(state, errorCode, this.#now(), containerId);
   }
 
   targets(planId: string): CleanupTargetRecord[] {

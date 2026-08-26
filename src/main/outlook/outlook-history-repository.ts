@@ -169,10 +169,7 @@ export class OutlookHistoryRepository {
           : candidates[0];
       if (
         !item ||
-        !item.enabled ||
-        message.confidence < 0.7 ||
-        (kind === "organize" &&
-          ["other", "personal", "suspicious"].includes(item.category))
+        !item.enabled
       ) {
         skipped += 1;
         continue;
@@ -245,8 +242,7 @@ export class OutlookHistoryRepository {
       for (const group of normalized) {
         const impactId = this.#createId();
         const spam = kind === "organize" && group.item.category === "spam";
-        const markRead =
-          kind === "trash" || (!spam && group.item.category !== "security");
+        const markRead = true;
         addImpact.run(
           impactId,
           planId,

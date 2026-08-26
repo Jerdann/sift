@@ -176,22 +176,28 @@ export class OutlookRuleReconciliationRunner {
       return;
     }
     if (operation.kind === "remove") {
-      if (managed?.ownership === "managed" && managed.provider_rule_id)
-        await this.#delete(token, managed.provider_rule_id);
+      const providerRuleId =
+        managed?.ownership === "managed" && managed.provider_rule_id
+          ? managed.provider_rule_id
+          : operation.prior?.ownership === "external"
+            ? operation.prior.providerRuleId
+            : null;
+      if (providerRuleId) await this.#delete(token, providerRuleId);
       state = await this.#state(token);
       if (
-        managed?.ownership === "managed" &&
-        managed.provider_rule_id &&
+        providerRuleId &&
         state.rules.some(
-          (rule) => rule.providerRuleId === managed.provider_rule_id,
+          (rule) => rule.providerRuleId === providerRuleId,
         )
       )
         throw new Error("provider_verification_mismatch");
-      this.rules.removeManagedRule(
-        "outlook",
-        operation.connectionId,
-        operation.stableKey,
-      );
+      if (managed) {
+        this.rules.removeManagedRule(
+          "outlook",
+          operation.connectionId,
+          operation.stableKey,
+        );
+      }
       this.rules.setOperationResult(operation.id, "succeeded", {
         verifiedFingerprint: operation.prior?.fingerprint ?? null,
       });

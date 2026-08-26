@@ -139,6 +139,7 @@ describe("desktop security boundary", () => {
       "retryRulePlan",
       "undoRulePlan",
       "exportProtonRulePlan",
+      "confirmProtonRuleImport",
       "listProfiles",
       "createProfile",
       "selectProfile",

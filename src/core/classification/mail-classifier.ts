@@ -1,6 +1,6 @@
 import type { MailCategory } from '../../shared/contracts/analysis';
 
-export const CLASSIFIER_VERSION = 'deterministic-1.1.0';
+export const CLASSIFIER_VERSION = 'deterministic-1.2.0';
 
 export const CATEGORY_PRESENTATION: Readonly<Record<MailCategory, { label: string; folder: string }>> = {
   personal: { label: 'Personal', folder: 'Personal' },
@@ -16,7 +16,7 @@ export const CATEGORY_PRESENTATION: Readonly<Record<MailCategory, { label: strin
   social: { label: 'Social networks', folder: 'Social' },
   suspicious: { label: 'Suspicious review', folder: 'Review/Suspicious' },
   spam: { label: 'Likely spam', folder: 'Spam Review' },
-  other: { label: 'Other', folder: 'Other' },
+  other: { label: 'Unsorted review', folder: 'Review/Unsorted' },
 };
 
 export interface ClassificationInput {

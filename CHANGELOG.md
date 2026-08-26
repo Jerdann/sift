@@ -4,6 +4,39 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-26
+
+### Added
+
+- A strict five-stage sieve—Scan, Organize, Rules, Unsubscribe, and Delete—with provider state gates that prevent later actions from running against incomplete prerequisites.
+- Scan now inventories messages, owned-address evidence, folders or labels, and the provider rule surface before Organize unlocks.
+- Proton Fresh Slate can now retire obsolete custom folders after verified filing and remove obsolete labels without deleting the underlying messages.
+- Gmail and Outlook fresh-rule reconciliation can explicitly remove unmatched existing provider rules after retaining exact semantic matches and previewing every deletion.
+- Proton Sieve exports now require explicit confirmation that the file was imported and enabled before Rules is considered complete.
+- Repeated uncertain sender streams can be routed into `Review/Unsorted`, marked read, and kept out of Inbox without deleting their history.
+
+### Changed
+
+- Address ownership and alias-container decisions now live at the start of Organize instead of a separate navigation page.
+- Organize is one linear workflow: build from mailbox, choose how existing structure is handled, review the final address-aware tree, file historical mail, retire obsolete structure when requested, then continue to Rules.
+- The initial historical pass files every enabled proposal category and marks it read, including Personal, Suspicious Review, and Unsorted Review; conservative thresholds still protect future human and suspicious mail from silent rules.
+- Rules now explains every exact future effect, distinguishes retaining from replacing provider rules, and remains locked until historical filing created its destinations.
+- Unsubscribe shows verified spam-rule coverage, never contacts suspected spam, and cannot advance to Delete while safe one-click candidates remain unresolved.
+- Cleanup summaries use readable category names, unique destination totals, and a clear `protected / already filed` remainder instead of a misleading undifferentiated action list.
+
+### Fixed
+
+- Historical `Other` mail is no longer forcibly excluded from an explicitly approved organization proposal, eliminating the main source of thousands of messages left in Inbox.
+- Outlook rule inventory and approval copy now use Microsoft-specific behavior instead of falling through to Proton export language.
+- Changing the existing-setup strategy invalidates the visible cleanup preview until the exact plan is rebuilt.
+- A nonempty obsolete Proton folder is retained and reported without failing an otherwise verified filing run.
+
+### Security
+
+- Proton system folders are never retirement candidates; custom folders require an empty live provider check before deletion.
+- Proton server-side filters remain an explicit manual boundary because Bridge cannot inspect or delete them; Fresh Slate requires confirmation that old Proton filters were disabled before replacement export.
+- External Gmail and Outlook rule deletions are opt-in, individually listed, provider-verified, and disclosed as not automatically undoable.
+
 ## [1.3.3] - 2026-08-26
 
 ### Changed

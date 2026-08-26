@@ -12,7 +12,7 @@ The working desktop build supports:
 - Gmail through Google OAuth for Desktop apps: resumable metadata-only history audit, local classification, an exact approval plan, nested labels, future filters, historical mark-read/archive batches, native Spam and recoverable Trash labeling, authenticated one-click bulk unsubscribe, and exact-label Undo.
 - Outlook, Hotmail, and Microsoft 365 mail through Microsoft public-client OAuth with PKCE: resumable metadata-only Graph audit, provider-backed aliases, immutable message IDs, nested folders, live inbox-rule reconciliation, verified historical moves, native Junk and recoverable Deleted Items, authenticated one-click unsubscribe, and exact folder/read-state Undo.
 - Provider-neutral local profiles and portable JSON rule packs, so separate people and mailboxes do not share data or credentials.
-- A guided connect → scan → addresses → organize → rules → unsubscribe → Trash flow, with one decision and action stage per page.
+- A gated five-stage sieve—Scan → Organize → Rules → Unsubscribe → Delete—with owned-address and alias-container decisions handled at the start of Organize.
 - A Recovery workspace with content-free health reports, same-Windows-user encrypted profile backups, verified restore with rollback, and a local-index rebuild that preserves connections, managed rules, and unsubscribe history.
 
 No permanent deletion is implemented. The final cleanup pass moves only approved stale history to the provider's recoverable Trash. Personal, security, account, transaction, finance, suspicious, uncertain, and mixed-use sender streams are excluded from that pass.

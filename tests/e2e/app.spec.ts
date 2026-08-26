@@ -137,8 +137,11 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
     );
     expect(accessibleControls).toBe(true);
     await expect(
-      page.getByRole("button", { name: "Addresses", exact: true }),
+      page.getByRole("button", { name: "Organize", exact: true }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Addresses", exact: true }),
+    ).toHaveCount(0);
     await page.setViewportSize({ width: 700, height: 900 });
     expect(
       await page.evaluate(
@@ -174,6 +177,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "approveGmailOrganizationPlan",
         "approveOutlookOrganizationPlan",
         "approveRulePlan",
+        "confirmProtonRuleImport",
         "connectGmail",
         "connectOutlook",
         "connectProtonBridge",

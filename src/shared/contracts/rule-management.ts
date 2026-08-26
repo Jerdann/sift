@@ -33,6 +33,7 @@ export const ruleInventorySchema = z.object({
   capability: z.enum(['live_api', 'managed_export']),
   capturedAt: z.iso.datetime(),
   providerLimit: z.number().int().positive().nullable(),
+  containers: z.array(z.string().min(1).max(512)),
   rules: z.array(providerRuleSnapshotSchema),
 });
 
@@ -81,6 +82,7 @@ export const ruleReconciliationPlanSchema = z.object({
 export const ruleManagementScopeSchema = z.object({
   provider: accountProviderSchema,
   connectionId: z.uuid(),
+  replaceExternalRules: z.boolean().optional(),
 }).strict();
 
 export const approveRulePlanSchema = z.object({

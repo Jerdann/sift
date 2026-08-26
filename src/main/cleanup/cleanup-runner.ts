@@ -118,8 +118,10 @@ export class CleanupRunner {
       for (;;) {
         const items = this.#jobs.claimNextPendingBatch(jobId, PROTON_CLEANUP_BATCH_SIZE);
         if (!items.length) break;
+        const retirementItems = items.filter((item) => item.itemKey.startsWith('retire:'));
+        const messageItems = items.filter((item) => !item.itemKey.startsWith('retire:'));
         const groups = new Map<string, Array<{ item: (typeof items)[number]; action: ReturnType<CleanupPlanRepository['action']> }>>();
-        for (const item of items) {
+        for (const item of messageItems) {
           const action = this.#plans.action(item.itemKey);
           const key = `${action.sourcePath}\0${action.actionKind}\0${action.targetPath}`;
           const group = groups.get(key) ?? [];
@@ -261,6 +263,41 @@ export class CleanupRunner {
           this.#emit(planId);
         }
         if (verificationDeferred) break;
+        if (retirementItems.length) {
+          const cleanupFailed = this.#plans.get(planId).failedActions.length > 0;
+          for (const item of retirementItems) {
+            const containerId = item.itemKey.slice('retire:'.length);
+            const container = this.#plans.legacyContainer(containerId);
+            this.#currentTarget = container.providerPath;
+            this.#plans.markLegacyContainer(container.id, 'running');
+            this.#emit(planId);
+            if (cleanupFailed) {
+              this.#plans.markLegacyContainer(container.id, 'failed', 'legacy_retirement_cleanup_incomplete');
+              this.#jobs.transitionItem(item.id, 'failed', { errorCode: 'legacy_retirement_cleanup_incomplete' });
+              continue;
+            }
+            try {
+              const result = await client.retireContainer(container.providerPath);
+              if (result === 'not_empty') {
+                this.#plans.markLegacyContainer(container.id, 'retained_nonempty', 'legacy_container_not_empty');
+                this.#jobs.transitionItem(item.id, container.kind === 'folder' ? 'skipped' : 'failed', {
+                  errorCode: container.kind === 'folder'
+                    ? 'legacy_container_retained_nonempty'
+                    : 'legacy_label_retirement_failed',
+                });
+              } else {
+                this.#plans.markLegacyContainer(container.id, 'retired');
+                this.#jobs.transitionItem(item.id, 'succeeded', {
+                  result: { operation: 'proton-cleanup-action', verified: true },
+                });
+              }
+            } catch {
+              this.#plans.markLegacyContainer(container.id, 'failed', 'legacy_container_retirement_failed');
+              this.#jobs.transitionItem(item.id, 'failed', { errorCode: 'legacy_container_retirement_failed' });
+            }
+            this.#emit(planId);
+          }
+        }
       }
     } finally {
       this.#currentTarget = null;

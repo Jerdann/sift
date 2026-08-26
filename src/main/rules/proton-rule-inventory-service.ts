@@ -15,6 +15,7 @@ export class ProtonRuleInventoryService {
       'managed_export',
       this.#rules.managedExportSnapshots(connectionId),
       null,
+      this.#rules.protonContainerPaths(connectionId),
     );
   }
 }

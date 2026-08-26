@@ -386,7 +386,11 @@ export const registerAccountHandlers = ({
     trust(event);
     const input = ruleManagementScopeSchema.parse(rawInput);
     return ruleReconciliationPlanSchema.parse(
-      repositories().rules.generate(input.provider, input.connectionId),
+      repositories().rules.generate(
+        input.provider,
+        input.connectionId,
+        input.replaceExternalRules ?? false,
+      ),
     );
   });
 

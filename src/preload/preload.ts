@@ -278,6 +278,13 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
         exportProtonRulePlanSchema.parse(input),
       ),
     ),
+  confirmProtonRuleImport: async (input: ExportProtonRulePlan) =>
+    ruleReconciliationPlanSchema.parse(
+      await ipcRenderer.invoke(
+        IPC_CHANNELS.rulePlanConfirmProton,
+        exportProtonRulePlanSchema.parse(input),
+      ),
+    ),
   listProfiles: async () =>
     z
       .array(profileSummarySchema)

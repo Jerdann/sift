@@ -114,6 +114,7 @@ export const IPC_CHANNELS = Object.freeze({
   rulePlanRetry: "rule-plan:retry",
   rulePlanUndo: "rule-plan:undo",
   rulePlanExportProton: "rule-plan:export-proton",
+  rulePlanConfirmProton: "rule-plan:confirm-proton",
   profilesCreate: "profiles:create",
   profilesList: "profiles:list",
   profilesSelect: "profiles:select",
@@ -219,6 +220,7 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   "retryRulePlan",
   "undoRulePlan",
   "exportProtonRulePlan",
+  "confirmProtonRuleImport",
   "listProfiles",
   "createProfile",
   "selectProfile",
@@ -340,6 +342,9 @@ export interface EmailOrganizerBridge {
   exportProtonRulePlan(
     input: ExportProtonRulePlan,
   ): Promise<ProtonRuleExportResult>;
+  confirmProtonRuleImport(
+    input: ExportProtonRulePlan,
+  ): Promise<RuleReconciliationPlan>;
   listProfiles(): Promise<ProfileSummary[]>;
   createProfile(input: CreateProfileInput): Promise<ProfileSummary>;
   selectProfile(input: SelectProfileInput): Promise<ProfileSummary>;

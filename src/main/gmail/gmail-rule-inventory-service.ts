@@ -36,6 +36,8 @@ export class GmailRuleInventoryService {
     ]);
     const labelNames = new Map((labelPayload.labels ?? []).map((label) => [label.id, label.name]));
     const snapshots = (filterPayload.filter ?? []).map((filter) => normalizeGmailFilter(filter, labelNames));
-    return this.#rules.saveInventory('gmail', connectionId, 'live_api', snapshots, 1_000);
+    return this.#rules.saveInventory(
+      'gmail', connectionId, 'live_api', snapshots, 1_000, [...labelNames.values()],
+    );
   }
 }

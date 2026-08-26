@@ -11,6 +11,7 @@ export interface ProtonMutationClientPort {
   inspectMany(sourcePath: string, uids: readonly number[]): Promise<Map<number, { uidValidity: string; flags: string[] }>>;
   moveMany(sourcePath: string, uids: readonly number[], targetPath: string): Promise<Map<number, ProtonMovePointer>>;
   restore(targetPath: string, uid: number, sourcePath: string, priorFlags: readonly string[]): Promise<ProtonMoveReceipt | null>;
+  retireContainer(path: string): Promise<'retired' | 'missing' | 'not_empty'>;
 }
 
 export interface ProtonMoveReceipt {
@@ -123,6 +124,29 @@ export class ImapFlowMutationClient implements ProtonMutationClientPort {
     } finally { sourceLock.release(); }
     const resulting = await this.inspect(sourcePath, sourceUid);
     return resulting ? { path: sourcePath, uid: sourceUid, ...resulting } : null;
+  }
+
+  async retireContainer(path: string): Promise<'retired' | 'missing' | 'not_empty'> {
+    const mailboxes = await this.#client.list();
+    const mailbox = mailboxes.find((candidate) => candidate.path.toLowerCase() === path.toLowerCase());
+    if (!mailbox) return 'missing';
+    const delimiter = mailbox.delimiter || '/';
+    const parts = mailbox.path.split(delimiter).filter(Boolean);
+    if (mailbox.specialUse || parts.length < 2 || !['folders', 'labels'].includes(parts[0]!.toLowerCase())) {
+      throw new Error('proton_container_protected');
+    }
+    // A Proton label is a tag, not a storage location. Removing it removes the
+    // tag while the message remains in its real folder. Custom folders must be
+    // empty before removal because they are the storage location.
+    if (parts[0]!.toLowerCase() === 'folders') {
+      const status = await this.#client.status(mailbox.path, { messages: true });
+      if ((status.messages ?? 0) > 0) return 'not_empty';
+    }
+    await this.#client.mailboxDelete(mailbox.path);
+    const remaining = await this.#client.list();
+    return remaining.some((candidate) => candidate.path.toLowerCase() === mailbox.path.toLowerCase())
+      ? 'not_empty'
+      : 'retired';
   }
 }
 

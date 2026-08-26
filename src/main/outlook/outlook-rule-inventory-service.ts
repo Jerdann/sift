@@ -94,6 +94,7 @@ export class OutlookRuleInventoryService {
         normalizeOutlookRule(rule, folderNames, { inboxId, junkId }),
       ),
       256,
+      [...folderNames.values()],
     );
   }
 }

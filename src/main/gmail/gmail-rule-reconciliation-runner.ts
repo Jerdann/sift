@@ -123,15 +123,20 @@ export class GmailRuleReconciliationRunner {
     }
 
     if (operation.kind === 'remove') {
-      if (managed?.ownership === 'managed' && managed.provider_rule_id) {
-        const exists = state.filters.some((filter) => filter.providerRuleId === managed.provider_rule_id);
-        if (exists) await this.#deleteFilter(token, managed.provider_rule_id);
+      const providerRuleId = managed?.ownership === 'managed' && managed.provider_rule_id
+        ? managed.provider_rule_id
+        : operation.prior?.ownership === 'external'
+          ? operation.prior.providerRuleId
+          : null;
+      if (providerRuleId) {
+        const exists = state.filters.some((filter) => filter.providerRuleId === providerRuleId);
+        if (exists) await this.#deleteFilter(token, providerRuleId);
         state = await this.#state(token);
-        if (state.filters.some((filter) => filter.providerRuleId === managed.provider_rule_id)) {
+        if (state.filters.some((filter) => filter.providerRuleId === providerRuleId)) {
           throw new Error('provider_verification_mismatch');
         }
       }
-      this.#rules.removeManagedRule('gmail', operation.connectionId, operation.stableKey);
+      if (managed) this.#rules.removeManagedRule('gmail', operation.connectionId, operation.stableKey);
       this.#rules.setOperationResult(operation.id, 'succeeded', { verifiedFingerprint: operation.prior?.fingerprint ?? null });
       return;
     }

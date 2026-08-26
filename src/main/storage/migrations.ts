@@ -998,6 +998,31 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       ALTER TABLE cleanup_actions ADD COLUMN container_name TEXT;
     `,
   },
+  {
+    version: 28,
+    statements: `
+      ALTER TABLE cleanup_plans ADD COLUMN existing_setup TEXT NOT NULL DEFAULT 'extend'
+        CHECK(existing_setup IN ('extend','reuse','replace'));
+      CREATE TABLE cleanup_legacy_containers (
+        id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL REFERENCES cleanup_plans(id) ON DELETE CASCADE,
+        provider_path TEXT NOT NULL,
+        container_kind TEXT NOT NULL CHECK(container_kind IN ('folder','label')),
+        observed_messages INTEGER NOT NULL CHECK(observed_messages >= 0),
+        state TEXT NOT NULL CHECK(state IN ('pending','running','retired','retained_nonempty','failed')),
+        error_code TEXT,
+        updated_at TEXT NOT NULL,
+        UNIQUE(plan_id,provider_path)
+      );
+      CREATE INDEX cleanup_legacy_containers_plan_idx ON cleanup_legacy_containers(plan_id,state);
+    `,
+  },
+  {
+    version: 29,
+    statements: `
+      ALTER TABLE rule_inventories ADD COLUMN containers_json TEXT NOT NULL DEFAULT '[]';
+    `,
+  },
 ]);
 
 export const applyMigrations = (

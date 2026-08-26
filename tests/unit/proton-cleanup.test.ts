@@ -35,6 +35,7 @@ class FakeMutationClient implements ProtonMutationClientPort {
   failBatch = false;
   failTargetInspectionOnce = false;
   rejectTargets = false;
+  readonly legacyContainers = new Map<string, number>();
   constructor(private readonly validity = '1') {
     for (let uid = 1; uid <= 4; uid += 1) this.messages.set(`INBOX:${uid}`, { uidValidity: validity, flags: ['\\Flagged'] });
   }
@@ -85,6 +86,13 @@ class FakeMutationClient implements ProtonMutationClientPort {
     const receipt = { path: source, uid: sourceUid, uidValidity: '3', flags: [...priorFlags].sort() };
     this.messages.set(`${source}:${sourceUid}`, { uidValidity: receipt.uidValidity, flags: receipt.flags });
     return receipt;
+  }
+  async retireContainer(path: string) {
+    const count = this.legacyContainers.get(path);
+    if (count === undefined) return 'missing' as const;
+    if (count > 0) return 'not_empty' as const;
+    this.legacyContainers.delete(path);
+    return 'retired' as const;
   }
 }
 
@@ -212,6 +220,30 @@ describe('approved Proton cleanup', () => {
     current.profile.database.close();
   });
 
+  it('sweeps uncertain historical mail into Review/Unsorted instead of leaving it in Inbox', () => {
+    const current = setup();
+    current.profile.database.prepare(`
+      INSERT INTO indexed_messages(
+        id,connection_id,container_id,uid_validity,uid,message_id,received_at,subject,
+        sender_json,recipients_json,headers_json,flags_json,size_bytes,body_text,body_truncated,indexed_at
+      ) VALUES (?,?,(SELECT id FROM mail_containers WHERE connection_id=? AND provider_container_id='INBOX'),'1',5,
+        '<uncertain>','2026-08-24T12:00:00.000Z','A generic company update','["updates@company.example"]',
+        '["owner@pm.test"]','{"delivered-to":"owner@pm.test"}','[]',100,NULL,0,'2026-08-24T12:00:00.000Z')
+    `).run('2342c974-bec2-4b52-ab84-55413f9b33e1', current.connection.id, current.connection.id);
+    analyzeMailbox(current.profile.database, current.profile.profile.id, current.connection.id);
+    new OrganizationProposalRepository(current.profile.database, current.profile.profile.id)
+      .generate('proton', current.connection.id);
+
+    const plan = current.plans.generate(current.connection.id, {
+      kind: 'organize', containers: {}, trashSenderDomains: [],
+    });
+    expect(plan.impacts).toContainEqual(expect.objectContaining({
+      category: 'other', targetFolder: 'Primary/Review/Unsorted', messageCount: 1,
+      action: 'sort_read_archive',
+    }));
+    current.profile.database.close();
+  });
+
   it('collapses shared impacts across hidden address scopes while preserving alias containers', () => {
     const current = setup();
     const plan = current.plans.generate(current.connection.id, {
@@ -245,6 +277,69 @@ describe('approved Proton cleanup', () => {
       impact.scopeAddress === 'owner@pm.test' && impact.containerName === 'Primary'
     )).toBe(true);
     expect(preview.actionCount).toBe(plan.actionCount);
+    current.profile.database.close();
+  });
+
+  it('retires obsolete empty Proton containers only after a verified replacement filing run', async () => {
+    const current = setup();
+    current.profile.database.prepare(`
+      INSERT INTO mail_containers(
+        id,connection_id,profile_id,provider_container_id,display_name,delimiter,
+        special_use,flags_json,message_count,unread_count,uid_validity,uid_next,observed_at
+      ) VALUES (?,?,?,?,?,'/',NULL,'[]',0,0,'8',1,'2026-08-26T12:00:00.000Z')
+    `).run(
+      '7599fc8c-e269-4de7-8934-cdb67a1948dc', current.connection.id,
+      current.profile.profile.id, 'Folders/Old filing', 'Old filing',
+    );
+    const plan = current.plans.generate(current.connection.id, {
+      kind: 'organize', existingSetup: 'replace', containers: {}, trashSenderDomains: [],
+    });
+    expect(plan.existingSetup).toBe('replace');
+    expect(plan.legacyContainers).toContainEqual(expect.objectContaining({
+      providerPath: 'Folders/Old filing', state: 'pending', observedMessages: 0,
+    }));
+
+    const client = new FakeMutationClient();
+    client.legacyContainers.set('Folders/Old filing', 0);
+    const approved = current.plans.approve(plan.id, plan.revision);
+    const result = await new CleanupRunner(
+      current.jobs, current.plans, current.connections, () => client,
+    ).run(approved.job!.id);
+
+    expect(result.plan.state).toBe('completed');
+    expect(result.plan.legacyContainers).toContainEqual(expect.objectContaining({
+      providerPath: 'Folders/Old filing', state: 'retired', errorCode: null,
+    }));
+    expect(client.legacyContainers.has('Folders/Old filing')).toBe(false);
+    current.profile.database.close();
+  });
+
+  it('finishes filing while retaining an obsolete folder that is still nonempty', async () => {
+    const current = setup();
+    current.profile.database.prepare(`
+      INSERT INTO mail_containers(
+        id,connection_id,profile_id,provider_container_id,display_name,delimiter,
+        special_use,flags_json,message_count,unread_count,uid_validity,uid_next,observed_at
+      ) VALUES (?,?,?,?,?,'/',NULL,'[]',1,0,'8',2,'2026-08-26T12:00:00.000Z')
+    `).run(
+      '6d58ed09-85c4-473a-828b-aad36145626f', current.connection.id,
+      current.profile.profile.id, 'Folders/Still occupied', 'Still occupied',
+    );
+    const plan = current.plans.generate(current.connection.id, {
+      kind: 'organize', existingSetup: 'replace', containers: {}, trashSenderDomains: [],
+    });
+    const client = new FakeMutationClient();
+    client.legacyContainers.set('Folders/Still occupied', 1);
+    const approved = current.plans.approve(plan.id, plan.revision);
+    const result = await new CleanupRunner(
+      current.jobs, current.plans, current.connections, () => client,
+    ).run(approved.job!.id);
+
+    expect(result.plan.state).toBe('completed');
+    expect(result.plan.job?.counts.skipped).toBe(1);
+    expect(result.plan.legacyContainers).toContainEqual(expect.objectContaining({
+      providerPath: 'Folders/Still occupied', state: 'retained_nonempty',
+    }));
     current.profile.database.close();
   });
 
