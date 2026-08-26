@@ -1184,7 +1184,12 @@ const AppShell = ({
   const pageLabel = navItems.find((item) => item.id === activePage)?.label ?? 'Overview';
   const emptyAccounts = accounts.length === 0;
   const selectedAccounts = accounts.filter((account) => account.selected);
-  const addressReviewCount = selectedAccounts.reduce((sum, account) => sum + (identities[account.id] ?? []).filter((identity) => identity.status === 'unreviewed').length, 0);
+  const addressReviewCount = selectedAccounts.reduce((sum, account) => {
+    const accountIdentities = identities[account.id] ?? [];
+    const unreviewed = accountIdentities.filter((identity) => identity.status === 'unreviewed').length;
+    const confirmed = accountIdentities.some((identity) => identity.status === 'confirmed');
+    return sum + Math.max(unreviewed, confirmed ? 0 : 1);
+  }, 0);
 
   const taskIntro = (title: string, copy: string) => (
     <div className="page-heading task-heading"><h1>{title}</h1><p>{copy}</p></div>
@@ -1198,7 +1203,7 @@ const AppShell = ({
       <aside className="sidebar">
         <button className="sidebar-brand" type="button" onClick={() => setActivePage('overview')}><BrandMark /><span>Sift</span></button>
         <nav aria-label="Primary navigation">
-          {navItems.map(({ id, label, icon: Icon }) => <button key={id} aria-label={label} className={activePage === id ? 'nav-item active' : 'nav-item'} type="button" onClick={() => setActivePage(id)}><Icon size={18} /><span>{label}</span></button>)}
+          {navItems.map(({ id, label, icon: Icon }) => <button key={id} aria-label={label} title={label} className={activePage === id ? 'nav-item active' : 'nav-item'} type="button" onClick={() => setActivePage(id)}><Icon size={18} /><span>{label}</span></button>)}
         </nav>
         <div className="sidebar-footer">
           <div className="local-status"><CircleDot size={12} /> Local only</div>
