@@ -6,8 +6,29 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ### Planned
 
-- A provider-neutral guided workflow with one clear action per page.
 - Outlook and Hotmail account support.
+
+## [0.8.0] - 2026-08-25
+
+### Added
+
+- A dedicated Addresses workspace between Scan and Organize for evidence-backed ownership confirmation and per-address container decisions.
+- An explicit connect → scan → addresses → organize → rules → unsubscribe → Trash workflow on the overview and primary navigation.
+- A common per-account capability contract covering audit, identity evidence, folders/labels, live/exported rules, authenticated unsubscribe, native Spam, and native Trash.
+- An account capability matrix that explains provider differences in context without lowering the quality of the common workflow.
+- A compact application layout with an accessible icon navigation bar, single-column workflow, and horizontal containment for data-heavy review surfaces.
+
+### Changed
+
+- Account connection controls no longer run mailbox scans; the Scan page owns read-only inventory actions.
+- Identity review is no longer embedded in Organize, and organization remains blocked until every selected mailbox has resolved ownership evidence and at least one confirmed identity.
+- Organize now focuses only on correcting proposals and applying approved historical filing; future automation remains isolated on Rules.
+- Overview always routes to the earliest unfinished stage instead of skipping directly from scan to organization.
+
+### Security
+
+- Address ownership requirements are enforced as a workflow prerequisite rather than explanatory copy alone.
+- Provider capability gaps are represented by validated contract values and cannot silently fall back to an unrelated action.
 
 ## [0.7.0] - 2026-08-25
 
@@ -93,7 +114,8 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 - Arbitrary message participants can no longer become user-owned identities merely by appearing in From, To, Cc, Bcc, Reply-To, or group-recipient fields.
 - Account and identity operations remain restricted to the active local profile through validated IPC contracts.
 
-[Unreleased]: https://github.com/Jerdann/sift/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/Jerdann/sift/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/Jerdann/sift/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Jerdann/sift/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Jerdann/sift/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Jerdann/sift/compare/v0.5.0...v0.5.1

@@ -11,6 +11,7 @@ The working desktop build supports:
 - Proton Mail through the local Proton Mail Bridge: discovery, resumable metadata-first history audit, proof-based alias detection, per-address containers, local classification, sender recency review, approval-gated folder cleanup, native Spam and Trash routing, safe bulk unsubscribe, and Proton Sieve export.
 - Gmail through Google OAuth for Desktop apps: resumable metadata-only history audit, local classification, an exact approval plan, nested labels, future filters, historical mark-read/archive batches, native Spam and recoverable Trash labeling, authenticated one-click bulk unsubscribe, and exact-label Undo.
 - Provider-neutral local profiles and portable JSON rule packs, so separate people and mailboxes do not share data or credentials.
+- A guided connect → scan → addresses → organize → rules → unsubscribe → Trash flow, with one decision and action stage per page.
 
 No permanent deletion is implemented. The final cleanup pass moves only approved stale history to the provider's recoverable Trash. Personal, security, account, transaction, finance, suspicious, uncertain, and mixed-use sender streams are excluded from that pass.
 
