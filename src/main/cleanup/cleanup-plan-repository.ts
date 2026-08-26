@@ -160,6 +160,7 @@ export class CleanupPlanRepository {
       WHERE cleanup_plans.id = ? AND pc.profile_id = ?
     `).get(planId, this.#profileId) as {
       id: string; connection_id: string; revision: string; state: CleanupPlan['state']; plan_kind: CleanupPlan['kind'];
+      proposal_id: string | null; proposal_revision: string | null;
       skipped_count: number; job_id: string | null; undo_job_id: string | null; created_at: string; approved_at: string | null;
     } | undefined;
     if (!row) throw new Error('Cleanup plan was not found');
@@ -174,6 +175,8 @@ export class CleanupPlanRepository {
       connectionId: row.connection_id,
       kind: row.plan_kind,
       revision: row.revision,
+      proposalId: row.proposal_id,
+      proposalRevision: row.proposal_revision,
       state: row.state,
       createdAt: row.created_at,
       approvedAt: row.approved_at,

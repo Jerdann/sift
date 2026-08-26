@@ -170,6 +170,21 @@ describe('provider rule inventory and reconciliation', () => {
     rules.saveInventory('gmail', connection.id, 'live_api', [], 1_000);
     const draft = rules.generate('gmail', connection.id);
     expect(draft.operations).toHaveLength(1);
+    expect(() => rules.approve(draft.id, draft.revision)).toThrow('organization_folders_required');
+    const appliedProposal = proposalRepository.get('gmail', connection.id)!;
+    profile.database.prepare(`
+      INSERT INTO gmail_organization_plans(
+        id,connection_id,analysis_id,revision,state,skipped_ambiguous_streams,
+        created_at,approved_at,proposal_id,proposal_revision,job_id,undo_job_id,plan_kind
+      )
+      SELECT ?,?,id,?,'completed',0,?,?,?,?,NULL,NULL,'organize'
+      FROM gmail_mailbox_analyses WHERE connection_id=? ORDER BY rowid DESC LIMIT 1
+    `).run(
+      'df77dc85-7ef8-40ba-8b52-5acba8d9a119', connection.id,
+      'completed-history-revision', '2026-08-25T12:25:00.000Z',
+      '2026-08-25T12:26:00.000Z', appliedProposal.id,
+      appliedProposal.revision, connection.id,
+    );
     const approved = rules.approve(draft.id, draft.revision);
     expect(approved.job).not.toBeNull();
 

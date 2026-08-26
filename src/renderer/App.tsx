@@ -1265,6 +1265,38 @@ const recency = (latestAt: string | null): { label: string; days: number } => {
   return { label: `${Math.floor(days / 365)} years ago`, days };
 };
 
+const senderRecommendation = (
+  days: number,
+  messages: number,
+): { label: string; detail: string; stale: boolean } => {
+  if (days > 365) {
+    return {
+      label: "Review old mail in Trash review",
+      detail: "Nothing is deleted on this page.",
+      stale: true,
+    };
+  }
+  if (days > 180) {
+    return {
+      label: "Review this sender in Trash review",
+      detail: "Nothing is deleted on this page.",
+      stale: true,
+    };
+  }
+  if (messages > 100) {
+    return {
+      label: "Review a future-mail rule later",
+      detail: "No filter is created here.",
+      stale: false,
+    };
+  }
+  return {
+    label: "Leave in the filing plan",
+    detail: "No extra action is proposed.",
+    stale: false,
+  };
+};
+
 const ProtonOrganizationFlow = ({
   audit,
   analysis,
@@ -1429,42 +1461,51 @@ const ProtonOrganizationFlow = ({
               <div>
                 <h3>Catch the largest and stalest sender streams</h3>
                 <p>
-                  Volume shows the widest net. Last activity separates ongoing
-                  noise from abandoned history that is safer to remove in one
-                  batch.
+                  This is a review-only ranking. It identifies the widest
+                  sender streams and routes any next decision to Rules or Trash
+                  review.
                 </p>
               </div>
+            </div>
+            <div className="review-only-note" role="note">
+              <ShieldCheck size={16} />
+              <span>
+                <strong>Nothing changes from this list.</strong>
+                <small>
+                  No messages are moved or deleted, and no future-mail filters
+                  are created here.
+                </small>
+              </span>
             </div>
             <div className="sender-review">
               <div className="sender-review-head">
                 <span>Sender</span>
-                <span>Addresses</span>
+                <span className="sender-addresses">Addresses</span>
                 <span>Last message</span>
-                <span>Suggested next move</span>
+                <span>Recommendation and consequence</span>
                 <span>Messages</span>
               </div>
               {senders.slice(0, senderLimit).map((sender) => {
                 const age = recency(sender.latestAt);
-                const suggestion =
-                  age.days > 365
-                    ? "Delete old history"
-                    : age.days > 180
-                      ? "Review for deletion"
-                      : sender.messages > 100
-                        ? "Filter future mail"
-                        : "Keep categorized";
+                const recommendation = senderRecommendation(
+                  age.days,
+                  sender.messages,
+                );
                 return (
                   <div key={sender.domain}>
                     <strong>{sender.domain}</strong>
-                    <span>
+                    <span className="sender-addresses">
                       {sender.addresses.length === 1
                         ? sender.addresses[0]
                         : `${sender.addresses.length} addresses`}
                     </span>
                     <small>{age.label}</small>
-                    <b className={age.days > 180 ? "stale" : ""}>
-                      {suggestion}
-                    </b>
+                    <span className="sender-next-step">
+                      <b className={recommendation.stale ? "stale" : ""}>
+                        {recommendation.label}
+                      </b>
+                      <small>{recommendation.detail}</small>
+                    </span>
                     <em>{sender.messages.toLocaleString()}</em>
                   </div>
                 );
@@ -3653,6 +3694,13 @@ const OrganizationProposalEditor = ({
     proposal?.items.filter(
       (item) => (item.scopeAddress ?? "") === currentScope,
     ) ?? [];
+  const activeItems = items.filter((item) => item.enabled);
+  const activeAssignments =
+    proposal?.items.filter((item) => item.enabled).length ?? 0;
+  const currentScopeMessages = activeItems.reduce(
+    (sum, item) => sum + item.messageCount,
+    0,
+  );
   const save = async (
     item: OrganizationProposal["items"][number],
     changes: Partial<
@@ -3727,18 +3775,17 @@ const OrganizationProposalEditor = ({
         <>
           <div className="proposal-revision">
             <span>
-              <b>{proposal.items.filter((item) => item.enabled).length}</b>{" "}
-              active categories
+              <b>{items.length}</b> categories shown for this address
             </span>
             <span>
-              <b>
-                {proposal.items
-                  .reduce((sum, item) => sum + item.messageCount, 0)
-                  .toLocaleString()}
-              </b>{" "}
-              affected messages
+              <b>{activeItems.length}</b> enabled ·{" "}
+              {currentScopeMessages.toLocaleString()} affected messages
             </span>
-            <small>Draft revision {proposal.revision.slice(0, 10)}</small>
+            <small>
+              {activeAssignments} total assignments across {scopes.length}{" "}
+              address scope{scopes.length === 1 ? "" : "s"} · Draft revision{" "}
+              {proposal.revision.slice(0, 10)}
+            </small>
           </div>
           <div
             className="proposal-scope-tabs"
@@ -3884,6 +3931,8 @@ const RuleReconciliationPanel = ({
   account,
   inventory,
   plan,
+  organizationReady,
+  onOpenOrganize,
   onRefresh,
   onGenerate,
   onApprove,
@@ -3894,6 +3943,8 @@ const RuleReconciliationPanel = ({
   account: MailAccountSummary;
   inventory: RuleInventory | null;
   plan: RuleReconciliationPlan | null;
+  organizationReady: boolean;
+  onOpenOrganize(): void;
   onRefresh(account: MailAccountSummary): Promise<void>;
   onGenerate(account: MailAccountSummary): Promise<void>;
   onApprove(plan: RuleReconciliationPlan): Promise<void>;
@@ -3905,6 +3956,7 @@ const RuleReconciliationPanel = ({
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [showAllOperations, setShowAllOperations] = useState(false);
   const act = async (key: string, action: () => Promise<void>) => {
     setBusy(key);
     setError("");
@@ -3935,6 +3987,38 @@ const RuleReconciliationPanel = ({
   const completed =
     plan?.operations.filter((operation) => operation.state === "succeeded")
       .length ?? 0;
+  const visibleOperations = showAllOperations
+    ? (plan?.operations ?? [])
+    : (plan?.operations.slice(0, 25) ?? []);
+  const operationEffect = (
+    operation: RuleReconciliationPlan["operations"][number],
+  ): string => {
+    const desired = operation.desired ?? operation.priorManaged;
+    if (operation.kind === "remove") {
+      return "Remove this Sift-managed rule; matching future mail will stop being filed by it.";
+    }
+    if (!desired) return "No provider behavior change is available to preview.";
+    const consequences = [
+      desired.spam
+        ? "send it to Spam"
+        : `file it in “${desired.targetPath}”`,
+      desired.markRead ? "mark it read" : null,
+      desired.archive ? "remove it from the inbox" : null,
+    ].filter((value): value is string => Boolean(value));
+    const behavior = consequences.join(", ");
+    if (operation.kind === "adopt") {
+      return `Take ownership of an identical existing rule. Its behavior stays the same: ${behavior}.`;
+    }
+    if (operation.kind === "replace") {
+      return `Replace Sift’s prior managed rule so future matches ${behavior}.`;
+    }
+    if (operation.kind === "unchanged") {
+      return `Keep the verified existing rule: future matches ${behavior}.`;
+    }
+    return account.provider === "proton"
+      ? `Add this instruction to the exported Sieve file: future matches ${behavior}.`
+      : `Create a provider rule so future matches ${behavior}.`;
+  };
   return (
     <section
       className="readiness-panel rule-reconciliation"
@@ -3948,21 +4032,27 @@ const RuleReconciliationPanel = ({
           <h2 id={`rules-${account.id}`}>
             {account.provider === "gmail"
               ? "Reconcile Gmail filters"
-              : "Build the managed Proton Sieve export"}
+              : account.provider === "outlook"
+                ? "Reconcile Outlook inbox rules"
+                : "Build the managed Proton Sieve export"}
           </h2>
         </div>
         <span className="secured-label">
           <ShieldCheck size={14} />
           {account.provider === "gmail"
             ? "Verified provider state"
-            : "Manual Proton import"}
+            : account.provider === "outlook"
+              ? "Verified provider state"
+              : "Manual Proton import"}
         </span>
       </div>
       <div className="rule-capability">
         <p>
           {account.provider === "gmail"
             ? "Sift inventories live Gmail filters, owns only the filters it creates, and replaces changed managed filters without touching unrelated rules."
-            : "Proton Bridge does not expose server-side filters. Sift tracks only its versioned Sieve exports and never claims visibility into filters created in Proton Mail."}
+            : account.provider === "outlook"
+              ? "Sift inventories live Outlook inbox rules, owns only the rules it creates, and replaces changed managed rules without touching unrelated automation."
+              : "Proton Bridge does not expose server-side filters. Sift tracks only its versioned Sieve exports and never claims visibility into filters created in Proton Mail."}
         </p>
         <button
           className="secondary-button"
@@ -3976,6 +4066,35 @@ const RuleReconciliationPanel = ({
               ? "Refresh rule inventory"
               : "Inventory rules first"}
         </button>
+      </div>
+      <div
+        className={`rule-folder-gate ${organizationReady ? "ready" : "blocked"}`}
+        role="status"
+      >
+        <span>
+          {organizationReady ? <Check size={16} /> : <FolderTree size={16} />}
+        </span>
+        <div>
+          <strong>
+            {organizationReady
+              ? "Destination folders are ready"
+              : "Create the approved folders before enabling rules"}
+          </strong>
+          <small>
+            {organizationReady
+              ? "The completed Organize run created the destinations used below. You can now review and approve future-mail automation."
+              : "You may inventory and preview the plan now, but Sift will not apply or export it. Run the approved historical filing plan in Organize first so every destination exists."}
+          </small>
+        </div>
+        {!organizationReady ? (
+          <button
+            className="secondary-button compact"
+            type="button"
+            onClick={onOpenOrganize}
+          >
+            Open Organize
+          </button>
+        ) : null}
       </div>
       {inventory ? (
         <div className="rule-inventory-metrics">
@@ -4031,22 +4150,33 @@ const RuleReconciliationPanel = ({
         <div className="rule-plan-review">
           <div className="proposal-revision">
             <span>
-              <b>{actionable.length}</b> provider changes
+              <b>{actionable.length}</b> future-mail rule changes
             </span>
             <span>
               <b>{plan.operations.length - actionable.length}</b> already
-              correct
+              correct · no change
             </span>
             <small>Plan revision {plan.revision.slice(0, 10)}</small>
+          </div>
+          <div className="rule-plan-explainer" role="note">
+            <ShieldCheck size={16} />
+            <span>
+              <strong>Review only until you explicitly approve.</strong>
+              <small>
+                These rules affect future messages only. They do not move or
+                delete existing mail; the exact effect of every proposed rule
+                is written below.
+              </small>
+            </span>
           </div>
           <div className="rule-operation-list">
             <div className="rule-operation-head">
               <span>Operation</span>
-              <span>Sender and address</span>
-              <span>Destination</span>
+              <span>Matches future mail from / to</span>
+              <span>Exact effect</span>
               <span>Status</span>
             </div>
-            {plan.operations.slice(0, 200).map((operation) => (
+            {visibleOperations.map((operation) => (
               <div
                 className={`rule-operation-row ${operation.kind}`}
                 key={operation.id}
@@ -4064,25 +4194,43 @@ const RuleReconciliationPanel = ({
                       "No address scope"}
                   </small>
                 </span>
-                <span>
-                  {operation.desired?.targetPath ?? "Remove from Sift registry"}
+                <span className="rule-operation-effect">
+                  {operationEffect(operation)}
                 </span>
                 <em>{operation.state.replace("_", " ")}</em>
               </div>
             ))}
           </div>
+          {plan.operations.length > 25 ? (
+            <button
+              className="sender-expand rule-operation-expand"
+              type="button"
+              onClick={() => setShowAllOperations((current) => !current)}
+            >
+              {showAllOperations
+                ? "Show the first 25 rules"
+                : `Show all ${plan.operations.length} exact rules`}
+            </button>
+          ) : null}
           {plan.state === "draft" ? (
             <div className="cleanup-approval">
               <label>
                 <input
                   type="checkbox"
                   checked={consent}
+                  disabled={!organizationReady}
                   onChange={(event) => setConsent(event.target.checked)}
                 />
                 <span>
-                  <strong>I approve these exact managed-rule changes</strong>
+                  <strong>
+                    {organizationReady
+                      ? "I approve these exact future-mail rule changes"
+                      : "Approval is locked until Organize creates the folders"}
+                  </strong>
                   <small>
-                    {account.provider === "gmail"
+                    {!organizationReady
+                      ? "Return to Organize, apply the historical filing plan, then come back to review this plan again."
+                      : account.provider === "gmail"
                       ? `${externalCount} external filters remain untouched. Each Sift operation is re-read and verified before success.`
                       : "This saves a checksum-tracked Sieve file for manual review and import in Proton Mail."}
                   </small>
@@ -4091,7 +4239,7 @@ const RuleReconciliationPanel = ({
               <button
                 className="primary-button"
                 type="button"
-                disabled={!consent || Boolean(busy)}
+                disabled={!organizationReady || !consent || Boolean(busy)}
                 onClick={() =>
                   void act("apply", async () => {
                     if (account.provider === "proton")
@@ -4550,6 +4698,28 @@ const AppShell = ({
     );
     return sum + Math.max(unreviewed, confirmed ? 0 : 1);
   }, 0);
+  const foldersReadyFor = (account: MailAccountSummary): boolean => {
+    const proposal = proposals[account.id];
+    if (!proposal) return false;
+    if (account.provider === "proton") {
+      return Boolean(
+        cleanupPlan?.kind === "organize" &&
+          cleanupPlan.state === "completed" &&
+          cleanupPlan.proposalId === proposal.id &&
+          cleanupPlan.proposalRevision === proposal.revision,
+      );
+    }
+    const historyPlan =
+      account.provider === "gmail"
+        ? gmailOrganization
+        : outlookOrganization;
+    return Boolean(
+      historyPlan?.kind === "organize" &&
+        historyPlan.state === "completed" &&
+        historyPlan.proposalId === proposal.id &&
+        historyPlan.proposalRevision === proposal.revision,
+    );
+  };
 
   const taskIntro = (title: string, copy: string) => (
     <div className="page-heading task-heading">
@@ -5017,6 +5187,8 @@ const AppShell = ({
                       account={account}
                       inventory={ruleInventories[account.id] ?? null}
                       plan={rulePlans[account.id] ?? null}
+                      organizationReady={foldersReadyFor(account)}
+                      onOpenOrganize={() => setActivePage("organize")}
                       onRefresh={onRefreshRuleInventory}
                       onGenerate={onGenerateRulePlan}
                       onApprove={onApproveRulePlan}

@@ -4,6 +4,20 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-25
+
+### Changed
+
+- Organize now reports the category rows and affected messages for the currently selected address, with the mailbox-wide assignment count labeled separately.
+- Sender cleanup is explicitly review-only and routes every recommendation to Rules or Trash review with a plain-language statement of what does—and does not—happen on that page.
+- Rule reconciliation now explains the exact future-mail effect of every create, replace, adopt, remove, and unchanged operation, previews 25 operations initially, and lets reviewers expand the full plan.
+- Gmail, Outlook, and Proton rule screens now use provider-correct capability and action language.
+
+### Security
+
+- Rule approval and Proton Sieve export are locked until the matching organization proposal has completed its historical filing run and created the destination folders or labels.
+- The main process independently enforces the folder prerequisite against the exact proposal ID and revision, preventing stale plans or direct IPC calls from bypassing the guided flow.
+
 ## [1.0.1] - 2026-08-25
 
 ### Fixed

@@ -14,6 +14,8 @@ export const cleanupPlanSchema = z.object({
   connectionId: z.uuid(),
   kind: z.enum(['organize', 'trash']),
   revision: z.string(),
+  proposalId: z.uuid().nullable(),
+  proposalRevision: z.string().length(64).nullable(),
   state: z.enum(['draft', 'approved', 'executing', 'completed', 'failed']),
   createdAt: z.iso.datetime(),
   approvedAt: z.iso.datetime().nullable(),

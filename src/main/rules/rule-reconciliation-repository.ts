@@ -495,6 +495,8 @@ export class RuleReconciliationRepository {
     const plan = this.getPlan(planId);
     if (plan.state !== "draft" || plan.revision !== revision)
       throw new Error("rule_plan_changed");
+    if (!this.organizationApplied(plan))
+      throw new Error("organization_folders_required");
     const currentProposal = this.#database
       .prepare(
         "SELECT revision,state FROM organization_proposals WHERE id=? AND profile_id=?",
@@ -783,9 +785,31 @@ export class RuleReconciliationRepository {
     ) {
       throw new Error("proton_rule_plan_changed");
     }
+    if (!this.organizationApplied(plan))
+      throw new Error("organization_folders_required");
     return plan.operations.flatMap((operation) =>
       operation.desired ? [operation.desired] : [],
     );
+  }
+
+  organizationApplied(plan: RuleReconciliationPlan): boolean {
+    const table =
+      plan.provider === "gmail"
+        ? "gmail_organization_plans"
+        : plan.provider === "outlook"
+          ? "outlook_history_plans"
+          : "cleanup_plans";
+    const row = this.#database
+      .prepare(
+        `SELECT 1 applied FROM ${table}
+         WHERE connection_id=? AND plan_kind='organize' AND state='completed'
+           AND proposal_id=? AND proposal_revision=?
+         ORDER BY rowid DESC LIMIT 1`,
+      )
+      .get(plan.connectionId, plan.proposalId, plan.proposalRevision) as
+      | { applied: number }
+      | undefined;
+    return Boolean(row?.applied);
   }
 
   finalizeProtonExport(
