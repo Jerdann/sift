@@ -17,6 +17,41 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
       page.getByRole("heading", { name: "A lighter inbox starts here." }),
     ).toBeVisible();
 
+    await page
+      .getByRole("button", { name: "Privacy & update settings" })
+      .click();
+    const automaticUpdates = page.getByRole("switch", {
+      name: "Download updates automatically",
+    });
+    await expect(automaticUpdates).not.toBeChecked();
+    await page.screenshot({
+      path: "test-results/settings-workspace.png",
+      fullPage: true,
+    });
+    await electronApp.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.setSize(700, 800),
+    );
+    await page.screenshot({
+      path: "test-results/settings-workspace-compact.png",
+      fullPage: true,
+    });
+    await electronApp.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.setSize(1280, 800),
+    );
+    await automaticUpdates.click();
+    await expect(automaticUpdates).toBeChecked();
+    await expect(
+      page.getByText("Automatic update checks are enabled."),
+    ).toBeVisible();
+    await automaticUpdates.click();
+    await expect(automaticUpdates).not.toBeChecked();
+    await expect(
+      page.getByText("Automatic update checks are disabled."),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Back to local profiles" })
+      .click();
+
     await page.getByRole("button", { name: "Create local profile" }).click();
     await page.getByLabel("Profile name").fill("Owner");
     await page.getByRole("button", { name: "Create profile" }).click();
@@ -25,6 +60,15 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         name: "Keep the mail that matters. Clear out the rest.",
       }),
     ).toBeVisible();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(
+      page.getByRole("heading", {
+        name: "Control what Sift keeps and when it updates.",
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("switch", { name: "Download updates automatically" }),
+    ).not.toBeChecked();
     await page.getByRole("button", { name: "Accounts", exact: true }).click();
     await expect(
       page.getByRole("heading", {
@@ -151,6 +195,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "generateOutlookDeletionPlan",
         "generateOutlookOrganizationPlan",
         "generateRulePlan",
+        "getAppSettings",
         "getCleanupPlan",
         "getCurrentProtonAudit",
         "getDiagnostics",
@@ -223,6 +268,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "undoOutlookOrganizationPlan",
         "undoRulePlan",
         "updateAccountIdentity",
+        "updateAppSettings",
       ],
     });
 
@@ -251,6 +297,10 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
     await expect(page.getByText("Owner", { exact: true })).toBeVisible();
     await expect(page.getByText("Second user", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Open" }).nth(1).click();
+
+    expect(
+      await page.evaluate(() => window.emailOrganizer.getAppSettings()),
+    ).toMatchObject({ autoUpdateEnabled: false });
 
     const recovered = await page.evaluate(
       (jobId) => window.emailOrganizer.getJob({ jobId }),

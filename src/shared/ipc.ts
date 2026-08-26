@@ -89,9 +89,15 @@ import type {
   RestoreProfileInput,
   RestoreResult,
 } from "./contracts/recovery";
+import type {
+  AppSettings,
+  UpdateAppSettingsInput,
+} from "./contracts/settings";
 
 export const IPC_CHANNELS = Object.freeze({
   appGetVersion: "app:get-version",
+  appSettingsGet: "app-settings:get",
+  appSettingsUpdate: "app-settings:update",
   accountsList: "accounts:list",
   accountsSelect: "accounts:select",
   identitiesList: "identities:list",
@@ -195,6 +201,8 @@ export const IPC_CHANNELS = Object.freeze({
 
 export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   "getVersion",
+  "getAppSettings",
+  "updateAppSettings",
   "listMailAccounts",
   "selectMailAccount",
   "listAccountIdentities",
@@ -298,6 +306,8 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
 
 export interface EmailOrganizerBridge {
   getVersion(): Promise<string>;
+  getAppSettings(): Promise<AppSettings>;
+  updateAppSettings(input: UpdateAppSettingsInput): Promise<AppSettings>;
   listMailAccounts(): Promise<MailAccountSummary[]>;
   selectMailAccount(input: AccountSelectionInput): Promise<MailAccountSummary>;
   listAccountIdentities(

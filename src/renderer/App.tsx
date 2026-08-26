@@ -4,13 +4,18 @@ import {
   Check,
   ChevronRight,
   CircleDot,
+  CloudOff,
+  Database,
   FolderTree,
   Inbox,
+  KeyRound,
   LockKeyhole,
   ListFilter,
   LifeBuoy,
   MailPlus,
+  RefreshCw,
   Search,
+  Settings2,
   ShieldCheck,
   Tags,
   UserRound,
@@ -66,6 +71,10 @@ import type {
   RebuildIndexResult,
   RestoreResult,
 } from "../shared/contracts/recovery";
+import type {
+  AppSettings,
+  UpdateAppSettingsInput,
+} from "../shared/contracts/settings";
 
 const mailCategoryOptions: MailCategory[] = [
   "personal",
@@ -93,7 +102,8 @@ type PageId =
   | "rules"
   | "unsubscribe"
   | "delete"
-  | "recovery";
+  | "recovery"
+  | "settings";
 const navItems: ReadonlyArray<{
   id: PageId;
   label: string;
@@ -108,6 +118,7 @@ const navItems: ReadonlyArray<{
   { id: "unsubscribe", label: "Unsubscribe", icon: Tags },
   { id: "delete", label: "Trash review", icon: Archive },
   { id: "recovery", label: "Recovery", icon: LifeBuoy },
+  { id: "settings", label: "Settings", icon: Settings2 },
 ];
 
 const BrandMark = () => (
@@ -118,9 +129,273 @@ const BrandMark = () => (
   </div>
 );
 
+const SettingsPanel = ({
+  settings,
+  onUpdate,
+  onOpenAccounts,
+  onOpenRecovery,
+}: {
+  settings: AppSettings;
+  onUpdate(input: UpdateAppSettingsInput): Promise<void>;
+  onOpenAccounts?: () => void;
+  onOpenRecovery?: () => void;
+}) => {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const setAutomaticUpdates = async (enabled: boolean) => {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await onUpdate({ autoUpdateEnabled: enabled });
+      setNotice(
+        enabled
+          ? "Automatic update checks are enabled."
+          : "Automatic update checks are disabled.",
+      );
+    } catch {
+      setError(
+        "Sift could not save the update preference. The previous setting is still in effect.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="page-heading task-heading settings-heading">
+        <h1>Control what Sift keeps and when it updates.</h1>
+        <p>
+          Update behavior is app-wide. Mail data remains isolated inside each
+          local profile.
+        </p>
+      </div>
+
+      <section
+        className="readiness-panel settings-update-panel"
+        aria-labelledby="software-update-title"
+      >
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">SOFTWARE UPDATES</p>
+            <h2 id="software-update-title">Choose when Sift downloads</h2>
+          </div>
+          <span className="secured-label">v{settings.appVersion}</span>
+        </div>
+        <div className="settings-update-control">
+          <span className="settings-control-icon">
+            <RefreshCw size={18} />
+          </span>
+          <span>
+            <strong>Download updates automatically</strong>
+            <small>
+              When enabled, installed Windows builds check Sift’s public GitHub
+              release feed hourly and download newer releases in the
+              background.
+            </small>
+          </span>
+          <label className="settings-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label="Download updates automatically"
+              checked={settings.autoUpdateEnabled}
+              disabled={busy}
+              onChange={(event) =>
+                void setAutomaticUpdates(event.target.checked)
+              }
+            />
+            <span aria-hidden="true" />
+            <b>{settings.autoUpdateEnabled ? "On" : "Off"}</b>
+          </label>
+        </div>
+        <div className="update-behavior-grid">
+          <div>
+            <strong>
+              {settings.automaticUpdatesActive
+                ? "Background checks are active"
+                : settings.autoUpdateEnabled && !settings.updatesSupported
+                  ? "Preference saved for installed builds"
+                  : "No new automatic checks or downloads"}
+            </strong>
+            <p>
+              {settings.automaticUpdatesActive
+                ? "Sift checks for complete public releases. It sends no mailbox data with an update request."
+                : settings.autoUpdateEnabled && !settings.updatesSupported
+                  ? "Automatic updates run only in the installed Windows version, not this development or unpacked build."
+                  : "You can install a release manually whenever you choose. A request already in progress may finish after this switch is turned off."}
+            </p>
+          </div>
+          <div>
+            <strong>Choose when to leave the current session</strong>
+            <p>
+              Sift defaults its update prompt to Later and never forces the
+              current session to restart. Once an update has downloaded,
+              Electron applies it the next time Sift starts even if you chose
+              Later.
+            </p>
+          </div>
+        </div>
+        {notice ? (
+          <p className="settings-notice" role="status">
+            {notice}
+          </p>
+        ) : null}
+        {error ? (
+          <p className="connection-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </section>
+
+      <section
+        className="readiness-panel privacy-panel"
+        aria-labelledby="privacy-policy-title"
+      >
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">PRIVACY &amp; DATA RETENTION</p>
+            <h2 id="privacy-policy-title">Your mailbox stays yours</h2>
+          </div>
+          <span className="secured-label">
+            <LockKeyhole size={14} /> Local-first
+          </span>
+        </div>
+        <p className="privacy-lead">
+          Sift has no hosted mailbox database, advertising system, analytics,
+          or telemetry service. Its working data is stored on this computer;
+          provider requests go directly to Proton Bridge, Google, or Microsoft.
+        </p>
+        <div
+          className="retention-table"
+          role="table"
+          aria-label="Data retention policy"
+        >
+          <div className="retention-head" role="row">
+            <span role="columnheader">Data</span>
+            <span role="columnheader">What is retained</span>
+            <span role="columnheader">How to remove it</span>
+          </div>
+          <div role="row">
+            <span className="retention-label" role="cell">
+              <Database size={16} />
+              <strong>Local mail index</strong>
+            </span>
+            <p role="cell">
+              Sender and recipient addresses, dates, subjects, selected
+              headers, message identifiers, and folder or label state. Proton
+              body text is stored only when optional body extraction is
+              enabled; Gmail and Outlook scans remain metadata-only.
+            </p>
+            <p role="cell">
+              Disconnect that account to remove its provider-scoped index, or
+              use Recovery → Rebuild local index to clear the profile’s
+              downloaded metadata and derived analysis.
+            </p>
+          </div>
+          <div role="row">
+            <span className="retention-label" role="cell">
+              <KeyRound size={16} />
+              <strong>Connection secrets</strong>
+            </span>
+            <p role="cell">
+              OAuth refresh tokens and Proton Bridge credentials are encrypted
+              with the current Windows user’s operating-system protection and
+              are kept outside the renderer.
+            </p>
+            <p role="cell">
+              Disconnecting an account removes its encrypted credential and
+              local connection record. Encrypted backups remain wherever you
+              chose to save them.
+            </p>
+          </div>
+          <div role="row">
+            <span className="retention-label" role="cell">
+              <ShieldCheck size={16} />
+              <strong>Plans and receipts</strong>
+            </span>
+            <p role="cell">
+              Address decisions, proposals, managed-rule ownership,
+              unsubscribe history, job checkpoints, and verified Undo receipts
+              remain in that local profile so later operations can be safe and
+              resumable.
+            </p>
+            <p role="cell">
+              Rebuild clears proposals and incomplete jobs but preserves
+              managed-rule ownership and unsubscribe history. Removing the
+              local profile files removes the remaining local records.
+            </p>
+          </div>
+          <div role="row">
+            <span className="retention-label" role="cell">
+              <CloudOff size={16} />
+              <strong>Provider mail</strong>
+            </span>
+            <p role="cell">
+              Messages remain with the mail provider. Sift does not operate a
+              cloud copy and does not permanently delete provider mail.
+            </p>
+            <p role="cell">
+              Provider Spam, Trash, and Deleted Items retention is controlled
+              by Proton, Google, or Microsoft. Undo is available only where the
+              reviewed Sift plan supports it.
+            </p>
+          </div>
+        </div>
+        <div className="privacy-network-boundary">
+          <strong>Network boundary</strong>
+          <p>
+            Sift contacts connected mail providers, local Proton Bridge, OAuth
+            endpoints, approved one-click unsubscribe endpoints, and—only when
+            automatic updates are enabled—the public Sift update service. It
+            does not send the local mailbox index, credentials, subjects, or
+            addresses to the update service.
+          </p>
+        </div>
+        <div className="privacy-removal-note">
+          <strong>Uninstall is not secure erasure.</strong>
+          <p>
+            Disconnect accounts first on a shared computer. Windows may leave
+            encrypted local profile files after the app is removed; delete the
+            Sift application-data folder separately if permanent local removal
+            is required.
+          </p>
+          {onOpenAccounts || onOpenRecovery ? (
+            <div>
+              {onOpenAccounts ? (
+                <button
+                  className="secondary-button compact"
+                  type="button"
+                  onClick={onOpenAccounts}
+                >
+                  Open connected accounts
+                </button>
+              ) : null}
+              {onOpenRecovery ? (
+                <button
+                  className="secondary-button compact"
+                  type="button"
+                  onClick={onOpenRecovery}
+                >
+                  Open Recovery
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </section>
+    </>
+  );
+};
+
 interface ProfilePickerProps {
   profiles: ProfileSummary[];
   loadError: string;
+  settings: AppSettings;
+  onUpdateSettings(input: UpdateAppSettingsInput): Promise<void>;
   onCreate(profileName: string): Promise<void>;
   onOpen(profile: ProfileSummary): Promise<void>;
 }
@@ -128,9 +403,12 @@ interface ProfilePickerProps {
 const ProfilePicker = ({
   profiles,
   loadError,
+  settings,
+  onUpdateSettings,
   onCreate,
   onOpen,
 }: ProfilePickerProps) => {
+  const [showSettings, setShowSettings] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [profileName, setProfileName] = useState("");
   const [error, setError] = useState("");
@@ -155,6 +433,26 @@ const ProfilePicker = ({
       setBusy(false);
     }
   };
+
+  if (showSettings) {
+    return (
+      <main className="profile-screen settings-entry-screen">
+        <section className="settings-entry-content">
+          <button
+            className="settings-back-button"
+            type="button"
+            onClick={() => setShowSettings(false)}
+          >
+            <ChevronRight size={15} /> Back to local profiles
+          </button>
+          <SettingsPanel settings={settings} onUpdate={onUpdateSettings} />
+        </section>
+        <div className="screen-corner-status">
+          <CircleDot size={12} /> LOCAL ONLY
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="profile-screen">
@@ -299,6 +597,13 @@ const ProfilePicker = ({
           A local profile is not an email account. You'll connect Proton Mail or
           Gmail later.
         </p>
+        <button
+          className="picker-settings-button"
+          type="button"
+          onClick={() => setShowSettings(true)}
+        >
+          <Settings2 size={14} /> Privacy &amp; update settings
+        </button>
       </section>
       <div className="screen-corner-status">
         <CircleDot size={12} /> LOCAL ONLY
@@ -310,6 +615,8 @@ const ProfilePicker = ({
 interface AppShellProps {
   profileName: string;
   onSwitchProfile(): void;
+  settings: AppSettings;
+  onUpdateSettings(input: UpdateAppSettingsInput): Promise<void>;
   accounts: MailAccountSummary[];
   identities: Record<string, AccountIdentitySummary[]>;
   onSelectAccount(account: MailAccountSummary): Promise<void>;
@@ -4556,9 +4863,11 @@ const RecoveryPanel = ({
         <div>
           <strong>Updates and rollback</strong>
           <p>
-            Completed GitHub releases update automatically. If a release causes
-            a problem, create a backup and reinstall an earlier version from the
-            Releases page; the profile schema refuses incompatible restores.
+            Automatic downloads are controlled in Settings. Choosing Later
+            keeps the current session open; an already-downloaded update applies
+            the next time Sift starts. If a release causes a problem, create a
+            backup and reinstall an earlier version from the Releases page; the
+            profile schema refuses incompatible restores.
           </p>
         </div>
         <div>
@@ -4587,6 +4896,8 @@ const RecoveryPanel = ({
 const AppShell = ({
   profileName,
   onSwitchProfile,
+  settings,
+  onUpdateSettings,
   accounts,
   identities,
   onSelectAccount,
@@ -5347,6 +5658,15 @@ const AppShell = ({
               />
             </>
           ) : null}
+
+          {activePage === "settings" ? (
+            <SettingsPanel
+              settings={settings}
+              onUpdate={onUpdateSettings}
+              onOpenAccounts={() => setActivePage("accounts")}
+              onOpenRecovery={() => setActivePage("recovery")}
+            />
+          ) : null}
         </main>
       </div>
     </div>
@@ -5354,6 +5674,7 @@ const AppShell = ({
 };
 
 export const App = () => {
+  const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [profiles, setProfiles] = useState<ProfileSummary[]>([]);
   const [activeProfile, setActiveProfile] = useState<ProfileSummary | null>(
     null,
@@ -5535,15 +5856,32 @@ export const App = () => {
   };
 
   useEffect(() => {
-    void window.emailOrganizer
-      .listProfiles()
-      .then(setProfiles)
-      .catch(() =>
-        setLoadError(
-          "Sift couldn't load local profiles. Try reopening the app.",
-        ),
-      )
-      .finally(() => setLoading(false));
+    void Promise.allSettled([
+      window.emailOrganizer.listProfiles(),
+      window.emailOrganizer.getAppSettings(),
+    ]).then(([profileResult, settingsResult]) => {
+      const errors: string[] = [];
+      if (profileResult.status === "fulfilled") {
+        setProfiles(profileResult.value);
+      } else {
+        errors.push("Sift couldn't load local profiles.");
+      }
+      if (settingsResult.status === "fulfilled") {
+        setAppSettings(settingsResult.value);
+      } else {
+        errors.push("Sift couldn't load app settings; automatic updates remain off.");
+        setAppSettings({
+          autoUpdateEnabled: false,
+          automaticUpdatesActive: false,
+          updatesSupported: false,
+          appVersion: "unknown",
+        });
+      }
+      setLoadError(
+        errors.length > 0 ? `${errors.join(" ")} Try reopening the app.` : "",
+      );
+      setLoading(false);
+    });
   }, []);
 
   useEffect(
@@ -6077,7 +6415,11 @@ export const App = () => {
       }),
     );
 
-  if (loading) {
+  const updateAppSettings = async (input: UpdateAppSettingsInput) => {
+    setAppSettings(await window.emailOrganizer.updateAppSettings(input));
+  };
+
+  if (loading || !appSettings) {
     return (
       <main className="loading-screen" aria-live="polite">
         <BrandMark />
@@ -6090,6 +6432,8 @@ export const App = () => {
     <AppShell
       profileName={activeProfile.displayName}
       onSwitchProfile={() => setActiveProfile(null)}
+      settings={appSettings}
+      onUpdateSettings={updateAppSettings}
       accounts={accounts}
       identities={identities}
       onSelectAccount={selectAccount}
@@ -6186,6 +6530,8 @@ export const App = () => {
     <ProfilePicker
       profiles={profiles}
       loadError={loadError}
+      settings={appSettings}
+      onUpdateSettings={updateAppSettings}
       onCreate={createProfile}
       onOpen={openProfile}
     />

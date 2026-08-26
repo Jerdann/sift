@@ -25,10 +25,15 @@ import { registerGmailHandlers } from "./ipc/gmail-handlers";
 import { registerAccountHandlers } from "./ipc/account-handlers";
 import { registerOutlookHandlers } from "./ipc/outlook-handlers";
 import { registerRecoveryHandlers } from "./ipc/recovery-handlers";
+import { registerSettingsHandlers } from "./ipc/settings-handlers";
 import { ProfileRepository } from "./profiles/profile-repository";
 import { ProfileSession } from "./profiles/profile-session";
 import { shouldUseLegacyUserData } from "./profiles/user-data-policy";
-import { startAutomaticUpdates } from "./updates/auto-update";
+import {
+  SiftAutomaticUpdateController,
+  type AutomaticUpdateController,
+} from "./updates/auto-update";
+import { AppSettingsRepository } from "./settings/app-settings-repository";
 import { SafeStorageVault } from "./secrets/safe-storage-vault";
 import {
   APP_HOST,
@@ -107,18 +112,16 @@ const registerAppProtocol = (): void => {
   });
 };
 
-const registerIpcHandlers = (): void => {
+const registerIpcHandlers = (
+  applicationDataRoot: string,
+  updates: AutomaticUpdateController,
+): void => {
   ipcMain.removeHandler(IPC_CHANNELS.appGetVersion);
   ipcMain.handle(IPC_CHANNELS.appGetVersion, (event) => {
     assertTrustedIpcSender(event.senderFrame?.url, developmentServerUrl);
     return z.string().parse(app.getVersion());
   });
 
-  const testDataRoot = process.env.MAIL_STEWARD_TEST_DATA_ROOT;
-  const applicationDataRoot =
-    !app.isPackaged && testDataRoot
-      ? path.resolve(testDataRoot)
-      : app.getPath("userData");
   const repository = new ProfileRepository(applicationDataRoot);
   const profileSession = new ProfileSession(
     repository,
@@ -155,6 +158,7 @@ const registerIpcHandlers = (): void => {
     appVersion: app.getVersion(),
     developmentServerUrl,
   });
+  registerSettingsHandlers({ ipcMain, updates, developmentServerUrl });
 };
 
 export const createMainWindow = (): BrowserWindow => {
@@ -190,11 +194,18 @@ export const createMainWindow = (): BrowserWindow => {
 
 if (!handlingSquirrelStartup)
   void app.whenReady().then(() => {
+    const testDataRoot = process.env.MAIL_STEWARD_TEST_DATA_ROOT;
+    const applicationDataRoot =
+      !app.isPackaged && testDataRoot
+        ? path.resolve(testDataRoot)
+        : app.getPath("userData");
+    const settings = new AppSettingsRepository(applicationDataRoot);
+    const updates = new SiftAutomaticUpdateController(settings);
     registerAppProtocol();
     secureSession(session.defaultSession);
-    registerIpcHandlers();
+    registerIpcHandlers(applicationDataRoot, updates);
     createMainWindow();
-    startAutomaticUpdates();
+    updates.start();
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createMainWindow();

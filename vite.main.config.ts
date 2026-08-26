@@ -22,7 +22,6 @@ export default defineConfig({
         'electron',
         'electron-squirrel-startup',
         'imapflow',
-        'update-electron-app',
         ...nodeExternals,
       ],
     },

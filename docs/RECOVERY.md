@@ -44,7 +44,7 @@ Run Scan again after rebuilding. Existing provider rules are inventoried again b
 
 ## Updates and rollback
 
-Installed Windows builds check completed public GitHub releases and download newer Squirrel packages in the background. Sift asks before restarting to apply an update.
+Automatic updates are off until the user enables them in Settings. Enabled installed Windows builds can check completed public GitHub releases hourly and download newer Squirrel packages in the background. The prompt defaults to **Later**, which keeps the current session open; Electron applies an already-downloaded update the next time Sift starts.
 
 To roll back:
 

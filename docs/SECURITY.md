@@ -24,8 +24,9 @@ Sift is a local-first desktop application with approval-gated provider mutations
 - Content-free diagnostics expose counts and health status only.
 - Encrypted backups authenticate the complete payload and are intended for the same Windows user and device. Restore validates the target profile, checksums, database schema, integrity, relationships, and secret-file set before replacement.
 - A local-index rebuild preserves connections, managed-rule ownership, and unsubscribe history while removing downloaded metadata and derived analysis.
+- The app-wide automatic-update preference is stored locally, can be changed before opening a profile, and fails closed if its preference file is damaged.
 
-See [Recovery and maintenance](RECOVERY.md) for operational details.
+See [Privacy and data retention](PRIVACY.md) and [Recovery and maintenance](RECOVERY.md) for operational details.
 
 ## Reporting a vulnerability
 

@@ -87,6 +87,7 @@ try {
 
   const result = await window.evaluate(async () => ({
     profileCount: (await window.emailOrganizer.listProfiles()).length,
+    settings: await window.emailOrganizer.getAppSettings(),
     title: document.title,
     version: await window.emailOrganizer.getVersion(),
   }));
@@ -96,6 +97,15 @@ try {
   }
   if (!/^\d+\.\d+\.\d+/.test(result.version)) {
     throw new Error(`Unexpected packaged app version: ${result.version}`);
+  }
+  if (
+    !result.settings.updatesSupported ||
+    result.settings.autoUpdateEnabled ||
+    result.settings.automaticUpdatesActive
+  ) {
+    throw new Error(
+      `Packaged update preference boundary failed: ${JSON.stringify(result.settings)}`,
+    );
   }
   const bridgeRuntime = await window.evaluate(async () => {
     await window.emailOrganizer.createProfile({ displayName: "Package smoke" });

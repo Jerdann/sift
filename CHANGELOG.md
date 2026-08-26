@@ -4,6 +4,27 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-26
+
+### Added
+
+- An app-wide Settings workspace available both before opening a local profile and from the primary navigation.
+- A plain-language privacy and data-retention policy covering the local mail index, OS-encrypted credentials, plans and receipts, provider mail, exports, backups, network connections, and removal boundaries.
+- A persisted automatic-update preference with immediate scheduled-check cancellation and relaunch persistence.
+
+### Changed
+
+- Automatic updates now require an explicit opt-in before the first update request.
+- The updater is now controlled directly by Sift instead of a generic wrapper, allowing the saved preference to govern checks, downloads, and restart notifications.
+- Update prompts default to **Later**, disclose Electron's next-launch installation behavior, and restart the current session only after the user explicitly chooses **Restart and update**.
+- Privacy, recovery, packaging, and update documentation now describe optional automatic updates and explicit restart consent.
+
+### Security
+
+- A damaged update-preference file fails closed and does not silently re-enable network checks.
+- Settings IPC is schema-validated and restricted to Sift's trusted application origin.
+- The update service receives only the installed version, operating system, and processor architecture; Sift sends no mailbox index, credentials, addresses, subjects, headers, or message identifiers with update checks.
+
 ## [1.1.0] - 2026-08-25
 
 ### Changed

@@ -2,7 +2,7 @@
 
 Sift is a local-first Windows desktop application that turns years of crowded Proton Mail, Gmail, Outlook, and Hotmail history into an understandable, maintainable system. It maps accounts and subscriptions, proposes folders, labels, and rules, prunes promotional clutter, and applies only the changes you approve.
 
-Install Sift once with `Sift-Setup.exe`. Installed builds check the public GitHub release feed for updates, download newer versions in the background, and ask before restarting to apply them.
+Install Sift once with `Sift-Setup.exe`. Automatic updates are off until the user enables them in Settings. When enabled, installed builds check the public GitHub release feed and download newer versions in the background; choosing **Later** keeps the current session open, and an already-downloaded update applies the next time Sift starts.
 
 ## Current status
 
@@ -48,7 +48,7 @@ pnpm verify:performance
 
 All fixtures are synthetic. End-to-end tests use a newly generated temporary profile root and remove it after the Electron process closes.
 
-See [Recovery and maintenance](docs/RECOVERY.md) for backup boundaries, verified restore, index rebuild, update rollback, and uninstall guidance.
+See [Privacy and data retention](docs/PRIVACY.md) for the local-data and network boundary. See [Recovery and maintenance](docs/RECOVERY.md) for backup boundaries, verified restore, index rebuild, update rollback, and uninstall guidance.
 
 ## Windows package
 
@@ -61,7 +61,7 @@ pnpm make
 
 The packaged application directory is written to `out/Sift-win32-x64`. Package verification requires the app executable, asar resources, and unpacked native SQLite binding, and rejects development files, source maps, environment files, and known privacy canaries.
 
-`pnpm make` creates a no-admin Squirrel.Windows installer and update artifacts in `out/make/squirrel.windows/x64`. The installer is the recommended build because it receives automatic updates. `pnpm package` creates the unpacked application directory for local verification; Sift does not currently publish a portable ZIP.
+`pnpm make` creates a no-admin Squirrel.Windows installer and update artifacts in `out/make/squirrel.windows/x64`. The installer supports user-controlled automatic updates. `pnpm package` creates the unpacked application directory for local verification; Sift does not currently publish a portable ZIP.
 
 ## Releases
 

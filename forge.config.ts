@@ -27,7 +27,6 @@ const collectRuntimePackage = (packageName: string): void => {
 
 collectRuntimePackage('imapflow');
 collectRuntimePackage('electron-squirrel-startup');
-collectRuntimePackage('update-electron-app');
 
 const config: ForgeConfig = {
   packagerConfig: {

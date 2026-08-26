@@ -139,10 +139,26 @@ import {
   restoreProfileInputSchema,
   restoreResultSchema,
 } from "../shared/contracts/recovery";
+import {
+  type UpdateAppSettingsInput,
+  appSettingsSchema,
+  updateAppSettingsInputSchema,
+} from "../shared/contracts/settings";
 
 const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
   getVersion: async () =>
     z.string().parse(await ipcRenderer.invoke(IPC_CHANNELS.appGetVersion)),
+  getAppSettings: async () =>
+    appSettingsSchema.parse(
+      await ipcRenderer.invoke(IPC_CHANNELS.appSettingsGet),
+    ),
+  updateAppSettings: async (input: UpdateAppSettingsInput) =>
+    appSettingsSchema.parse(
+      await ipcRenderer.invoke(
+        IPC_CHANNELS.appSettingsUpdate,
+        updateAppSettingsInputSchema.parse(input),
+      ),
+    ),
   listMailAccounts: async () =>
     z
       .array(mailAccountSummarySchema)
