@@ -4,6 +4,12 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-08-26
+
+### Fixed
+
+- Unsafe saved Proton plans now provide a direct **Build safe replacement preview** action after blocking Resume, preserving verified work while making the recovery path immediately actionable.
+
 ## [1.3.0] - 2026-08-26
 
 ### Added

@@ -2284,6 +2284,14 @@ const CleanupPanel = ({
                     source. Sift will not resume it. Rebuild the mailbox analysis
                     and preview; already verified actions remain recorded.
                   </small>
+                  <button
+                    className="primary-button compact"
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void act(onGenerate)}
+                  >
+                    {busy ? "Rebuilding…" : "Build safe replacement preview"}
+                  </button>
                 </div>
               ) : null}
               {jobTargetBlocked || blockedFailures.length ? (
