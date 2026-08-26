@@ -4,6 +4,13 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-25
+
+### Fixed
+
+- Packaged smoke tests now keep their temporary `--user-data-dir` even when a pre-rename Mail Steward profile directory exists, preventing synthetic “Package smoke” profiles from appearing in real local data.
+- The packaged runtime test now verifies its resolved Electron user-data directory before it is allowed to create a synthetic profile and fails closed if isolation is lost.
+
 ## [1.0.0] - 2026-08-25
 
 ### Added
@@ -162,7 +169,8 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 - Arbitrary message participants can no longer become user-owned identities merely by appearing in From, To, Cc, Bcc, Reply-To, or group-recipient fields.
 - Account and identity operations remain restricted to the active local profile through validated IPC contracts.
 
-[Unreleased]: https://github.com/Jerdann/sift/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Jerdann/sift/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/Jerdann/sift/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Jerdann/sift/compare/v0.9.0...v1.0.0
 [0.9.0]: https://github.com/Jerdann/sift/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Jerdann/sift/compare/v0.7.0...v0.8.0

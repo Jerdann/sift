@@ -27,6 +27,7 @@ import { registerOutlookHandlers } from "./ipc/outlook-handlers";
 import { registerRecoveryHandlers } from "./ipc/recovery-handlers";
 import { ProfileRepository } from "./profiles/profile-repository";
 import { ProfileSession } from "./profiles/profile-session";
+import { shouldUseLegacyUserData } from "./profiles/user-data-policy";
 import { startAutomaticUpdates } from "./updates/auto-update";
 import { SafeStorageVault } from "./secrets/safe-storage-vault";
 import {
@@ -61,7 +62,14 @@ if (handlingSquirrelStartup) app.quit();
 
 // Keep profiles created by the pre-Sift build discoverable after the rename.
 const legacyUserData = path.join(app.getPath("appData"), "Mail Steward");
-if (existsSync(legacyUserData)) app.setPath("userData", legacyUserData);
+if (
+  shouldUseLegacyUserData({
+    argv: process.argv,
+    legacyDirectoryExists: existsSync(legacyUserData),
+  })
+) {
+  app.setPath("userData", legacyUserData);
+}
 
 const developmentServerUrl =
   typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "undefined"
