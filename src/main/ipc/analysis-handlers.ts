@@ -1,19 +1,33 @@
-import { dialog, type IpcMain, type IpcMainInvokeEvent } from 'electron';
-import { writeFile } from 'node:fs/promises';
-import { mailboxAnalysisSummarySchema } from '../../shared/contracts/analysis';
-import { exportRulePackInputSchema, exportRulePackResultSchema } from '../../shared/contracts/rules';
-import { IPC_CHANNELS } from '../../shared/ipc';
-import { buildPortableRulePack, renderProtonSieve } from '../../core/rules/rule-pack';
-import { renderManagedProtonSieve, sha256 } from '../../core/rules/rule-reconciliation';
-import { GmailConnectionRepository } from '../gmail/gmail-connection-repository';
-import { GmailAnalysisService } from '../gmail/gmail-analysis-service';
-import { MailboxAnalysisRepository } from '../analysis/mailbox-analysis-repository';
-import { analyzeMailbox } from '../analysis/mailbox-analysis-service';
-import { ProfileSession } from '../profiles/profile-session';
-import { ProtonConnectionRepository } from '../proton/proton-connection-repository';
-import { assertTrustedIpcSender } from '../window-security';
-import { exportProtonRulePlanSchema, protonRuleExportResultSchema } from '../../shared/contracts/rule-management';
-import { RuleReconciliationRepository } from '../rules/rule-reconciliation-repository';
+import { dialog, type IpcMain, type IpcMainInvokeEvent } from "electron";
+import { writeFile } from "node:fs/promises";
+import { mailboxAnalysisSummarySchema } from "../../shared/contracts/analysis";
+import {
+  exportRulePackInputSchema,
+  exportRulePackResultSchema,
+} from "../../shared/contracts/rules";
+import { IPC_CHANNELS } from "../../shared/ipc";
+import {
+  buildPortableRulePack,
+  renderProtonSieve,
+} from "../../core/rules/rule-pack";
+import {
+  renderManagedProtonSieve,
+  sha256,
+} from "../../core/rules/rule-reconciliation";
+import { GmailConnectionRepository } from "../gmail/gmail-connection-repository";
+import { GmailAnalysisService } from "../gmail/gmail-analysis-service";
+import { MailboxAnalysisRepository } from "../analysis/mailbox-analysis-repository";
+import { analyzeMailbox } from "../analysis/mailbox-analysis-service";
+import { ProfileSession } from "../profiles/profile-session";
+import { ProtonConnectionRepository } from "../proton/proton-connection-repository";
+import { assertTrustedIpcSender } from "../window-security";
+import {
+  exportProtonRulePlanSchema,
+  protonRuleExportResultSchema,
+} from "../../shared/contracts/rule-management";
+import { RuleReconciliationRepository } from "../rules/rule-reconciliation-repository";
+import { OutlookConnectionRepository } from "../outlook/outlook-connection-repository";
+import { OutlookAnalysisService } from "../outlook/outlook-analysis-service";
 
 export const registerAnalysisHandlers = ({
   ipcMain,
@@ -33,11 +47,14 @@ export const registerAnalysisHandlers = ({
       profileSession.requireSecretVault(),
       context.profile.id,
     ).get();
-    if (!connection) throw new Error('proton_not_connected');
+    if (!connection) throw new Error("proton_not_connected");
     return {
       context,
       connection,
-      repository: new MailboxAnalysisRepository(context.database, context.profile.id),
+      repository: new MailboxAnalysisRepository(
+        context.database,
+        context.profile.id,
+      ),
     };
   };
 
@@ -50,10 +67,13 @@ export const registerAnalysisHandlers = ({
       context.profile.id,
     ).get();
     if (!connection) return null;
-    const repository = new MailboxAnalysisRepository(context.database, context.profile.id);
-    return mailboxAnalysisSummarySchema.nullable().parse(
-      repository.get(connection.id),
+    const repository = new MailboxAnalysisRepository(
+      context.database,
+      context.profile.id,
     );
+    return mailboxAnalysisSummarySchema
+      .nullable()
+      .parse(repository.get(connection.id));
   });
   ipcMain.handle(IPC_CHANNELS.analysisRun, (event) => {
     trust(event);
@@ -71,53 +91,102 @@ export const registerAnalysisHandlers = ({
     trust(event);
     const input = exportRulePackInputSchema.parse(rawInput);
     const context = profileSession.requireActiveContext();
-    const analysis = input.source === 'proton'
-      ? services().repository.get(services().connection.id)
-      : (() => { const connection = new GmailConnectionRepository(context.database, profileSession.requireSecretVault(), context.profile.id).get(); return connection ? new GmailAnalysisService(context.database, context.profile.id).get(connection) : null; })();
-    if (!analysis) throw new Error('mailbox_analysis_required');
+    const analysis =
+      input.source === "proton"
+        ? services().repository.get(services().connection.id)
+        : input.source === "gmail"
+          ? (() => {
+              const connection = new GmailConnectionRepository(
+                context.database,
+                profileSession.requireSecretVault(),
+                context.profile.id,
+              ).get();
+              return connection
+                ? new GmailAnalysisService(
+                    context.database,
+                    context.profile.id,
+                  ).get(connection)
+                : null;
+            })()
+          : (() => {
+              const connection = new OutlookConnectionRepository(
+                context.database,
+                profileSession.requireSecretVault(),
+                context.profile.id,
+              ).get();
+              return connection
+                ? new OutlookAnalysisService(
+                    context.database,
+                    context.profile.id,
+                  ).get(connection)
+                : null;
+            })();
+    if (!analysis) throw new Error("mailbox_analysis_required");
     const pack = buildPortableRulePack(analysis);
-    const sieve = input.format === 'proton-sieve';
+    const sieve = input.format === "proton-sieve";
     const result = await dialog.showSaveDialog({
-      title: sieve ? 'Save Proton Sieve rules' : 'Save portable Sift rule pack',
-      defaultPath: sieve ? 'sift-proton.sieve' : 'sift-rules.json',
+      title: sieve ? "Save Proton Sieve rules" : "Save portable Sift rule pack",
+      defaultPath: sieve ? "sift-proton.sieve" : "sift-rules.json",
       filters: sieve
-        ? [{ name: 'Sieve filters', extensions: ['sieve'] }]
-        : [{ name: 'JSON rule packs', extensions: ['json'] }],
+        ? [{ name: "Sieve filters", extensions: ["sieve"] }]
+        : [{ name: "JSON rule packs", extensions: ["json"] }],
     });
     if (result.canceled || !result.filePath) {
-      return exportRulePackResultSchema.parse({ canceled: true, path: null, ruleCount: pack.rules.length });
+      return exportRulePackResultSchema.parse({
+        canceled: true,
+        path: null,
+        ruleCount: pack.rules.length,
+      });
     }
     await writeFile(
       result.filePath,
       sieve ? renderProtonSieve(pack) : `${JSON.stringify(pack, null, 2)}\n`,
-      { encoding: 'utf8', flag: 'w' },
+      { encoding: "utf8", flag: "w" },
     );
-    return exportRulePackResultSchema.parse({ canceled: false, path: result.filePath, ruleCount: pack.rules.length });
+    return exportRulePackResultSchema.parse({
+      canceled: false,
+      path: result.filePath,
+      ruleCount: pack.rules.length,
+    });
   });
   ipcMain.handle(IPC_CHANNELS.rulePlanExportProton, async (event, rawInput) => {
     trust(event);
     const input = exportProtonRulePlanSchema.parse(rawInput);
     const context = profileSession.requireActiveContext();
-    const rules = new RuleReconciliationRepository(context.database, context.profile.id);
+    const rules = new RuleReconciliationRepository(
+      context.database,
+      context.profile.id,
+    );
     const plan = rules.getPlan(input.planId);
     const desired = rules.rulesForPlan(input.planId, input.revision);
     const content = renderManagedProtonSieve(desired);
     const result = await dialog.showSaveDialog({
-      title: 'Save Sift-managed Proton Sieve rules',
+      title: "Save Sift-managed Proton Sieve rules",
       defaultPath: `sift-proton-${input.revision.slice(0, 8)}.sieve`,
-      filters: [{ name: 'Sieve filters', extensions: ['sieve'] }],
+      filters: [{ name: "Sieve filters", extensions: ["sieve"] }],
     });
     if (result.canceled || !result.filePath) {
-      return protonRuleExportResultSchema.parse({ canceled: true, path: null, checksum: null, ruleCount: desired.length, plan });
+      return protonRuleExportResultSchema.parse({
+        canceled: true,
+        path: null,
+        checksum: null,
+        ruleCount: desired.length,
+        plan,
+      });
     }
-    await writeFile(result.filePath, content, { encoding: 'utf8', flag: 'w' });
+    await writeFile(result.filePath, content, { encoding: "utf8", flag: "w" });
     const checksum = sha256(content);
     return protonRuleExportResultSchema.parse({
       canceled: false,
       path: result.filePath,
       checksum,
       ruleCount: desired.length,
-      plan: rules.finalizeProtonExport(input.planId, input.revision, checksum, result.filePath),
+      plan: rules.finalizeProtonExport(
+        input.planId,
+        input.revision,
+        checksum,
+        result.filePath,
+      ),
     });
   });
 

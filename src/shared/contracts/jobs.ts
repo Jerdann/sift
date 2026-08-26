@@ -1,8 +1,16 @@
-import { z } from 'zod';
-import { JOB_STATES } from '../../core/jobs/job-types';
+import { z } from "zod";
+import { JOB_STATES } from "../../core/jobs/job-types";
 
 export const jobStateSchema = z.enum(JOB_STATES);
-export const jobKindSchema = z.enum(['synthetic-audit', 'proton-audit', 'proton-cleanup', 'gmail-history', 'bulk-unsubscribe', 'provider-rules']);
+export const jobKindSchema = z.enum([
+  "synthetic-audit",
+  "proton-audit",
+  "proton-cleanup",
+  "gmail-history",
+  "outlook-history",
+  "bulk-unsubscribe",
+  "provider-rules",
+]);
 
 export const jobStateCountsSchema = z.object({
   pending: z.number().int().nonnegative(),
@@ -32,5 +40,7 @@ export const getJobInputSchema = z.object({
   jobId: z.uuid(),
 });
 
-export type StartSyntheticJobInput = z.infer<typeof startSyntheticJobInputSchema>;
+export type StartSyntheticJobInput = z.infer<
+  typeof startSyntheticJobInputSchema
+>;
 export type GetJobInput = z.infer<typeof getJobInputSchema>;

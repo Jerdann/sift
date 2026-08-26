@@ -839,7 +839,9 @@ select:focus-visible {
 .gmail-connect-form > p { color: var(--muted); margin: 0; line-height: 1.55; }
 .gmail-connect-form label { display: grid; gap: 7px; }
 .gmail-connect-form label > span { color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
-.gmail-connect-form input { width: 100%; box-sizing: border-box; border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 11px 12px; font: inherit; }
+.gmail-connect-form input,
+.gmail-connect-form select { width: 100%; min-height: 42px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--text); padding: 9px 12px; color-scheme: dark; font: inherit; }
+.gmail-connect-form select option { background: var(--panel); color: var(--text); }
 .gmail-connect-form details { color: var(--muted); }
 .gmail-connect-form details label { margin-top: 12px; }
 .gmail-connected { display: flex; justify-content: space-between; align-items: center; gap: 16px; }

@@ -1,4 +1,4 @@
-import type BetterSqlite3 from 'better-sqlite3';
+import type BetterSqlite3 from "better-sqlite3";
 
 interface Migration {
   version: number;
@@ -784,6 +784,213 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       ALTER TABLE gmail_subscription_candidates ADD COLUMN read_count INTEGER NOT NULL DEFAULT 0 CHECK(read_count >= 0);
     `,
   },
+  {
+    version: 23,
+    statements: `
+      ALTER TABLE account_selections RENAME TO account_selections_v22;
+      CREATE TABLE account_selections (
+        profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton','gmail','outlook')),
+        connection_id TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(profile_id,provider)
+      );
+      INSERT INTO account_selections SELECT * FROM account_selections_v22;
+      DROP TABLE account_selections_v22;
+
+      ALTER TABLE account_identities RENAME TO account_identities_v22;
+      CREATE TABLE account_identities (
+        id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton','gmail','outlook')),
+        connection_id TEXT NOT NULL, normalized_address TEXT NOT NULL,
+        evidence_json TEXT NOT NULL DEFAULT '[]', sent_from_count INTEGER NOT NULL DEFAULT 0 CHECK(sent_from_count>=0),
+        delivered_to_count INTEGER NOT NULL DEFAULT 0 CHECK(delivered_to_count>=0),
+        provider_evidence INTEGER NOT NULL DEFAULT 0 CHECK(provider_evidence IN(0,1)), last_seen_at TEXT,
+        user_status TEXT NOT NULL DEFAULT 'unreviewed' CHECK(user_status IN('unreviewed','confirmed','rejected')),
+        container_enabled INTEGER NOT NULL DEFAULT 0 CHECK(container_enabled IN(0,1)), container_name TEXT,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(connection_id,normalized_address)
+      );
+      INSERT INTO account_identities SELECT * FROM account_identities_v22;
+      DROP TABLE account_identities_v22;
+      CREATE INDEX account_identities_profile_connection_idx ON account_identities(profile_id,provider,connection_id,user_status);
+
+      CREATE TABLE outlook_connections(
+        id TEXT PRIMARY KEY,profile_id TEXT NOT NULL,email TEXT NOT NULL,client_id TEXT NOT NULL,tenant TEXT NOT NULL,
+        secret_ref_id TEXT NOT NULL REFERENCES secret_refs(id) ON DELETE RESTRICT,state TEXT NOT NULL CHECK(state IN('connected','attention')),
+        connected_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(profile_id,email)
+      );
+      CREATE INDEX outlook_connections_profile_idx ON outlook_connections(profile_id);
+      CREATE TABLE outlook_audit_state(
+        connection_id TEXT PRIMARY KEY REFERENCES outlook_connections(id) ON DELETE CASCADE,state TEXT NOT NULL CHECK(state IN('idle','scanning','paused','completed','failed')),
+        next_link TEXT,indexed_messages INTEGER NOT NULL DEFAULT 0,total_estimate INTEGER NOT NULL DEFAULT 0,earliest_at TEXT,latest_at TEXT,updated_at TEXT NOT NULL
+      );
+      CREATE TABLE outlook_indexed_messages(
+        id TEXT PRIMARY KEY,connection_id TEXT NOT NULL REFERENCES outlook_connections(id) ON DELETE CASCADE,graph_message_id TEXT NOT NULL,
+        conversation_id TEXT,received_at TEXT,subject TEXT,sender_json TEXT NOT NULL DEFAULT '[]',recipients_json TEXT NOT NULL DEFAULT '[]',
+        headers_json TEXT NOT NULL DEFAULT '{}',categories_json TEXT NOT NULL DEFAULT '[]',parent_folder_id TEXT NOT NULL,is_read INTEGER NOT NULL CHECK(is_read IN(0,1)),
+        size_bytes INTEGER NOT NULL DEFAULT 0,indexed_at TEXT NOT NULL,UNIQUE(connection_id,graph_message_id)
+      );
+      CREATE INDEX outlook_messages_connection_date_idx ON outlook_indexed_messages(connection_id,received_at DESC);
+    `,
+  },
+  {
+    version: 24,
+    foreignKeysOff: true,
+    statements: `
+      PRAGMA legacy_alter_table = ON;
+
+      DROP INDEX organization_proposals_scope_idx;
+      ALTER TABLE organization_proposals RENAME TO organization_proposals_v23;
+      CREATE TABLE organization_proposals (
+        id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton','gmail','outlook')),
+        connection_id TEXT NOT NULL, analysis_id TEXT NOT NULL, revision TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'draft' CHECK(state IN ('draft','approved','superseded')),
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      );
+      INSERT INTO organization_proposals SELECT * FROM organization_proposals_v23;
+      DROP TABLE organization_proposals_v23;
+      CREATE INDEX organization_proposals_scope_idx ON organization_proposals(profile_id,provider,connection_id,updated_at DESC);
+
+      DROP INDEX rule_inventories_scope_idx;
+      ALTER TABLE rule_inventories RENAME TO rule_inventories_v23;
+      CREATE TABLE rule_inventories (
+        id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton','gmail','outlook')),
+        connection_id TEXT NOT NULL, capability TEXT NOT NULL CHECK(capability IN ('live_api','managed_export')),
+        provider_limit INTEGER, captured_at TEXT NOT NULL
+      );
+      INSERT INTO rule_inventories SELECT * FROM rule_inventories_v23;
+      DROP TABLE rule_inventories_v23;
+      CREATE INDEX rule_inventories_scope_idx ON rule_inventories(profile_id,provider,connection_id,captured_at DESC);
+
+      DROP INDEX managed_rules_scope_idx;
+      ALTER TABLE managed_rules RENAME TO managed_rules_v23;
+      CREATE TABLE managed_rules (
+        id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton','gmail','outlook')),
+        connection_id TEXT NOT NULL, stable_key TEXT NOT NULL, provider_rule_id TEXT,
+        fingerprint TEXT NOT NULL, desired_json TEXT NOT NULL,
+        ownership TEXT NOT NULL CHECK(ownership IN ('managed','adopted','exported')),
+        state TEXT NOT NULL CHECK(state IN ('active','removed','mismatched')),
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(connection_id,stable_key)
+      );
+      INSERT INTO managed_rules SELECT * FROM managed_rules_v23;
+      DROP TABLE managed_rules_v23;
+      CREATE INDEX managed_rules_scope_idx ON managed_rules(profile_id,provider,connection_id,state);
+
+      DROP INDEX rule_reconciliation_plans_scope_idx;
+      ALTER TABLE rule_reconciliation_plans RENAME TO rule_reconciliation_plans_v23;
+      CREATE TABLE rule_reconciliation_plans (
+        id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton','gmail','outlook')),
+        connection_id TEXT NOT NULL, proposal_id TEXT NOT NULL REFERENCES organization_proposals(id) ON DELETE CASCADE,
+        proposal_revision TEXT NOT NULL, inventory_id TEXT NOT NULL REFERENCES rule_inventories(id) ON DELETE RESTRICT,
+        revision TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('draft','approved','executing','completed','failed','undone')),
+        job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL, undo_job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL, approved_at TEXT
+      );
+      INSERT INTO rule_reconciliation_plans SELECT * FROM rule_reconciliation_plans_v23;
+      DROP TABLE rule_reconciliation_plans_v23;
+      CREATE INDEX rule_reconciliation_plans_scope_idx ON rule_reconciliation_plans(profile_id,provider,connection_id,created_at DESC);
+
+      DROP INDEX unsubscribe_ledger_scope_idx;
+      ALTER TABLE unsubscribe_ledger RENAME TO unsubscribe_ledger_v23;
+      CREATE TABLE unsubscribe_ledger (
+        id TEXT PRIMARY KEY, profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton','gmail','outlook')),
+        connection_id TEXT NOT NULL, list_id TEXT NOT NULL, receiving_address TEXT NOT NULL,
+        requested_at TEXT NOT NULL, latest_seen_at_request TEXT,
+        recurrence_count INTEGER NOT NULL DEFAULT 0 CHECK(recurrence_count >= 0), updated_at TEXT NOT NULL,
+        UNIQUE(profile_id,provider,connection_id,list_id,receiving_address)
+      );
+      INSERT INTO unsubscribe_ledger SELECT * FROM unsubscribe_ledger_v23;
+      DROP TABLE unsubscribe_ledger_v23;
+      CREATE INDEX unsubscribe_ledger_scope_idx ON unsubscribe_ledger(profile_id,provider,connection_id,requested_at DESC);
+
+      CREATE TABLE outlook_folder_ids (
+        connection_id TEXT PRIMARY KEY REFERENCES outlook_connections(id) ON DELETE CASCADE,
+        inbox_id TEXT NOT NULL, sent_items_id TEXT NOT NULL, deleted_items_id TEXT NOT NULL,
+        junk_email_id TEXT NOT NULL, archive_id TEXT, updated_at TEXT NOT NULL
+      );
+      CREATE TABLE outlook_mailbox_analyses (
+        id TEXT PRIMARY KEY, connection_id TEXT NOT NULL REFERENCES outlook_connections(id) ON DELETE CASCADE,
+        profile_id TEXT NOT NULL, classifier_version TEXT NOT NULL, analyzed_at TEXT NOT NULL,
+        UNIQUE(connection_id,profile_id)
+      );
+      CREATE TABLE outlook_message_classifications (
+        analysis_id TEXT NOT NULL REFERENCES outlook_mailbox_analyses(id) ON DELETE CASCADE,
+        message_row_id TEXT NOT NULL REFERENCES outlook_indexed_messages(id) ON DELETE CASCADE,
+        category TEXT NOT NULL, confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1),
+        evidence_json TEXT NOT NULL, sender_domain TEXT NOT NULL, receiving_addresses_json TEXT NOT NULL,
+        PRIMARY KEY(analysis_id,message_row_id)
+      );
+      CREATE TABLE outlook_analysis_streams (
+        id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL REFERENCES outlook_mailbox_analyses(id) ON DELETE CASCADE,
+        sender_domain TEXT NOT NULL, category TEXT NOT NULL, receiving_address TEXT NOT NULL,
+        message_count INTEGER NOT NULL CHECK(message_count > 0), latest_at TEXT,
+        confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1), evidence_json TEXT NOT NULL
+      );
+      CREATE INDEX outlook_analysis_streams_analysis_idx ON outlook_analysis_streams(analysis_id,message_count DESC);
+
+      PRAGMA legacy_alter_table = OFF;
+    `,
+  },
+  {
+    version: 25,
+    statements: `
+      CREATE TABLE outlook_history_plans (
+        id TEXT PRIMARY KEY, connection_id TEXT NOT NULL REFERENCES outlook_connections(id) ON DELETE CASCADE,
+        analysis_id TEXT NOT NULL REFERENCES outlook_mailbox_analyses(id) ON DELETE CASCADE,
+        proposal_id TEXT REFERENCES organization_proposals(id) ON DELETE CASCADE, proposal_revision TEXT,
+        plan_kind TEXT NOT NULL CHECK(plan_kind IN ('organize','trash')), revision TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('draft','approved','running','completed','failed')),
+        skipped_ambiguous_streams INTEGER NOT NULL DEFAULT 0, job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+        undo_job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL, created_at TEXT NOT NULL, approved_at TEXT
+      );
+      CREATE INDEX outlook_history_plans_scope_idx ON outlook_history_plans(connection_id,plan_kind,created_at DESC);
+      CREATE TABLE outlook_history_impacts (
+        id TEXT PRIMARY KEY, plan_id TEXT NOT NULL REFERENCES outlook_history_plans(id) ON DELETE CASCADE,
+        scope_address TEXT, source_category TEXT NOT NULL, category TEXT NOT NULL, target_folder TEXT NOT NULL,
+        mark_read INTEGER NOT NULL CHECK(mark_read IN (0,1)), spam INTEGER NOT NULL CHECK(spam IN (0,1)),
+        trash INTEGER NOT NULL CHECK(trash IN (0,1)), confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1),
+        existing_messages INTEGER NOT NULL CHECK(existing_messages > 0)
+      );
+      CREATE TABLE outlook_history_actions (
+        id TEXT PRIMARY KEY, plan_id TEXT NOT NULL REFERENCES outlook_history_plans(id) ON DELETE CASCADE,
+        impact_id TEXT NOT NULL REFERENCES outlook_history_impacts(id) ON DELETE CASCADE,
+        graph_message_id TEXT NOT NULL, prior_folder_id TEXT NOT NULL, prior_is_read INTEGER NOT NULL CHECK(prior_is_read IN (0,1)),
+        resulting_folder_id TEXT, resulting_is_read INTEGER CHECK(resulting_is_read IN (0,1)),
+        state TEXT NOT NULL CHECK(state IN ('pending','running','succeeded','failed','verification_mismatch')),
+        error_code TEXT, undo_state TEXT CHECK(undo_state IN ('pending','running','succeeded','failed','verification_mismatch')),
+        undo_error_code TEXT, updated_at TEXT NOT NULL, UNIQUE(plan_id,graph_message_id)
+      );
+      CREATE INDEX outlook_history_actions_state_idx ON outlook_history_actions(plan_id,state);
+    `,
+  },
+  {
+    version: 26,
+    statements: `
+      CREATE TABLE outlook_subscription_scans (
+        id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL REFERENCES outlook_mailbox_analyses(id) ON DELETE CASCADE,
+        profile_id TEXT NOT NULL, generated_at TEXT NOT NULL
+      );
+      CREATE TABLE outlook_subscription_candidates (
+        id TEXT PRIMARY KEY, scan_id TEXT NOT NULL REFERENCES outlook_subscription_scans(id) ON DELETE CASCADE,
+        sender_domain TEXT NOT NULL, list_id TEXT NOT NULL, receiving_address TEXT NOT NULL, endpoint TEXT,
+        eligibility TEXT NOT NULL CHECK(eligibility IN ('eligible','manual','protected','spam_skipped')),
+        authenticated INTEGER NOT NULL CHECK(authenticated IN (0,1)), message_count INTEGER NOT NULL,
+        latest_at TEXT, earliest_at TEXT, read_count INTEGER NOT NULL DEFAULT 0 CHECK(read_count >= 0),
+        categories_json TEXT NOT NULL, sample_subjects_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending','unsubscribed','failed','manual','spam_skipped')), reason TEXT NOT NULL
+      );
+      CREATE INDEX outlook_subscription_candidates_scan_idx ON outlook_subscription_candidates(scan_id,eligibility,status);
+      CREATE TABLE outlook_unsubscribe_runs (
+        job_id TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+        scan_id TEXT NOT NULL REFERENCES outlook_subscription_scans(id) ON DELETE CASCADE, created_at TEXT NOT NULL
+      );
+    `,
+  },
 ]);
 
 export const applyMigrations = (
@@ -800,35 +1007,37 @@ export const applyMigrations = (
 
   const applied = new Set(
     database
-      .prepare('SELECT version FROM schema_migrations ORDER BY version')
+      .prepare("SELECT version FROM schema_migrations ORDER BY version")
       .all()
       .map((row) => (row as { version: number }).version),
   );
   const record = database.prepare(
-    'INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)',
+    "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
   );
 
   for (const migration of MIGRATIONS) {
     if (migration.version > throughVersion) continue;
     if (applied.has(migration.version)) continue;
     const apply = database.transaction(() => {
-        database.exec(migration.statements);
-        record.run(migration.version, now());
-      });
+      database.exec(migration.statements);
+      record.run(migration.version, now());
+    });
     if (!migration.foreignKeysOff) {
       apply();
       continue;
     }
-    database.pragma('foreign_keys = OFF');
+    database.pragma("foreign_keys = OFF");
     try {
       apply();
     } finally {
-      database.pragma('legacy_alter_table = OFF');
-      database.pragma('foreign_keys = ON');
+      database.pragma("legacy_alter_table = OFF");
+      database.pragma("foreign_keys = ON");
     }
-    const violations = database.pragma('foreign_key_check') as unknown[];
+    const violations = database.pragma("foreign_key_check") as unknown[];
     if (violations.length) {
-      throw new Error(`Migration ${migration.version} left ${violations.length} foreign-key violation(s)`);
+      throw new Error(
+        `Migration ${migration.version} left ${violations.length} foreign-key violation(s)`,
+      );
     }
   }
 };

@@ -1,9 +1,11 @@
-import { z } from 'zod';
+import { z } from "zod";
 
-export const exportRulePackInputSchema = z.object({
-  format: z.enum(['proton-sieve', 'portable-json']),
-  source: z.enum(['proton', 'gmail']),
-}).strict();
+export const exportRulePackInputSchema = z
+  .object({
+    format: z.enum(["proton-sieve", "portable-json"]),
+    source: z.enum(["proton", "gmail", "outlook"]),
+  })
+  .strict();
 
 export const exportRulePackResultSchema = z.object({
   canceled: z.boolean(),

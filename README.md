@@ -1,6 +1,6 @@
 # Sift
 
-Sift is a local-first Windows desktop application that turns years of crowded Proton Mail and Gmail history into an understandable, maintainable system. It maps accounts and subscriptions, proposes labels and rules, prunes promotional clutter, and applies only the changes you approve.
+Sift is a local-first Windows desktop application that turns years of crowded Proton Mail, Gmail, Outlook, and Hotmail history into an understandable, maintainable system. It maps accounts and subscriptions, proposes folders, labels, and rules, prunes promotional clutter, and applies only the changes you approve.
 
 Install Sift once with `Sift-Setup.exe`. Installed builds check the public GitHub release feed for updates, download newer versions in the background, and ask before restarting to apply them.
 
@@ -10,6 +10,7 @@ The working desktop build supports:
 
 - Proton Mail through the local Proton Mail Bridge: discovery, resumable metadata-first history audit, proof-based alias detection, per-address containers, local classification, sender recency review, approval-gated folder cleanup, native Spam and Trash routing, safe bulk unsubscribe, and Proton Sieve export.
 - Gmail through Google OAuth for Desktop apps: resumable metadata-only history audit, local classification, an exact approval plan, nested labels, future filters, historical mark-read/archive batches, native Spam and recoverable Trash labeling, authenticated one-click bulk unsubscribe, and exact-label Undo.
+- Outlook, Hotmail, and Microsoft 365 mail through Microsoft public-client OAuth with PKCE: resumable metadata-only Graph audit, provider-backed aliases, immutable message IDs, nested folders, live inbox-rule reconciliation, verified historical moves, native Junk and recoverable Deleted Items, authenticated one-click unsubscribe, and exact folder/read-state Undo.
 - Provider-neutral local profiles and portable JSON rule packs, so separate people and mailboxes do not share data or credentials.
 - A guided connect → scan → addresses → organize → rules → unsubscribe → Trash flow, with one decision and action stage per page.
 
@@ -82,6 +83,18 @@ Google requires the person distributing the app to provide an OAuth client:
 5. Run the Gmail audit, build the organization proposal, review the exact impact, and approve the action plan.
 
 Testing-mode Google grants can expire after seven days. A broadly distributed build needs Google's OAuth verification for the requested Gmail scopes.
+
+### Outlook, Hotmail, and Microsoft 365
+
+Microsoft requires the person distributing the app to provide a public desktop application registration:
+
+1. Register an application in the Microsoft Entra admin center and enable accounts for the audience you intend to support.
+2. Add the **Mobile and desktop applications** platform with the `http://localhost` redirect URI. Do not create or paste a client secret; installed applications use authorization code flow with PKCE.
+3. Add delegated `User.Read`, `Mail.ReadWrite`, and `MailboxSettings.ReadWrite` permissions.
+4. Copy the Application (client) ID into Sift and choose whether the connection accepts all Microsoft accounts, consumer Outlook/Hotmail accounts, or work/school accounts.
+5. Complete sign-in in the system browser, scan the mailbox, confirm the provider identities, and review every proposal before applying it.
+
+Sift stores the refresh token with the operating system's encrypted credential facility. The Graph audit requests immutable message IDs and stores metadata and selected headers locally; it does not download attachments or message bodies.
 
 ## Privacy boundary
 

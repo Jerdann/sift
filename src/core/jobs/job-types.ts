@@ -8,7 +8,7 @@ export const JOB_STATES = [
 ] as const;
 
 export type JobState = (typeof JOB_STATES)[number];
-export type JobKind = 'synthetic-audit' | 'proton-audit' | 'proton-cleanup' | 'gmail-history' | 'bulk-unsubscribe' | 'provider-rules';
+export type JobKind = 'synthetic-audit' | 'proton-audit' | 'proton-cleanup' | 'gmail-history' | 'outlook-history' | 'bulk-unsubscribe' | 'provider-rules';
 
 export interface DurableJob {
   readonly id: string;
@@ -54,6 +54,6 @@ export interface JobProgress {
 }
 
 export interface SafeJobResult {
-  readonly operation: 'synthetic-check' | 'proton-folder-index' | 'proton-cleanup-action' | 'gmail-history-batch' | 'unsubscribe-one-click' | 'provider-rule-action';
+  readonly operation: 'synthetic-check' | 'proton-folder-index' | 'proton-cleanup-action' | 'gmail-history-batch' | 'outlook-history-message' | 'unsubscribe-one-click' | 'provider-rule-action';
   readonly verified: boolean;
 }

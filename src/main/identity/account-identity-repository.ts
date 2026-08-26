@@ -1,13 +1,13 @@
-import type BetterSqlite3 from 'better-sqlite3';
-import { randomUUID } from 'node:crypto';
+import type BetterSqlite3 from "better-sqlite3";
+import { randomUUID } from "node:crypto";
 import {
   type AccountIdentitySummary,
   type AccountIdentityUpdateInput,
   type AccountProvider,
   accountIdentitySummarySchema,
   accountIdentityUpdateInputSchema,
-} from '../../shared/contracts/accounts';
-import type { OwnedIdentityEvidence } from './ownership-evidence';
+} from "../../shared/contracts/accounts";
+import type { OwnedIdentityEvidence } from "./ownership-evidence";
 
 interface IdentityRow {
   id: string;
@@ -19,7 +19,7 @@ interface IdentityRow {
   delivered_to_count: number;
   provider_evidence: number;
   last_seen_at: string | null;
-  user_status: AccountIdentitySummary['status'];
+  user_status: AccountIdentitySummary["status"];
   container_enabled: number;
   container_name: string | null;
   updated_at: string;
@@ -31,14 +31,22 @@ export class AccountIdentityRepository {
   readonly #now: () => string;
   readonly #createId: () => string;
 
-  constructor(database: BetterSqlite3.Database, profileId: string, options: { now?: () => string; createId?: () => string } = {}) {
+  constructor(
+    database: BetterSqlite3.Database,
+    profileId: string,
+    options: { now?: () => string; createId?: () => string } = {},
+  ) {
     this.#database = database;
     this.#profileId = profileId;
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#createId = options.createId ?? randomUUID;
   }
 
-  sync(provider: AccountProvider, connectionId: string, evidence: readonly OwnedIdentityEvidence[]): AccountIdentitySummary[] {
+  sync(
+    provider: AccountProvider,
+    connectionId: string,
+    evidence: readonly OwnedIdentityEvidence[],
+  ): AccountIdentitySummary[] {
     this.#assertConnection(provider, connectionId);
     const now = this.#now();
     const upsert = this.#database.prepare(`
@@ -62,55 +70,99 @@ export class AccountIdentityRepository {
     this.#database.transaction(() => {
       for (const identity of evidence) {
         upsert.run(
-          this.#createId(), this.#profileId, provider, connectionId, identity.address,
-          JSON.stringify(identity.evidence), identity.sentFromCount, identity.deliveredToCount,
-          identity.providerEvidence ? 1 : 0, identity.lastSeenAt,
-          identity.providerEvidence ? 'confirmed' : 'unreviewed', now, now,
+          this.#createId(),
+          this.#profileId,
+          provider,
+          connectionId,
+          identity.address,
+          JSON.stringify(identity.evidence),
+          identity.sentFromCount,
+          identity.deliveredToCount,
+          identity.providerEvidence ? 1 : 0,
+          identity.lastSeenAt,
+          identity.providerEvidence ? "confirmed" : "unreviewed",
+          now,
+          now,
         );
       }
     })();
     return this.list(provider, connectionId);
   }
 
-  list(provider: AccountProvider, connectionId: string): AccountIdentitySummary[] {
+  list(
+    provider: AccountProvider,
+    connectionId: string,
+  ): AccountIdentitySummary[] {
     this.#assertConnection(provider, connectionId);
-    return (this.#database.prepare(`
+    return (
+      this.#database
+        .prepare(
+          `
       SELECT * FROM account_identities
       WHERE profile_id=? AND provider=? AND connection_id=?
       ORDER BY CASE user_status WHEN 'confirmed' THEN 0 WHEN 'unreviewed' THEN 1 ELSE 2 END,
         normalized_address
-    `).all(this.#profileId, provider, connectionId) as IdentityRow[]).map((row) => this.#summary(row));
+    `,
+        )
+        .all(this.#profileId, provider, connectionId) as IdentityRow[]
+    ).map((row) => this.#summary(row));
   }
 
   update(rawInput: AccountIdentityUpdateInput): AccountIdentitySummary {
     const input = accountIdentityUpdateInputSchema.parse(rawInput);
     this.#assertConnection(input.provider, input.connectionId);
     const address = input.address.toLowerCase();
-    const row = this.#database.prepare(`
+    const row = this.#database
+      .prepare(
+        `
       SELECT id FROM account_identities
       WHERE profile_id=? AND provider=? AND connection_id=? AND normalized_address=?
-    `).get(this.#profileId, input.provider, input.connectionId, address) as { id: string } | undefined;
-    if (!row) throw new Error('account_identity_not_found');
-    const containerEnabled = input.status === 'confirmed' && input.containerEnabled;
-    this.#database.prepare(`
+    `,
+      )
+      .get(this.#profileId, input.provider, input.connectionId, address) as
+      | { id: string }
+      | undefined;
+    if (!row) throw new Error("account_identity_not_found");
+    const containerEnabled =
+      input.status === "confirmed" && input.containerEnabled;
+    this.#database
+      .prepare(
+        `
       UPDATE account_identities SET user_status=?,container_enabled=?,container_name=?,updated_at=?
       WHERE id=? AND profile_id=? AND provider=? AND connection_id=?
-    `).run(
-      input.status, containerEnabled ? 1 : 0,
-      containerEnabled ? input.containerName : null, this.#now(), row.id,
-      this.#profileId, input.provider, input.connectionId,
-    );
-    const updated = this.#database.prepare('SELECT * FROM account_identities WHERE id=?').get(row.id) as IdentityRow;
+    `,
+      )
+      .run(
+        input.status,
+        containerEnabled ? 1 : 0,
+        containerEnabled ? input.containerName : null,
+        this.#now(),
+        row.id,
+        this.#profileId,
+        input.provider,
+        input.connectionId,
+      );
+    const updated = this.#database
+      .prepare("SELECT * FROM account_identities WHERE id=?")
+      .get(row.id) as IdentityRow;
     return this.#summary(updated);
   }
 
   #assertConnection(provider: AccountProvider, connectionId: string): void {
-    const table = provider === 'gmail' ? 'gmail_connections' : 'provider_connections';
-    const providerClause = provider === 'proton' ? " AND provider='proton'" : '';
-    const row = this.#database.prepare(
-      `SELECT id FROM ${table} WHERE id=? AND profile_id=?${providerClause}`,
-    ).get(connectionId, this.#profileId);
-    if (!row) throw new Error('account_connection_not_found');
+    const table =
+      provider === "gmail"
+        ? "gmail_connections"
+        : provider === "outlook"
+          ? "outlook_connections"
+          : "provider_connections";
+    const providerClause =
+      provider === "proton" ? " AND provider='proton'" : "";
+    const row = this.#database
+      .prepare(
+        `SELECT id FROM ${table} WHERE id=? AND profile_id=?${providerClause}`,
+      )
+      .get(connectionId, this.#profileId);
+    if (!row) throw new Error("account_connection_not_found");
   }
 
   #summary(row: IdentityRow): AccountIdentitySummary {

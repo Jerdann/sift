@@ -4,9 +4,30 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
-### Planned
+## [0.9.0] - 2026-08-25
 
-- Outlook and Hotmail account support.
+### Added
+
+- Outlook, Hotmail, and Microsoft 365 connections through Microsoft public-client OAuth authorization code flow with PKCE, a system-browser consent screen, a loopback callback, and no client secret.
+- Resumable Microsoft Graph metadata audits with trusted paging links, well-known folder discovery, immutable message IDs, local classification, and address-scoped organization proposals.
+- Strict Microsoft identity discovery from provider profile aliases and Sent Items `From` evidence; recipients, copied participants, forwarding participants, and arbitrary delivery addresses cannot become owned identities.
+- Verified Outlook history execution with nested folder creation, native Junk Email and Deleted Items routing, per-message checkpoints, selective retry, and exact original-folder/read-state Undo.
+- Live Outlook inbox-rule inventory and reconciliation with deterministic Sift ownership, exact-match adoption, unrelated-rule protection, post-write verification, selective retry, and Undo.
+- Outlook authenticated RFC 8058 one-click unsubscribe with provider-neutral ranking, recurrence tracking, per-host throttling, resume, and selective retry.
+- Outlook stale-sender review with the same age boundary and protected critical categories used by Gmail and Proton.
+
+### Changed
+
+- The shared account, identity, proposal, rule, unsubscribe-ledger, job, export, and UI contracts now support Proton, Gmail, and Outlook without provider-specific address heuristics.
+- Microsoft organization, rules, unsubscribe, and Trash actions appear in the same guided pages and approval sequence as existing providers.
+- The minimum desktop window width now permits the compact application layout used on small laptops.
+
+### Security
+
+- Microsoft Graph continuation links are restricted to the official Graph origin before Sift reuses them.
+- Refresh tokens remain encrypted outside the renderer, and the sealed preload bridge exposes only schema-validated Outlook operations.
+- Outlook history execution uses immutable IDs plus live before/after checks; Undo refuses to overwrite messages whose provider state no longer matches Sift's receipt.
+- Suspected spam is routed to provider-native Junk and is never contacted by the unsubscribe runner.
 
 ## [0.8.0] - 2026-08-25
 
@@ -114,7 +135,8 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 - Arbitrary message participants can no longer become user-owned identities merely by appearing in From, To, Cc, Bcc, Reply-To, or group-recipient fields.
 - Account and identity operations remain restricted to the active local profile through validated IPC contracts.
 
-[Unreleased]: https://github.com/Jerdann/sift/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Jerdann/sift/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Jerdann/sift/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Jerdann/sift/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Jerdann/sift/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Jerdann/sift/compare/v0.5.1...v0.6.0
