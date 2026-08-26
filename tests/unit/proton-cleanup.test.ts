@@ -212,6 +212,42 @@ describe('approved Proton cleanup', () => {
     current.profile.database.close();
   });
 
+  it('collapses shared impacts across hidden address scopes while preserving alias containers', () => {
+    const current = setup();
+    const plan = current.plans.generate(current.connection.id, {
+      kind: 'organize', containers: {}, trashSenderDomains: [],
+    });
+    const actionIds = current.profile.database.prepare(`
+      SELECT id FROM cleanup_actions WHERE plan_id=? ORDER BY rowid LIMIT 2
+    `).all(plan.id) as Array<{ id: string }>;
+    expect(actionIds).toHaveLength(2);
+    current.profile.database.prepare(`
+      UPDATE cleanup_actions
+      SET scope_address=?, container_name=NULL, category='games', target_path='Games', action_kind='sort_read_archive'
+      WHERE id=?
+    `).run('first@pm.test', actionIds[0]!.id);
+    current.profile.database.prepare(`
+      UPDATE cleanup_actions
+      SET scope_address=?, container_name=NULL, category='games', target_path='Games', action_kind='sort_read_archive'
+      WHERE id=?
+    `).run('second@pm.test', actionIds[1]!.id);
+
+    const preview = current.plans.get(plan.id);
+    expect(preview.impacts.filter((impact) => !impact.containerName)).toEqual([{
+      scopeAddress: null,
+      containerName: null,
+      category: 'games',
+      targetFolder: 'Games',
+      action: 'sort_read_archive',
+      messageCount: 2,
+    }]);
+    expect(preview.impacts.some((impact) =>
+      impact.scopeAddress === 'owner@pm.test' && impact.containerName === 'Primary'
+    )).toBe(true);
+    expect(preview.actionCount).toBe(plan.actionCount);
+    current.profile.database.close();
+  });
+
   it('previews exact impact, rejects stale approval, then applies only approved actions', async () => {
     const current = setup();
     const plan = current.plans.generate(current.connection.id, { kind: 'organize', containers: { 'owner@pm.test': 'Primary' }, trashSenderDomains: [] });

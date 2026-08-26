@@ -2082,8 +2082,8 @@ const CleanupPanel = ({
       groups.push({
         key: "shared",
         eyebrow: "Action set 1 · Shared mailbox structure",
-        title: "General filing tree",
-        detail: "Mail not routed into a dedicated alias container is filed into these shared destinations.",
+        title: "Shared filing destinations",
+        detail: "All aliases that are not split into a dedicated container use these shared destinations.",
         impacts: shared,
       });
     }
@@ -2181,7 +2181,10 @@ const CleanupPanel = ({
                       <strong>{group.title}</strong>
                       <small>{group.detail}</small>
                     </div>
-                    <b>{messageCount.toLocaleString()} messages</b>
+                    <b>
+                      {group.impacts.length.toLocaleString()} {group.impacts.length === 1 ? "destination" : "destinations"}
+                      {" · "}{messageCount.toLocaleString()} messages
+                    </b>
                   </header>
                   <div
                     className="proposal-table"
@@ -2197,7 +2200,7 @@ const CleanupPanel = ({
                     {group.impacts.map((impact) => (
                       <div
                         className="cleanup-impact-row"
-                        key={`${impact.scopeAddress}:${impact.category}:${impact.targetFolder}`}
+                        key={`${impact.scopeAddress}:${impact.category}:${impact.targetFolder}:${impact.action}`}
                       >
                         <strong>{impact.category}</strong>
                         <span>{impact.targetFolder}</span>

@@ -184,9 +184,13 @@ export class CleanupPlanRepository {
     } | undefined;
     if (!row) throw new Error('Cleanup plan was not found');
     const impacts = this.#database.prepare(`
-      SELECT scope_address,container_name,category, target_path, action_kind, COUNT(*) AS message_count
+      SELECT
+        CASE WHEN container_name IS NULL THEN NULL ELSE scope_address END AS scope_address,
+        container_name,category,target_path,action_kind,COUNT(*) AS message_count
       FROM cleanup_actions WHERE plan_id = ?
-      GROUP BY scope_address,container_name,category,target_path,action_kind
+      GROUP BY
+        CASE WHEN container_name IS NULL THEN NULL ELSE scope_address END,
+        container_name,category,target_path,action_kind
       ORDER BY CASE WHEN container_name IS NULL THEN 0 ELSE 1 END,container_name,message_count DESC
     `).all(planId) as Array<{ scope_address: string | null; container_name: string | null; category: MailCategory; target_path: string; action_kind: 'sort_read_archive' | 'native_spam' | 'native_trash'; message_count: number }>;
     const actionCount = impacts.reduce((sum, impact) => sum + impact.message_count, 0);

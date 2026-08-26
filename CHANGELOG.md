@@ -4,6 +4,17 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-08-26
+
+### Changed
+
+- Proton cleanup action-set headers now show both the number of unique destinations and the total affected messages, making the exact scope of each approved set immediately visible.
+
+### Fixed
+
+- Shared Proton cleanup impacts are now summed across non-containerized aliases into one row per actual category, destination, and action instead of rendering dozens of visually identical rows grouped by hidden address scopes.
+- Dedicated alias containers remain separate action sets and retain their exact alias identity after shared-impact aggregation.
+
 ## [1.3.2] - 2026-08-26
 
 ### Fixed
