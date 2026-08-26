@@ -4,11 +4,12 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
-## [1.3.1] - 2026-08-26
+## [1.3.2] - 2026-08-26
 
 ### Fixed
 
 - Unsafe saved Proton plans now provide a direct **Build safe replacement preview** action after blocking Resume, preserving verified work while making the recovery path immediately actionable.
+- Windows release tests now cap Vitest worker contention and use a realistic runner timeout, preventing unrelated SQLite-heavy suites from timing out together on a loaded GitHub host.
 
 ## [1.3.0] - 2026-08-26
 
