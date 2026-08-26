@@ -1,5 +1,7 @@
 export type RuleDeliveryMode = 'install' | 'export' | 'unsupported';
 export type SpamActionMode = 'native' | 'move' | 'unsupported';
+export type TrashActionMode = 'native' | 'move' | 'unsupported';
+export type UnsubscribeActionMode = 'authenticated_one_click' | 'manual' | 'unsupported';
 
 export interface ProviderCapabilities {
   readonly folders: boolean;
@@ -8,6 +10,8 @@ export interface ProviderCapabilities {
   readonly batchMutation: boolean;
   readonly ruleDelivery: RuleDeliveryMode;
   readonly spamAction: SpamActionMode;
+  readonly trashAction: TrashActionMode;
+  readonly unsubscribeAction: UnsubscribeActionMode;
 }
 
 export interface ProviderAddress {

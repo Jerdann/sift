@@ -17,6 +17,8 @@ const account: ProviderAccount = {
     batchMutation: true,
     ruleDelivery: 'export',
     spamAction: 'native',
+    trashAction: 'native',
+    unsubscribeAction: 'authenticated_one_click',
   },
 };
 

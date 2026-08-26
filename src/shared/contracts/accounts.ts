@@ -2,6 +2,15 @@ import { z } from 'zod';
 
 export const accountProviderSchema = z.enum(['proton', 'gmail']);
 export const accountIdentityStatusSchema = z.enum(['unreviewed', 'confirmed', 'rejected']);
+export const accountCapabilitiesSchema = z.object({
+  audit: z.enum(['native', 'local']),
+  addresses: z.enum(['provider', 'evidence']),
+  organization: z.enum(['folders', 'labels']),
+  rules: z.enum(['live', 'export']),
+  unsubscribe: z.literal('one_click'),
+  spam: z.literal('native'),
+  trash: z.literal('native'),
+});
 export const identityEvidenceSourceSchema = z.enum([
   'provider_primary',
   'provider_alias',
@@ -17,6 +26,7 @@ export const mailAccountSummarySchema = z.object({
   state: z.enum(['connected', 'attention']),
   selected: z.boolean(),
   connectedAt: z.iso.datetime().nullable(),
+  capabilities: accountCapabilitiesSchema,
 });
 
 export const accountSelectionInputSchema = z.object({

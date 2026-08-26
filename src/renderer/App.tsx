@@ -45,11 +45,12 @@ const mailCategoryOptions: MailCategory[] = [
   'games', 'subscriptions', 'promotions', 'social', 'suspicious', 'spam', 'other',
 ];
 
-type PageId = 'overview' | 'accounts' | 'audit' | 'organize' | 'rules' | 'unsubscribe' | 'delete';
+type PageId = 'overview' | 'accounts' | 'audit' | 'addresses' | 'organize' | 'rules' | 'unsubscribe' | 'delete';
 const navItems: ReadonlyArray<{ id: PageId; label: string; icon: typeof Inbox }> = [
   { id: 'overview', label: 'Overview', icon: Inbox },
   { id: 'accounts', label: 'Accounts', icon: MailPlus },
   { id: 'audit', label: 'Scan', icon: Search },
+  { id: 'addresses', label: 'Addresses', icon: UserRound },
   { id: 'organize', label: 'Organize', icon: FolderTree },
   { id: 'rules', label: 'Rules', icon: ListFilter },
   { id: 'unsubscribe', label: 'Unsubscribe', icon: Tags },
@@ -284,6 +285,7 @@ interface ProtonConnectionPanelProps {
   onConnect(credentials: BridgeCredentials): Promise<BridgeConnectResult>;
   onDisconnect(connectionId: string): Promise<void>;
   onDiscover(): Promise<ProtonDiscoverySummary>;
+  mode?: 'connect' | 'audit';
 }
 
 const ProtonConnectionPanel = ({
@@ -293,6 +295,7 @@ const ProtonConnectionPanel = ({
   onConnect,
   onDisconnect,
   onDiscover,
+  mode = 'connect',
 }: ProtonConnectionPanelProps) => {
   const [credentials, setCredentials] = useState<BridgeCredentials>({
     host: '127.0.0.1',
@@ -370,13 +373,14 @@ const ProtonConnectionPanel = ({
     }
   };
 
+  if (mode === 'audit' && !connection) return null;
   if (connection && !adding) {
     return (
       <section className="readiness-panel proton-panel" aria-labelledby="proton-title">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">PROTON BRIDGE</p>
-            <h2 id="proton-title">Connected locally</h2>
+            <p className="eyebrow">{mode === 'audit' ? 'PROTON SCAN SOURCE' : 'PROTON BRIDGE'}</p>
+            <h2 id="proton-title">{mode === 'audit' ? 'Map the Bridge mailbox' : 'Connected locally'}</h2>
           </div>
           <span className="secured-label"><ShieldCheck size={14} /> Credentials encrypted</span>
         </div>
@@ -389,23 +393,23 @@ const ProtonConnectionPanel = ({
           <b>{connection.state === 'connected' ? 'READY' : 'ATTENTION'}</b>
         </div>
         <div className="panel-action connection-actions">
-          <button className="primary-button" type="button" disabled={Boolean(busy)} onClick={() => void discover()}>
+          {mode === 'audit' ? <button className="primary-button" type="button" disabled={Boolean(busy)} onClick={() => void discover()}>
             {busy === 'discover' ? 'Mapping mailbox…' : discovery ? 'Refresh mailbox map' : 'Map folders and delivery addresses'}
-          </button>
-          <button
+          </button> : null}
+          {mode === 'connect' ? <button
             className="secondary-button"
             type="button"
             disabled={Boolean(busy)}
             onClick={() => void disconnect()}
           >
             {busy === 'disconnect' ? 'Disconnecting…' : 'Remove local credential'}
-          </button>
-          <button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => setAdding(true)}>
+          </button> : null}
+          {mode === 'connect' ? <button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => setAdding(true)}>
             Add another Proton account
-          </button>
+          </button> : null}
           {error ? <p className="field-error" role="alert">{error}</p> : null}
         </div>
-        {discovery ? (
+        {mode === 'audit' && discovery ? (
           <div className="discovery-scope" aria-live="polite">
             <div className="scope-heading">
               <span><Search size={16} /></span>
@@ -914,7 +918,7 @@ const UnsubscribePanel = ({
   );
 };
 
-const GmailConnectionPanel = ({ connection, audit, onConnect, onDisconnect, onAudit }: { connection: GmailConnectionSummary | null; audit: GmailAuditSummary | null; onConnect(clientId: string, clientSecret?: string): Promise<void>; onDisconnect(connectionId: string): Promise<void>; onAudit(): Promise<void> }) => {
+const GmailConnectionPanel = ({ connection, audit, onConnect, onDisconnect, onAudit, showAudit=false }: { connection: GmailConnectionSummary | null; audit: GmailAuditSummary | null; onConnect(clientId: string, clientSecret?: string): Promise<void>; onDisconnect(connectionId: string): Promise<void>; onAudit(): Promise<void>; showAudit?:boolean }) => {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [busy, setBusy] = useState(false);
@@ -926,8 +930,9 @@ const GmailConnectionPanel = ({ connection, audit, onConnect, onDisconnect, onAu
     catch { setError('Gmail sign-in did not finish. Verify the Desktop OAuth client, Gmail API, consent-screen scopes, and test-user access.'); }
     finally { setBusy(false); }
   };
+  if(showAudit&&!connection)return null;
   return (
-    <section className="readiness-panel gmail-panel" aria-labelledby="gmail-title">
+    <section className={`readiness-panel gmail-panel ${showAudit?'gmail-audit-mode':'gmail-connect-mode'}`} aria-labelledby="gmail-title">
       <div className="panel-header"><div><p className="eyebrow">GMAIL</p><h2 id="gmail-title">Connect through Google’s consent screen</h2></div><span className="secured-label"><ShieldCheck size={14} /> OAuth + PKCE</span></div>
       {connection && !adding ? (
         <div className="gmail-connected-wrap"><div className="gmail-connected"><div><span className="state-icon safe"><Check size={15} /></span><span><strong>{connection.email}</strong><small>Refresh access is encrypted in this Windows profile. Your Google password is never seen or stored.</small></span><b>CONNECTED</b></div><div className="connection-actions"><button className="secondary-button" type="button" disabled={busy || audit?.state === 'scanning'} onClick={() => setAdding(true)}>Add another Gmail</button><button className="secondary-button" type="button" disabled={busy || audit?.state === 'scanning'} onClick={() => void onDisconnect(connection.id)}>{busy ? 'Disconnecting…' : 'Disconnect Gmail'}</button></div></div><div className="gmail-audit"><span><strong>{audit?.state === 'completed' ? 'Gmail history inventoried' : audit?.state === 'scanning' ? 'Reading Gmail metadata' : audit?.state === 'paused' || audit?.state === 'failed' ? 'Audit can resume from its saved page' : 'Ready for a read-only history audit'}</strong><small>{(audit?.indexedMessages ?? 0).toLocaleString()} indexed{audit?.totalEstimate ? ` of about ${audit.totalEstimate.toLocaleString()}` : ''} · includes Spam and Trash for accurate classification</small></span><button className="primary-button compact" type="button" disabled={busy || audit?.state === 'scanning'} onClick={() => { setBusy(true); setError(''); void onAudit().catch(() => setError('Gmail audit paused at its last saved page. Check the connection and resume.')).finally(() => setBusy(false)); }}>{busy ? 'Scanning Gmail…' : audit?.state === 'completed' ? 'Run fresh Gmail audit' : audit?.indexedMessages ? 'Resume Gmail audit' : 'Start Gmail audit'}</button></div>{audit?.state === 'scanning' ? <progress max={Math.max(audit.totalEstimate, 1)} value={audit.indexedMessages} /> : null}</div>
@@ -958,7 +963,7 @@ const AccountWorkspace = ({ accounts, onSelect }: {
     <section className="readiness-panel account-workspace" aria-labelledby="account-workspace-title">
       <div className="panel-header"><div><p className="eyebrow">CONNECTED ACCOUNTS</p><h2 id="account-workspace-title">One workspace, every mailbox</h2></div><span className="secured-label"><LockKeyhole size={14} /> Secrets stay local</span></div>
       <div className="account-metrics"><div><b>{accounts.length}</b><span>connected</span></div><div><b>{attention}</b><span>need attention</span></div><div><b>{accounts.filter((account) => account.selected).length}</b><span>active scopes</span></div></div>
-      {accounts.length ? <div className="account-list" role="list">{accounts.map((account) => <div className={account.selected ? 'account-row selected' : 'account-row'} role="listitem" key={account.id}><span className={account.state === 'connected' ? 'state-icon safe' : 'state-icon warning'}>{account.state === 'connected' ? <Check size={15} /> : <CircleDot size={15} />}</span><span><strong>{account.label}</strong><small>{account.provider === 'gmail' ? 'Gmail · OAuth connection' : 'Proton Mail · local Bridge connection'}{account.connectedAt ? ` · connected ${new Date(account.connectedAt).toLocaleDateString()}` : ''}</small></span><b>{account.selected ? 'ACTIVE' : account.state.toUpperCase()}</b><button className="secondary-button" type="button" disabled={account.selected || busyId === account.id} onClick={() => { setBusyId(account.id); void onSelect(account).finally(() => setBusyId(null)); }}>{busyId === account.id ? 'Switching…' : account.selected ? 'Selected' : 'Use account'}</button></div>)}</div> : <div className="analysis-empty"><p>No mailboxes are connected to this local profile yet. Add Gmail or Proton below to begin.</p></div>}
+      {accounts.length ? <><div className="account-list" role="list">{accounts.map((account) => <div className={account.selected ? 'account-row selected' : 'account-row'} role="listitem" key={account.id}><span className={account.state === 'connected' ? 'state-icon safe' : 'state-icon warning'}>{account.state === 'connected' ? <Check size={15} /> : <CircleDot size={15} />}</span><span><strong>{account.label}</strong><small>{account.provider === 'gmail' ? 'Gmail · OAuth connection' : 'Proton Mail · local Bridge connection'}{account.connectedAt ? ` · connected ${new Date(account.connectedAt).toLocaleDateString()}` : ''}</small></span><b>{account.selected ? 'ACTIVE' : account.state.toUpperCase()}</b><button className="secondary-button" type="button" disabled={account.selected || busyId === account.id} onClick={() => { setBusyId(account.id); void onSelect(account).finally(() => setBusyId(null)); }}>{busyId === account.id ? 'Switching…' : account.selected ? 'Selected' : 'Use account'}</button></div>)}</div><div className="capability-matrix" role="table" aria-label="Provider capabilities"><div className="capability-row capability-head" role="row"><span>Account</span><span>Organization</span><span>Rules</span><span>Addresses</span><span>Spam / Trash</span></div>{accounts.map(account=><div className="capability-row" role="row" key={`cap-${account.id}`}><strong>{account.provider==='gmail'?'Gmail':'Proton'}</strong><span>{account.capabilities.organization}</span><span>{account.capabilities.rules==='live'?'Installed automatically':'Verified Sieve export'}</span><span>{account.capabilities.addresses==='provider'?'Provider identities':'Sent/direct-delivery evidence'}</span><span>Native / native</span></div>)}</div></> : <div className="analysis-empty"><p>No mailboxes are connected to this local profile yet. Add Gmail or Proton below to begin.</p></div>}
     </section>
   );
 };
@@ -1179,6 +1184,7 @@ const AppShell = ({
   const pageLabel = navItems.find((item) => item.id === activePage)?.label ?? 'Overview';
   const emptyAccounts = accounts.length === 0;
   const selectedAccounts = accounts.filter((account) => account.selected);
+  const addressReviewCount = selectedAccounts.reduce((sum, account) => sum + (identities[account.id] ?? []).filter((identity) => identity.status === 'unreviewed').length, 0);
 
   const taskIntro = (title: string, copy: string) => (
     <div className="page-heading task-heading"><h1>{title}</h1><p>{copy}</p></div>
@@ -1192,7 +1198,7 @@ const AppShell = ({
       <aside className="sidebar">
         <button className="sidebar-brand" type="button" onClick={() => setActivePage('overview')}><BrandMark /><span>Sift</span></button>
         <nav aria-label="Primary navigation">
-          {navItems.map(({ id, label, icon: Icon }) => <button key={id} className={activePage === id ? 'nav-item active' : 'nav-item'} type="button" onClick={() => setActivePage(id)}><Icon size={18} /><span>{label}</span></button>)}
+          {navItems.map(({ id, label, icon: Icon }) => <button key={id} aria-label={label} className={activePage === id ? 'nav-item active' : 'nav-item'} type="button" onClick={() => setActivePage(id)}><Icon size={18} /><span>{label}</span></button>)}
         </nav>
         <div className="sidebar-footer">
           <div className="local-status"><CircleDot size={12} /> Local only</div>
@@ -1208,15 +1214,17 @@ const AppShell = ({
               <div><p className="eyebrow">INBOX PRUNING, WITH A PLAN</p><h1>Keep the mail that matters. Clear out the rest.</h1><p>Sift turns years of accumulated email into a map of accounts, purchases, subscriptions, promotions, and noise—then lets you shape the rules before anything moves.</p><div className="hero-actions"><button className="primary-button compact" type="button" onClick={() => setActivePage(emptyAccounts ? 'accounts' : 'audit')}>{emptyAccounts ? 'Connect your first account' : scannedCount ? 'Continue pruning' : 'Scan connected accounts'}</button><button className="secondary-button" type="button" onClick={() => setActivePage('accounts')}>Add another account</button></div></div>
               <div className="workspace-pulse" aria-label="Workspace progress"><div><b>{connectedCount}</b><span>accounts connected</span></div><div><b>{scannedCount}</b><span>mailboxes scanned</span></div><div><b>{organizedCount}</b><span>plans prepared</span></div></div>
             </section>
-            <section className="workflow-section" aria-labelledby="workflow-title"><div className="section-heading"><h2 id="workflow-title">From crowded mailbox to a system that holds</h2><p>Each stage produces something concrete. Review the result, adjust the plan, then move forward.</p></div><ol className="workflow-steps"><li><span>1</span><div><strong>Connect an account</strong><p>Add Proton or Gmail to this private profile. Add more accounts whenever you need them.</p></div></li><li><span>2</span><div><strong>Map the history</strong><p>Inventory folders, delivery addresses, senders, and years of messages without changing mail.</p></div></li><li><span>3</span><div><strong>Shape the system</strong><p>Review categories, labels, account relationships, future rules, and every excluded edge case.</p></div></li><li><span>4</span><div><strong>Prune with approval</strong><p>Apply the exact moves you accept, route spam, and stop legitimate bulk mail at the source.</p></div></li></ol></section>
-            <section className="next-action"><span><strong>{emptyAccounts ? 'Start with an account' : scannedCount < connectedCount ? 'Your next best action: scan' : 'Your mailbox map is ready to shape'}</strong><small>{emptyAccounts ? 'Connect Proton, Gmail, or both.' : scannedCount < connectedCount ? 'Build a complete inventory before designing labels and rules.' : 'Open Organize to review categories and prepare cleanup.'}</small></span><button className="primary-button compact" type="button" onClick={() => setActivePage(emptyAccounts ? 'accounts' : scannedCount < connectedCount ? 'audit' : 'organize')}>{emptyAccounts ? 'Open accounts' : scannedCount < connectedCount ? 'Open scan' : 'Open organize'}</button></section>
+            <section className="workflow-section" aria-labelledby="workflow-title"><div className="section-heading"><h2 id="workflow-title">From crowded mailbox to a system that holds</h2><p>Every page owns one decision. Finish the broad, high-impact work first; narrow toward deletion only after the system is in place.</p></div><ol className="workflow-steps"><li><span>1</span><div><strong>Connect</strong><p>Add each mailbox to this private local profile.</p></div></li><li><span>2</span><div><strong>Scan</strong><p>Build a read-only inventory of years of history.</p></div></li><li><span>3</span><div><strong>Addresses</strong><p>Confirm only identities you own and choose containers.</p></div></li><li><span>4</span><div><strong>Organize</strong><p>Correct categories and approve historical filing.</p></div></li><li><span>5</span><div><strong>Rules</strong><p>Install or export durable future automation.</p></div></li><li><span>6</span><div><strong>Unsubscribe</strong><p>Stop authenticated bulk mail at the source.</p></div></li><li><span>7</span><div><strong>Trash</strong><p>Review old non-critical history last.</p></div></li></ol></section>
+            <section className="next-action"><span><strong>{emptyAccounts ? 'Start with an account' : scannedCount < connectedCount ? 'Your next best action: scan' : addressReviewCount ? 'Confirm your real addresses' : 'Your mailbox map is ready to shape'}</strong><small>{emptyAccounts ? 'Connect Proton, Gmail, or both.' : scannedCount < connectedCount ? 'Build a complete inventory before designing labels and rules.' : addressReviewCount ? `${addressReviewCount} evidence-backed address${addressReviewCount===1?'':'es'} need a decision before organization.` : 'Open Organize to review categories and prepare cleanup.'}</small></span><button className="primary-button compact" type="button" onClick={() => setActivePage(emptyAccounts ? 'accounts' : scannedCount < connectedCount ? 'audit' : addressReviewCount ? 'addresses' : 'organize')}>{emptyAccounts ? 'Open accounts' : scannedCount < connectedCount ? 'Open scan' : addressReviewCount ? 'Review addresses' : 'Open organize'}</button></section>
           </> : null}
 
           {activePage === 'accounts' ? <>{taskIntro('Bring every inbox into one pruning workspace.', 'Connect an account, choose which mailbox you are working on, and add another whenever your email life expands. Proton uses Bridge; Gmail uses Google OAuth. Outlook and Hotmail are planned next.')}<AccountWorkspace accounts={accounts} onSelect={onSelectAccount}/><GmailConnectionPanel connection={gmailConnection} audit={gmailAudit} onConnect={onConnectGmail} onDisconnect={onDisconnectGmail} onAudit={onStartGmailAudit}/><ProtonConnectionPanel connection={protonConnection} discovery={protonDiscovery} onDiagnose={onDiagnoseProton} onConnect={onConnectProton} onDisconnect={onDisconnectProton} onDiscover={onDiscoverProton}/></> : null}
 
-          {activePage === 'audit' ? <>{taskIntro('Map the mailbox before you prune it.', 'Scan message history into a private inventory of senders, dates, folders, and bounded text evidence. A scan changes nothing in the mailbox and can resume after interruption.')}{emptyAccounts ? prerequisite('Connect an account first', 'Sift needs a mailbox connection before it can build an inventory.', 'accounts', 'Open accounts') : <><GmailConnectionPanel connection={gmailConnection} audit={gmailAudit} onConnect={onConnectGmail} onDisconnect={onDisconnectGmail} onAudit={onStartGmailAudit}/><ProtonAuditPanel discovery={protonDiscovery} audit={protonAudit} onStart={onStartProtonAudit} onPause={onPauseProtonAudit} onResume={onResumeProtonAudit}/></>}</> : null}
+          {activePage === 'audit' ? <>{taskIntro('Map the mailbox before you prune it.', 'Scan message history into a private inventory of senders, dates, folders, and bounded text evidence. A scan changes nothing in the mailbox and can resume after interruption.')}{emptyAccounts ? prerequisite('Connect an account first', 'Sift needs a mailbox connection before it can build an inventory.', 'accounts', 'Open accounts') : <><GmailConnectionPanel connection={gmailConnection} audit={gmailAudit} onConnect={onConnectGmail} onDisconnect={onDisconnectGmail} onAudit={onStartGmailAudit} showAudit/><ProtonConnectionPanel connection={protonConnection} discovery={protonDiscovery} onDiagnose={onDiagnoseProton} onConnect={onConnectProton} onDisconnect={onDisconnectProton} onDiscover={onDiscoverProton} mode="audit"/><ProtonAuditPanel discovery={protonDiscovery} audit={protonAudit} onStart={onStartProtonAudit} onPause={onPauseProtonAudit} onResume={onResumeProtonAudit}/></>}</> : null}
 
-          {activePage === 'organize' ? <>{taskIntro('Turn mailbox history into a durable system.', 'Confirm your real addresses first, then correct the address-scoped filing plan before Sift builds any provider rules or moves a message.')}{!protonAudit?.indexedMessages && !gmailAudit?.indexedMessages ? prerequisite('Scan at least one mailbox', 'Organization proposals are learned from the message inventory, not from a generic template.', emptyAccounts ? 'accounts' : 'audit', emptyAccounts ? 'Connect an account' : 'Open scan') : <>{selectedAccounts.map((account) => <div className="account-organization-sequence" key={account.id}><IdentityReview account={account} identities={identities[account.id] ?? []} onRefresh={onRefreshIdentities} onUpdate={onUpdateIdentity}/><OrganizationProposalEditor account={account} proposal={proposals[account.id] ?? null} onGenerate={onGenerateProposal} onEdit={onEditProposal}/>{account.provider==='gmail'&&proposals[account.id]?<GmailOrganizationPanel analysis={gmailAnalysis} plan={gmailOrganization} onGenerate={onGenerateGmailOrganization} onApprove={onApproveGmailOrganization} onRetry={onRetryGmailOrganization} onUndo={onUndoGmailOrganization}/>:null}</div>)}<ProtonOrganizationFlow audit={protonAudit} analysis={analysis} cleanupPlan={cleanupPlan} onAnalyze={onAnalyzeMailbox} onGenerateCleanup={onGenerateCleanup} onApproveCleanup={onApproveCleanup} onResumeCleanup={onResumeCleanup} onRetryCleanup={onRetryCleanup} onUndoCleanup={onUndoCleanup} onContinue={() => setActivePage('rules')} /></>}</> : null}
+          {activePage === 'addresses' ? <>{taskIntro('Confirm only the addresses that actually belong to you.', 'Sift accepts provider identities, Sent-folder From evidence, and direct-delivery headers. Group recipients, correspondents, forwarding participants, and arbitrary To/Cc addresses cannot become owned identities.')}{!scannedCount ? prerequisite('Scan a mailbox first', 'Address ownership needs provider or indexed message evidence.', emptyAccounts ? 'accounts' : 'audit', emptyAccounts ? 'Connect an account' : 'Open scan') : <>{selectedAccounts.map(account=><IdentityReview key={account.id} account={account} identities={identities[account.id]??[]} onRefresh={onRefreshIdentities} onUpdate={onUpdateIdentity}/>)}</>}</> : null}
+
+          {activePage === 'organize' ? <>{taskIntro('Turn mailbox history into a durable system.', 'Correct the address-scoped filing proposal, preview exact historical impact, and apply only the approved folders or labels. Future automation remains a separate Rules action.')}{!protonAudit?.indexedMessages && !gmailAudit?.indexedMessages ? prerequisite('Scan at least one mailbox', 'Organization proposals are learned from the message inventory, not from a generic template.', emptyAccounts ? 'accounts' : 'audit', emptyAccounts ? 'Connect an account' : 'Open scan') : addressReviewCount ? prerequisite('Finish address review first', `${addressReviewCount} address decision${addressReviewCount===1?'':'s'} remain. Organization never guesses who owns an address.`, 'addresses', 'Review addresses') : <>{selectedAccounts.map((account) => <div className="account-organization-sequence" key={account.id}><OrganizationProposalEditor account={account} proposal={proposals[account.id] ?? null} onGenerate={onGenerateProposal} onEdit={onEditProposal}/>{account.provider==='gmail'&&proposals[account.id]?<GmailOrganizationPanel analysis={gmailAnalysis} plan={gmailOrganization} onGenerate={onGenerateGmailOrganization} onApprove={onApproveGmailOrganization} onRetry={onRetryGmailOrganization} onUndo={onUndoGmailOrganization}/>:null}</div>)}<ProtonOrganizationFlow audit={protonAudit} analysis={analysis} cleanupPlan={cleanupPlan} onAnalyze={onAnalyzeMailbox} onGenerateCleanup={onGenerateCleanup} onApproveCleanup={onApproveCleanup} onResumeCleanup={onResumeCleanup} onRetryCleanup={onRetryCleanup} onUndoCleanup={onUndoCleanup} onContinue={() => setActivePage('rules')} /></>}</> : null}
 
           {activePage === 'rules' ? <>{taskIntro('Keep the new system working automatically.', 'Inventory existing provider rules first, protect anything Sift does not own, then approve a deterministic create, replace, adopt, or remove plan.')}{selectedAccounts.some((account) => proposals[account.id]) ? <>{selectedAccounts.map((account) => <RuleReconciliationPanel key={account.id} account={account} inventory={ruleInventories[account.id] ?? null} plan={rulePlans[account.id] ?? null} onRefresh={onRefreshRuleInventory} onGenerate={onGenerateRulePlan} onApprove={onApproveRulePlan} onRetry={onRetryRulePlan} onUndo={onUndoRulePlan} onExportProton={onExportProtonRulePlan}/>)}</> : prerequisite('Finish an organization proposal first', 'Rules are derived from the corrected address-scoped filing plan, never directly from a generic template.', scannedCount ? 'organize' : 'audit', scannedCount ? 'Open organize' : 'Open scan')}</> : null}
 

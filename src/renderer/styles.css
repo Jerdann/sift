@@ -16,7 +16,7 @@
 
 body {
   margin: 0;
-  min-width: 1024px;
+  min-width: 320px;
   min-height: 720px;
   background: #0e1116;
 }
@@ -787,12 +787,22 @@ select:focus-visible {
 .section-heading { display: block; }
 .section-heading .eyebrow { margin-bottom: 7px; }
 .section-heading > p { max-width: 680px; margin: 9px 0 0; color: #6f7a78; font-size: 12px; line-height: 1.55; }
-.workflow-steps { margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid #2a323b; border-bottom: 1px solid #2a323b; list-style: none; }
+.workflow-steps { margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: repeat(7, minmax(142px, 1fr)); overflow-x: auto; border-top: 1px solid #2a323b; border-bottom: 1px solid #2a323b; list-style: none; }
 .workflow-steps li { min-height: 170px; padding: 22px 18px; display: flex; gap: 14px; border-right: 1px solid #2a323b; }
 .workflow-steps li:last-child { border-right: 0; }
 .workflow-steps > li > span { color: #7de2c3; font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
 .workflow-steps strong { font-size: 13px; }
 .workflow-steps p { margin: 10px 0 0; color: #6f7a78; font-size: 12px; line-height: 1.55; }
+.gmail-connect-mode .gmail-audit,
+.gmail-connect-mode .gmail-connected-wrap > progress,
+.gmail-audit-mode .gmail-connected > .connection-actions { display: none; }
+
+.capability-matrix { margin-top: 18px; border: 1px solid #2a323b; border-radius: 7px; overflow-x: auto; }
+.capability-row { display: grid; grid-template-columns: .7fr 1fr 1.35fr 1.4fr .8fr; min-width: 760px; border-top: 1px solid #2a323b; }
+.capability-row:first-child { border-top: 0; }
+.capability-row > * { padding: 11px 13px; color: #a7b1ae; font-size: 11px; border-right: 1px solid #2a323b; }
+.capability-row > *:last-child { border-right: 0; }
+.capability-head > * { color: #6f7a78; font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
 
 .next-action { margin-top: 28px; padding: 18px 20px; display: flex; align-items: center; justify-content: space-between; gap: 28px; border: 1px solid #315447; border-radius: 8px; background: #15231e; }
 .next-action > span { display: grid; gap: 5px; }
@@ -806,8 +816,8 @@ select:focus-visible {
   .readiness-rows small { display: none; }
   .product-hero { grid-template-columns: 1fr; gap: 34px; }
   .workflow-steps { grid-template-columns: repeat(2, 1fr); }
-  .workflow-steps li:nth-child(2) { border-right: 0; }
-  .workflow-steps li:nth-child(-n + 2) { border-bottom: 1px solid #2a323b; }
+  .workflow-steps li:nth-child(even) { border-right: 0; }
+  .workflow-steps li:nth-child(-n + 6) { border-bottom: 1px solid #2a323b; }
   .organization-stages { grid-template-columns: 1fr; }
   .organization-stages button { min-height: 42px; border-right: 0; border-bottom: 1px solid #242b33; }
   .sender-review > div { grid-template-columns: minmax(150px, 1fr) 100px 130px 60px; }
@@ -960,4 +970,27 @@ select:focus-visible {
   .editable-proposal-row { grid-template-columns: 28px minmax(220px, 1.25fr) minmax(180px, 1fr) 110px; gap: 12px; }
   .rule-operation-head,
   .rule-operation-row { grid-template-columns: 86px minmax(210px, 1.2fr) minmax(180px, 1fr) 100px; gap: 12px; }
+}
+
+@media (max-width: 760px) {
+  .app-shell { display: block; }
+  .sidebar { position: sticky; inset: 0; z-index: 5; width: 100%; height: auto; flex-direction: row; align-items: center; border-right: 0; border-bottom: 1px solid #2a323b; }
+  .sidebar-brand { width: 68px; height: 54px; padding: 0 12px; flex: 0 0 auto; }
+  .sidebar-brand > span:last-child { display: none; }
+  .sidebar nav { min-width: 0; padding: 7px 8px; display: flex; overflow-x: auto; }
+  .nav-item { height: 38px; min-width: 42px; padding: 0 11px; justify-content: center; }
+  .nav-item span { display: none; }
+  .nav-item.active::before { left: 50%; bottom: 0; width: 18px; height: 2px; transform: translateX(-50%); }
+  .sidebar-footer, .topbar { display: none; }
+  .workspace { min-width: 0; }
+  .overview { padding: 30px 16px 48px; }
+  .page-heading h1 { font-size: 28px; }
+  .product-hero { gap: 28px; }
+  .workflow-steps { grid-template-columns: 1fr; overflow: visible; }
+  .workflow-steps li { min-height: 112px; border-right: 0; border-bottom: 1px solid #2a323b; }
+  .workflow-steps li:last-child { border-bottom: 0; }
+  .next-action, .panel-header, .analysis-summary-line, .rule-plan-actions { align-items: flex-start; flex-direction: column; }
+  .next-action .primary-button { width: 100%; }
+  .readiness-panel { overflow-x: auto; }
+  .account-row { min-width: 620px; }
 }

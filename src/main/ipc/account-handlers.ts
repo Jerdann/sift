@@ -77,6 +77,7 @@ export const registerAccountHandlers = ({
         state: connection.state,
         selected: connection.id === selectedGmail,
         connectedAt: connection.connectedAt,
+        capabilities: { audit: 'native', addresses: 'provider', organization: 'labels', rules: 'live', unsubscribe: 'one_click', spam: 'native', trash: 'native' },
       })),
       ...current.proton.list().map((connection) => ({
         id: connection.id,
@@ -85,6 +86,7 @@ export const registerAccountHandlers = ({
         state: connection.state,
         selected: connection.id === selectedProton,
         connectedAt: connection.lastConnectedAt,
+        capabilities: { audit: 'local', addresses: 'evidence', organization: 'folders', rules: 'export', unsubscribe: 'one_click', spam: 'native', trash: 'native' },
       })),
     ].sort((left, right) => left.provider.localeCompare(right.provider) || left.label.localeCompare(right.label)));
   });
@@ -108,6 +110,9 @@ export const registerAccountHandlers = ({
       connectedAt: input.provider === 'gmail'
         ? current.gmail.getById(input.connectionId)!.connectedAt
         : current.proton.getById(input.connectionId)!.lastConnectedAt,
+      capabilities: input.provider === 'gmail'
+        ? { audit: 'native', addresses: 'provider', organization: 'labels', rules: 'live', unsubscribe: 'one_click', spam: 'native', trash: 'native' }
+        : { audit: 'local', addresses: 'evidence', organization: 'folders', rules: 'export', unsubscribe: 'one_click', spam: 'native', trash: 'native' },
     });
   });
 
