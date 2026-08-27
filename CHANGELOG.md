@@ -4,6 +4,18 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-08-27
+
+### Fixed
+
+- Proton filter plans now use the latest mailbox scan instead of an analysis row replaced by a later scan, preventing valid folder proposals from producing zero filters.
+- Rescanning an account no longer disconnects the approved folder structure from future-message filter generation. The fix applies to Proton, Gmail, and Outlook.
+- Proton Rules now states that Bridge cannot read Proton Mail filters and labels its refresh action as a check for files previously saved by Sift.
+
+### Tests
+
+- Added a regression test that rescans a mailbox after folder planning and verifies that filters are still generated from the newest scan.
+
 ## [1.4.3] - 2026-08-26
 
 ### Changed

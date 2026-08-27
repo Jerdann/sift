@@ -4429,7 +4429,7 @@ const RuleReconciliationPanel = ({
               ? "Review Gmail filters"
               : account.provider === "outlook"
                 ? "Review Outlook inbox rules"
-                : "Create a Proton filter file (Sieve)"}
+                : "Create Proton filters"}
           </h2>
         </div>
         <span className="secured-label">
@@ -4438,7 +4438,7 @@ const RuleReconciliationPanel = ({
             ? "Reads current Gmail filters"
             : account.provider === "outlook"
               ? "Reads current Outlook rules"
-              : "You import the file in Proton Mail"}
+              : "Save a file, then import it in Proton"}
         </span>
       </div>
       <div className="rule-capability">
@@ -4447,7 +4447,7 @@ const RuleReconciliationPanel = ({
             ? "Sift reads your current Gmail filters. You can keep unrelated filters or review and delete filters that are not in this list."
             : account.provider === "outlook"
               ? "Sift reads your current Outlook inbox rules. You can keep unrelated rules or review and delete rules that are not in this list."
-              : "Proton Bridge cannot read filters created in Proton Mail. Sift can save a new Proton filter file (Sieve), but you must remove conflicting Proton filters and import the file yourself."}
+              : "Proton Bridge cannot read or delete filters in Proton Mail. Sift checks only files it previously saved. Review the new filters below, save the file, then import it in Proton Mail."}
         </p>
         <button
           className="secondary-button"
@@ -4456,10 +4456,14 @@ const RuleReconciliationPanel = ({
           onClick={() => void act("inventory", () => onRefresh(account))}
         >
           {busy === "inventory"
-            ? "Reading filters…"
-            : inventory
-              ? "Scan filters again"
-              : "Scan existing filters"}
+            ? account.provider === "proton"
+              ? "Checking saved files…"
+              : "Reading filters…"
+            : account.provider === "proton"
+              ? "Check saved filter files"
+              : inventory
+                ? "Scan filters again"
+                : "Scan existing filters"}
         </button>
       </div>
       {account.provider === "proton" && freshSlate ? (
@@ -4516,7 +4520,7 @@ const RuleReconciliationPanel = ({
                 ? "Gmail filters found"
                 : account.provider === "outlook"
                   ? "Outlook inbox rules found"
-                  : "Proton filter files created by Sift"}
+                  : "filter files previously saved by Sift"}
             </small>
           </span>
           <span>
@@ -4536,8 +4540,9 @@ const RuleReconciliationPanel = ({
       {!inventory ? (
         <div className="analysis-empty">
           <p>
-            Scan the existing filters before creating a list of changes. This
-            prevents duplicates and shows which filters Sift will leave unchanged.
+            {account.provider === "proton"
+              ? "Check for Proton filter files previously saved by Sift before creating the new filter list. Proton Bridge cannot read filters created in Proton Mail."
+              : "Scan the existing filters before creating a list of changes. This prevents duplicates and shows which filters Sift will leave unchanged."}
           </p>
         </div>
       ) : !plan ? (

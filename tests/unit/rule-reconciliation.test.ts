@@ -160,6 +160,28 @@ describe('provider rule inventory and reconciliation', () => {
     profile.database.close();
   });
 
+  it('uses the latest mailbox scan when the folder proposal points to an older scan', () => {
+    const { profile, profileId, connection, rules } = setup();
+    const insert = profile.database.prepare(`INSERT INTO gmail_indexed_messages(
+      id,connection_id,gmail_message_id,thread_id,received_at,subject,sender_json,recipients_json,
+      headers_json,label_ids_json,size_bytes,indexed_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,'[]',100,'2026-08-25T12:00:00.000Z')`);
+    insert.run(
+      '66a67bd3-3d82-4fb1-adce-542796e65b52', connection.id,
+      '66a67bd3-3d82-4fb1-adce-542796e65b52', 'thread-second-offer',
+      '2026-08-25T11:00:00.000Z', 'Another limited sale',
+      '["mail@second-offers.example"]', '["owner@example.test"]',
+      '{"delivered-to":"owner@example.test","list-id":"second-offers.example"}',
+    );
+
+    new GmailAnalysisService(profile.database, profileId).analyze(connection);
+
+    const desired = rules.desired('gmail', connection.id).rules;
+    expect(desired.length).toBeGreaterThan(0);
+    expect(desired.some((rule) => rule.senderDomain === 'second-offers.example')).toBe(true);
+    profile.database.close();
+  });
+
   it('uses a stable identity when a correction requires replacing a managed rule', () => {
     const { profile, profileId, connection, rules } = setup();
     const firstDesired = rules.desired('gmail', connection.id).rules.find((rule) => rule.category === 'promotions')!;

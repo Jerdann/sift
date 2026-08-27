@@ -248,7 +248,11 @@ export class RuleReconciliationRepository {
         item,
       ]),
     );
-    const streams = this.#streams(provider, String(proposal.analysis_id));
+    // A mailbox rescan replaces the prior analysis rows, while the approved
+    // folder proposal remains the user's chosen structure. Always build future
+    // rules from the newest scan for this account instead of the proposal's
+    // now-stale analysis id.
+    const streams = this.#streams(provider, connectionId);
     const groups = new Map<string, StreamRow[]>();
     for (const stream of streams) {
       if (
@@ -972,24 +976,42 @@ export class RuleReconciliationRepository {
       .all(this.#profileId, provider, connectionId) as ManagedRow[];
   }
 
-  #streams(provider: AccountProvider, analysisId: string): StreamRow[] {
+  #streams(provider: AccountProvider, connectionId: string): StreamRow[] {
     if (provider === "gmail")
       return this.#database
         .prepare(
-          "SELECT sender_domain,category,receiving_address,message_count,confidence FROM gmail_analysis_streams WHERE analysis_id=?",
+          `SELECT sender_domain,category,receiving_address,message_count,confidence
+           FROM gmail_analysis_streams
+           WHERE analysis_id=(
+             SELECT id FROM gmail_mailbox_analyses
+             WHERE profile_id=? AND connection_id=?
+             ORDER BY rowid DESC LIMIT 1
+           )`,
         )
-        .all(analysisId) as StreamRow[];
+        .all(this.#profileId, connectionId) as StreamRow[];
     if (provider === "outlook")
       return this.#database
         .prepare(
-          "SELECT sender_domain,category,receiving_address,message_count,confidence FROM outlook_analysis_streams WHERE analysis_id=?",
+          `SELECT sender_domain,category,receiving_address,message_count,confidence
+           FROM outlook_analysis_streams
+           WHERE analysis_id=(
+             SELECT id FROM outlook_mailbox_analyses
+             WHERE profile_id=? AND connection_id=?
+             ORDER BY rowid DESC LIMIT 1
+           )`,
         )
-        .all(analysisId) as StreamRow[];
+        .all(this.#profileId, connectionId) as StreamRow[];
     return this.#database
       .prepare(
-        "SELECT sender_domain,category,receiving_address,message_count,confidence FROM analysis_streams WHERE analysis_id=?",
+        `SELECT sender_domain,category,receiving_address,message_count,confidence
+         FROM analysis_streams
+         WHERE analysis_id=(
+           SELECT id FROM mailbox_analyses
+           WHERE profile_id=? AND connection_id=?
+           ORDER BY rowid DESC LIMIT 1
+         )`,
       )
-      .all(analysisId) as StreamRow[];
+      .all(this.#profileId, connectionId) as StreamRow[];
   }
 
   #assertConnection(provider: AccountProvider, connectionId: string): void {
