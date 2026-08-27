@@ -151,15 +151,15 @@ export class SubscriptionRepository {
         let status: 'pending' | 'manual' | 'spam_skipped';
         let reason: string;
         if (categories.some((category) => category === 'spam' || category === 'suspicious')) {
-          eligibility = 'spam_skipped'; status = 'spam_skipped'; reason = 'Likely spam is never contacted; use native Spam handling instead.';
+          eligibility = 'spam_skipped'; status = 'spam_skipped'; reason = 'Suspected spam: Sift will not contact this sender. Use a Spam filter instead.';
         } else if (categories.some((category) => protectedCategories.has(category))) {
-          eligibility = 'protected'; status = 'manual'; reason = 'Transactional, security, account, or finance mail is protected from bulk unsubscribe.';
+          eligibility = 'protected'; status = 'manual'; reason = 'Contains transaction, security, account, or finance messages. Sift will not unsubscribe automatically.';
         } else if (group.endpoint && group.oneClick && group.authenticated) {
-          eligibility = 'eligible'; status = 'pending'; reason = 'Authenticated RFC 8058 HTTPS one-click endpoint.';
+          eligibility = 'eligible'; status = 'pending'; reason = 'Supports standard one-click unsubscribe.';
         } else {
           eligibility = 'manual'; status = 'manual'; reason = !group.authenticated
-            ? 'Sender authentication is insufficient for an automated request.'
-            : 'No authenticated RFC 8058 one-click HTTPS endpoint was found.';
+            ? 'Sift could not confirm the sender, so it will not send an automatic request.'
+            : 'No supported one-click unsubscribe link was found.';
         }
         insert.run(
           this.#createId(), scanId, group.senderDomain, group.listId, group.receivingAddress,
@@ -216,7 +216,7 @@ export class SubscriptionRepository {
         categories,
         sampleSubjects: JSON.parse(String(row.sample_subjects_json)),
         status: row.status,
-        reason: recurrence === 'recurring' ? `${row.reason} New mail arrived after the last verified request.` : row.reason,
+        reason: recurrence === 'recurring' ? `${row.reason} New mail arrived after the previous unsubscribe request.` : row.reason,
       }; }).sort((left, right) => right.priorityScore - left.priorityScore || right.messageCount - left.messageCount || left.senderDomain.localeCompare(right.senderDomain)),
       job: jobRow ? this.#jobs.getProgress(jobRow.job_id) : null,
     });

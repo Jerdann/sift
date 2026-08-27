@@ -47,7 +47,7 @@ export const restoreResultSchema = z.object({
   secretFiles: z.number().int().nonnegative(),
 });
 export const rebuildIndexInputSchema = z
-  .object({ confirmation: z.literal("REBUILD LOCAL INDEX") })
+  .object({ confirmation: z.literal("DELETE SAVED SCAN") })
   .strict();
 export const rebuildIndexResultSchema = z.object({
   rebuiltAt: z.iso.datetime(),

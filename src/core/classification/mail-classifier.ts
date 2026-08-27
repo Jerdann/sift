@@ -96,14 +96,20 @@ export const classifyMessage = (input: ClassificationInput): ClassificationResul
     return result('accounts', 0.88, 'account lifecycle language');
   }
   if (listMail && has(text, /\b(?:sale|save \d+%|\d+% off|discount|deal|offer|shop now|limited time|clearance|coupon|promo)\b/)) {
-    return result('promotions', 0.91, 'authenticated list mail with promotional language');
+    return result('promotions', 0.91, 'mailing-list headers and promotional language');
   }
   if (listMail) return result('subscriptions', 0.87, 'mailing-list headers');
   if (has(text, /\b(?:sale|discount|deal|offer|shop now|limited time|clearance|coupon|promo)\b/)) {
-    return result('promotions', 0.7, 'promotional language without list identity');
+    return result('promotions', 0.7, 'promotional language without mailing-list headers');
   }
   if (has(senderDomain, /(?:gmail|outlook|hotmail|icloud|protonmail|pm\.me|yahoo)\./) && input.senders.length === 1) {
     return result('personal', 0.68, 'individual mailbox sender');
   }
-  return result('other', input.bodyText ? 0.58 : 0.45, input.bodyText ? 'no stronger category signal' : 'metadata-only evidence is limited');
+  return result(
+    'other',
+    input.bodyText ? 0.58 : 0.45,
+    input.bodyText
+      ? 'No category matched with enough certainty'
+      : 'Only the sender, recipient, subject, and message headers were available',
+  );
 };

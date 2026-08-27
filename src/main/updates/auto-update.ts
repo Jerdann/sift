@@ -116,7 +116,7 @@ export class SiftAutomaticUpdateController
       title: "Sift update ready",
       message: "A newer version of Sift is ready.",
       detail:
-        "Choose Restart and update to apply it now. Choose Later to keep working; because the update is already downloaded, Electron will apply it the next time Sift starts.",
+        "Choose Restart and update to install it now. Choose Later to keep working. The downloaded update will install the next time Sift starts.",
     };
     const parent = BrowserWindow.getFocusedWindow();
     const result = parent

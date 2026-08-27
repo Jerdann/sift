@@ -54,7 +54,7 @@ export const registerRecoveryHandlers = ({
   ipcMain.handle(IPC_CHANNELS.recoveryDiagnosticsExport, async (event) => {
     trust(event);
     const result = await dialog.showSaveDialog({
-      title: "Export content-free Sift diagnostics",
+      title: "Save Sift error report without email content",
       defaultPath: `sift-diagnostics-${new Date().toISOString().slice(0, 10)}.json`,
       filters: [{ name: "JSON", extensions: ["json"] }],
     });
@@ -82,7 +82,7 @@ export const registerRecoveryHandlers = ({
   ipcMain.handle(IPC_CHANNELS.recoveryBackupCreate, async (event) => {
     trust(event);
     const result = await dialog.showSaveDialog({
-      title: "Create encrypted Sift profile backup",
+      title: "Save encrypted Sift backup",
       defaultPath: `sift-profile-${new Date().toISOString().slice(0, 10)}.siftbackup`,
       filters: [{ name: "Sift encrypted backup", extensions: ["siftbackup"] }],
     });
@@ -113,7 +113,7 @@ export const registerRecoveryHandlers = ({
       trust(event);
       restoreProfileInputSchema.parse(input);
       const result = await dialog.showOpenDialog({
-        title: "Restore encrypted Sift profile backup",
+        title: "Choose an encrypted Sift backup to restore",
         properties: ["openFile"],
         filters: [
           { name: "Sift encrypted backup", extensions: ["siftbackup"] },

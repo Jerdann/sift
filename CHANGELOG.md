@@ -4,6 +4,21 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-08-26
+
+### Changed
+
+- Rewrote interface text across account connection, scanning, folder setup, message moves, filters, unsubscribe, deletion, recovery, updates, and save dialogs to name the exact action and result.
+- Replaced internal states such as verification mismatches, checkpoints, batches, portable packs, and provider terminology with direct status labels and instructions.
+- Kept required provider terms only where users must match a Google, Microsoft, or Proton setting, with a plain-language explanation beside each one.
+- Renamed the destructive local-index reset to **Delete saved scan** and changed its required confirmation phrase to `DELETE SAVED SCAN`.
+- Replaced technical unsubscribe eligibility reasons with direct explanations of what Sift can do and why a sender is excluded.
+
+### Fixed
+
+- Filter and scan status rows no longer expose internal state names.
+- Automated interface checks now cover plain-language wording in the renderer, classifier explanations, unsubscribe reasons, and update prompt.
+
 ## [1.4.2] - 2026-08-26
 
 ### Changed

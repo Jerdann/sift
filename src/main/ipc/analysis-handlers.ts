@@ -126,11 +126,11 @@ export const registerAnalysisHandlers = ({
     const pack = buildPortableRulePack(analysis);
     const sieve = input.format === "proton-sieve";
     const result = await dialog.showSaveDialog({
-      title: sieve ? "Save Proton Sieve rules" : "Save portable Sift rule pack",
+      title: sieve ? "Save Proton filter file (Sieve)" : "Save filters as JSON",
       defaultPath: sieve ? "sift-proton.sieve" : "sift-rules.json",
       filters: sieve
         ? [{ name: "Sieve filters", extensions: ["sieve"] }]
-        : [{ name: "JSON rule packs", extensions: ["json"] }],
+        : [{ name: "JSON filter file", extensions: ["json"] }],
     });
     if (result.canceled || !result.filePath) {
       return exportRulePackResultSchema.parse({
@@ -162,7 +162,7 @@ export const registerAnalysisHandlers = ({
     const desired = rules.rulesForPlan(input.planId, input.revision);
     const content = renderManagedProtonSieve(desired);
     const result = await dialog.showSaveDialog({
-      title: "Save Sift-managed Proton Sieve rules",
+      title: "Save Proton filter file (Sieve)",
       defaultPath: `sift-proton-${input.revision.slice(0, 8)}.sieve`,
       filters: [{ name: "Sieve filters", extensions: ["sieve"] }],
     });

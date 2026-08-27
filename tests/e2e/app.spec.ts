@@ -81,7 +81,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
     await expect(
       page.getByRole("heading", { name: "Connect Proton Bridge" }),
     ).toBeVisible();
-    await expect(page.getByLabel("OAuth client ID")).toBeVisible();
+    await expect(page.getByLabel("Google client ID")).toBeVisible();
     await expect(page.getByLabel("Application (client) ID")).toBeVisible();
     await expect(page.getByLabel("Bridge local host")).toHaveValue("127.0.0.1");
     await expect(
@@ -108,7 +108,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
       page.getByRole("button", { name: "Choose backup and restore" }),
     ).toBeDisabled();
     await expect(
-      page.getByRole("button", { name: "Rebuild local index" }),
+      page.getByRole("button", { name: "Delete saved scan" }),
     ).toBeDisabled();
     await page.screenshot({
       path: "test-results/recovery-workspace.png",

@@ -393,7 +393,7 @@ const messageForCategory = (category: BridgeDiagnosticCategory): string => {
     case 'configuration_invalid':
       return 'The Bridge connection settings are invalid.';
     case 'connection_interrupted':
-      return 'The local Bridge connection ended before diagnostics completed.';
+      return 'The Proton Bridge connection ended before the connection test finished.';
   }
 };
 
