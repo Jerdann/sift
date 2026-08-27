@@ -41,6 +41,7 @@ import type {
   UnsubscribeProgress,
 } from "../shared/contracts/unsubscribe";
 import { buildPortableRulePack } from "../core/rules/rule-pack";
+import { providerHasDestinations } from "../core/rules/folder-readiness";
 import type {
   GmailAuditSummary,
   GmailConnectionSummary,
@@ -5233,12 +5234,34 @@ const AppShell = ({
     const proposal = proposals[account.id];
     if (!proposal) return false;
     if (account.provider === "proton") {
-      return Boolean(
+      const completedPlanMatches = Boolean(
         cleanupPlan?.kind === "organize" &&
           cleanupPlan.state === "completed" &&
           cleanupPlan.proposalId === proposal.id &&
           cleanupPlan.proposalRevision === proposal.revision,
       );
+      if (completedPlanMatches) return true;
+      const requiredTargets = proposal.items
+        .filter(
+          (item) =>
+            item.enabled &&
+            !["personal", "suspicious", "spam"].includes(item.category),
+        )
+        .map((item) => item.targetPath);
+      const discoveredContainers =
+        protonDiscovery?.connectionId === account.id
+          ? protonDiscovery.mailboxes.map((mailbox) => ({
+              path: mailbox.path,
+              delimiter: mailbox.delimiter,
+            }))
+          : [];
+      const inventoriedContainers = (
+        ruleInventories[account.id]?.containers ?? []
+      ).map((path) => ({ path }));
+      return providerHasDestinations("proton", requiredTargets, [
+        ...discoveredContainers,
+        ...inventoriedContainers,
+      ]);
     }
     const historyPlan =
       account.provider === "gmail"

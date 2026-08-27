@@ -11,9 +11,10 @@ import { AccountIdentityRepository } from '../../src/main/identity/account-ident
 import { OrganizationProposalRepository } from '../../src/main/organization/organization-proposal-repository';
 import { JobRepository } from '../../src/main/jobs/job-repository';
 import { ProfileRepository } from '../../src/main/profiles/profile-repository';
+import { ProtonConnectionRepository } from '../../src/main/proton/proton-connection-repository';
 import { RuleReconciliationRepository } from '../../src/main/rules/rule-reconciliation-repository';
 import { SafeStorageVault, type SafeStoragePort } from '../../src/main/secrets/safe-storage-vault';
-import type { DesiredManagedRule, ProviderRuleSnapshot } from '../../src/shared/contracts/rule-management';
+import type { DesiredManagedRule, ProviderRuleSnapshot, RuleReconciliationPlan } from '../../src/shared/contracts/rule-management';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -226,6 +227,50 @@ describe('provider rule inventory and reconciliation', () => {
     expect(inventory.containers).toEqual(['Primary/Promotions']);
     const providerReads = fetchPort.mock.calls.filter((call) => String(call[0]).includes('gmail.googleapis.com'));
     expect(providerReads.every((call) => !call[1]?.method || call[1]?.method === 'GET')).toBe(true);
+    profile.database.close();
+  });
+
+  it('accepts live Proton folders when a rescan removed the completed Organize record', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'sift-proton-folders-')); roots.push(root);
+    const profileId = '9c1c28a1-5d31-458a-9de3-f10ca5d68e9c';
+    const profile = new ProfileRepository(root, { createId: () => profileId }).createProfile('Folder owner');
+    const vault = new SafeStorageVault(root, profile.database, storage);
+    const connection = new ProtonConnectionRepository(profile.database, vault, profileId).save({
+      host: '127.0.0.1', port: 1143, username: 'bridge', password: 'generated', security: 'starttls',
+    });
+    profile.database.prepare(`
+      INSERT INTO mail_containers(
+        id,connection_id,profile_id,provider_container_id,display_name,delimiter,
+        special_use,flags_json,message_count,unread_count,uid_validity,uid_next,observed_at
+      ) VALUES (?,?,?,?,?,'/',NULL,'[]',0,0,'1',1,'2026-08-27T01:00:00.000Z')
+    `).run(
+      '8d0768a0-189f-49f2-883d-ab9a2cf659d3', connection.id, profileId,
+      'Folders/Primary/Promotions', 'Promotions',
+    );
+    const desired: DesiredManagedRule = {
+      stableKey: 'a'.repeat(64), fingerprint: 'b'.repeat(64),
+      senderDomain: 'offers.example', receivingAddress: null,
+      category: 'promotions', targetPath: 'Primary/Promotions',
+      markRead: true, archive: false, spam: false,
+      observedMessages: 5, confidence: 0.95,
+    };
+    const plan = {
+      id: '8e4df6a8-8113-4a51-b9aa-c5dc5ec98c64', provider: 'proton', connectionId: connection.id,
+      proposalId: '0f02e04d-a763-477c-a1d1-8eff343ac5e2', proposalRevision: 'c'.repeat(64),
+      inventoryId: '479e1574-d90d-437e-9e4a-d30921a7edc6', revision: 'd'.repeat(64),
+      state: 'draft', createdAt: '2026-08-27T01:00:00.000Z', approvedAt: null,
+      operations: [{
+        id: '3740aa88-e30f-42dd-af68-12316d5b0d29', stableKey: desired.stableKey,
+        kind: 'create', desired, prior: null, priorManaged: null,
+        state: 'pending', providerRuleId: null, errorCode: null,
+      }],
+      job: null, undoJob: null,
+    } satisfies RuleReconciliationPlan;
+    const rules = new RuleReconciliationRepository(profile.database, profileId);
+
+    expect(rules.organizationApplied(plan)).toBe(true);
+    profile.database.prepare('DELETE FROM mail_containers WHERE connection_id=?').run(connection.id);
+    expect(rules.organizationApplied(plan)).toBe(false);
     profile.database.close();
   });
 

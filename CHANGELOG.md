@@ -4,6 +4,18 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-08-27
+
+### Fixed
+
+- Rules now recognizes required Proton folders that already exist even when a later mailbox scan removed the old Organize completion record.
+- Proton filter export repeats the live folder check in the backend, so the interface cannot unlock Rules unless every destination needed by the filter plan exists.
+- Missing Proton destinations still block filter approval; existing folders are reused and no Organize actions need to be repeated merely to satisfy the Rules prerequisite.
+
+### Tests
+
+- Added regression coverage for Proton namespace matching, missing destinations, and completed-folder verification after the historical Organize record is gone.
+
 ## [1.4.5] - 2026-08-27
 
 ### Added

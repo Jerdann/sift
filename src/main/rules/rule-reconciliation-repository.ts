@@ -18,6 +18,7 @@ import {
   sha256,
   snapshotForDesiredRule,
 } from "../../core/rules/rule-reconciliation";
+import { providerHasDestinations } from "../../core/rules/folder-readiness";
 import type { JobRepository } from "../jobs/job-repository";
 
 interface StreamRow {
@@ -890,7 +891,19 @@ export class RuleReconciliationRepository {
       .get(plan.connectionId, plan.proposalId, plan.proposalRevision) as
       | { applied: number }
       | undefined;
-    return Boolean(row?.applied);
+    if (row?.applied) return true;
+    if (plan.provider !== "proton") return false;
+
+    const requiredTargets = plan.operations.flatMap((operation) =>
+      operation.desired && !operation.desired.spam
+        ? [operation.desired.targetPath]
+        : [],
+    );
+    const liveContainers = this.#database.prepare(`
+      SELECT provider_container_id path,delimiter
+      FROM mail_containers WHERE connection_id=?
+    `).all(plan.connectionId) as Array<{ path: string; delimiter: string }>;
+    return providerHasDestinations("proton", requiredTargets, liveContainers);
   }
 
   finalizeProtonExport(
