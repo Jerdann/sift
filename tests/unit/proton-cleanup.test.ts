@@ -327,6 +327,39 @@ describe('approved Proton cleanup', () => {
     current.profile.database.close();
   });
 
+  it('orders approved actions by source mailbox so Bridge can move them in large batches', () => {
+    const current = setup();
+    const plan = current.plans.generate(current.connection.id, {
+      kind: 'organize', containers: {}, trashSenderDomains: [],
+    });
+    const actions = current.profile.database.prepare(`
+      SELECT id FROM cleanup_actions WHERE plan_id=? ORDER BY rowid
+    `).all(plan.id) as Array<{ id: string }>;
+    expect(actions).toHaveLength(3);
+    const update = current.profile.database.prepare(
+      'UPDATE cleanup_actions SET source_path=?,uid=? WHERE id=?',
+    );
+    update.run('Folders/Second', 30, actions[0]!.id);
+    update.run('Folders/First', 20, actions[1]!.id);
+    update.run('Folders/Second', 10, actions[2]!.id);
+
+    const approved = current.plans.approve(plan.id, plan.revision);
+    const ordered = current.profile.database.prepare(`
+      SELECT ca.source_path sourcePath,ca.uid
+      FROM job_items ji
+      JOIN cleanup_actions ca ON ca.id=ji.item_key
+      WHERE ji.job_id=?
+      ORDER BY ji.rowid
+    `).all(approved.job!.id) as Array<{ sourcePath: string; uid: number }>;
+
+    expect(ordered).toEqual([
+      { sourcePath: 'Folders/First', uid: 20 },
+      { sourcePath: 'Folders/Second', uid: 10 },
+      { sourcePath: 'Folders/Second', uid: 30 },
+    ]);
+    current.profile.database.close();
+  });
+
   it('retires obsolete empty Proton containers only after a verified replacement filing run', async () => {
     const current = setup();
     current.profile.database.prepare(`

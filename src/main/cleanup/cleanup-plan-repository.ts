@@ -385,7 +385,11 @@ export class CleanupPlanRepository {
       if (!currentReview || currentReview.id !== plan.spamReviewId)
         throw new Error('spam_review_changed');
     }
-    const actions = this.#database.prepare('SELECT id FROM cleanup_actions WHERE plan_id = ? ORDER BY rowid').all(planId) as Array<{ id: string }>;
+    const actions = this.#database.prepare(`
+      SELECT id FROM cleanup_actions
+      WHERE plan_id = ?
+      ORDER BY source_path COLLATE NOCASE, action_kind, target_path COLLATE NOCASE, uid, rowid
+    `).all(planId) as Array<{ id: string }>;
     const legacyContainers = this.#database.prepare('SELECT id FROM cleanup_legacy_containers WHERE plan_id=? ORDER BY rowid')
       .all(planId) as Array<{ id: string }>;
     const job = this.#jobs.createJob({

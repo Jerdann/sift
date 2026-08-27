@@ -4,6 +4,17 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-08-27
+
+### Fixed
+
+- Proton message actions are now ordered by source folder and message UID before execution, allowing Bridge to process large contiguous groups instead of repeatedly switching between folders.
+- Spam progress now explains that the completed count advances after each group is confirmed in the provider's Spam folder, so a long first group is not mistaken for a frozen job.
+
+### Tests
+
+- Added a regression test that verifies Proton cleanup jobs keep messages from the same source folder together and order each folder by UID.
+
 ## [1.5.1] - 2026-08-27
 
 ### Fixed

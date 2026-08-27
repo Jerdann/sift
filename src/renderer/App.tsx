@@ -4643,6 +4643,7 @@ const SpamReviewPanel = ({
           ) : (
             <span className="application-progress" role="status">
               Moving messages to Spam… {applicationJob ? `${applicationJob.completedItems.toLocaleString()} of ${applicationJob.totalItems.toLocaleString()}` : ""}
+              <small>The count updates after each group is confirmed in Spam.</small>
             </span>
           )
         ) : review.state === "completed" ? (

@@ -1057,7 +1057,8 @@ select:focus-visible {
 .spam-review > .sender-expand { margin: 14px 24px 0; }
 .spam-review-action { margin: 18px 24px 22px; }
 .spam-complete-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.application-progress { color: var(--green); font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
+.application-progress { align-items: flex-start; color: var(--green); display: flex; flex-direction: column; font-family: 'IBM Plex Mono', monospace; font-size: 10px; gap: 4px; }
+.application-progress small { color: var(--text-muted); font-family: inherit; font-size: 9px; }
 .spam-provider-note { margin: 0 24px 22px; color: #9aa5a2; font-size: 10px; line-height: 1.55; }
 .sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
 .rule-operation-list { padding: 0 24px; }
