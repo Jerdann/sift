@@ -5,6 +5,7 @@ import { isSameProtonFolder, protonFolderPath } from '../proton/proton-paths';
 import { CATEGORY_PRESENTATION } from '../../core/classification/mail-classifier';
 import type { MailCategory } from '../../shared/contracts/analysis';
 import { type CleanupPlan, cleanupPlanSchema, type GenerateCleanupInput } from '../../shared/contracts/cleanup';
+import { analyzeMailbox } from '../analysis/mailbox-analysis-service';
 
 interface CandidateRow {
   analysis_id: string;
@@ -84,6 +85,13 @@ export class CleanupPlanRepository {
   get profileId(): string { return this.#profileId; }
 
   generate(connectionId: string, input: GenerateCleanupInput): CleanupPlan {
+    // A Proton audit can legitimately replace indexed rows when Bridge reports a
+    // new UIDVALIDITY. Classifications reference those rows and are therefore
+    // invalidated with them. Refresh the local-only classification snapshot at
+    // the exact-review boundary so a still-visible organization proposal never
+    // produces an empty or partial filing plan. The proposal itself remains
+    // untouched, preserving the user's category edits and alias containers.
+    analyzeMailbox(this.#database, this.#profileId, connectionId);
     const existingSetup = input.existingSetup ?? 'extend';
     const candidates = this.#database.prepare(`
       SELECT ma.id AS analysis_id, mc.message_row_id, mc.canonical_key,

@@ -4,6 +4,14 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-08-26
+
+### Fixed
+
+- Proton final-structure reviews now refresh the local classification snapshot before calculating exact actions, recovering automatically when a later Bridge scan invalidates indexed-message classifications.
+- Rebuilding the classification snapshot preserves the user's existing category corrections, target paths, alias containers, and Fresh Slate choice.
+- Final-review failures now direct users back to Scan when the local message index cannot be refreshed instead of showing an unexplained generic failure.
+
 ## [1.4.0] - 2026-08-26
 
 ### Added

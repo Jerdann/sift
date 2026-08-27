@@ -220,6 +220,53 @@ describe('approved Proton cleanup', () => {
     current.profile.database.close();
   });
 
+  it('rebuilds classifications invalidated by a later Proton scan before creating the exact review', () => {
+    const current = setup();
+    const proposals = new OrganizationProposalRepository(
+      current.profile.database,
+      current.profile.profile.id,
+    );
+    const proposal = proposals.get('proton', current.connection.id)!;
+    const promotion = proposal.items.find((item) => item.category === 'promotions')!;
+    const corrected = proposals.edit({
+      proposalId: proposal.id,
+      revision: proposal.revision,
+      itemId: promotion.id,
+      category: 'accounts',
+      targetPath: 'Primary/Important/Joint accounts',
+      enabled: true,
+    });
+
+    current.profile.database.prepare('DELETE FROM message_classifications').run();
+    expect((current.profile.database.prepare(
+      'SELECT COUNT(*) count FROM message_classifications',
+    ).get() as { count: number }).count).toBe(0);
+
+    const plan = current.plans.generate(current.connection.id, {
+      kind: 'organize',
+      existingSetup: 'replace',
+      containers: { 'owner@pm.test': 'Primary' },
+      trashSenderDomains: [],
+    });
+
+    expect(plan).toMatchObject({
+      state: 'draft',
+      existingSetup: 'replace',
+      proposalId: corrected.id,
+      proposalRevision: corrected.revision,
+      actionCount: 4,
+    });
+    expect(plan.impacts).toContainEqual(expect.objectContaining({
+      category: 'accounts',
+      targetFolder: 'Primary/Important/Joint accounts',
+      messageCount: 2,
+    }));
+    expect((current.profile.database.prepare(
+      'SELECT COUNT(*) count FROM message_classifications',
+    ).get() as { count: number }).count).toBe(4);
+    current.profile.database.close();
+  });
+
   it('sweeps uncertain historical mail into Review/Unsorted instead of leaving it in Inbox', () => {
     const current = setup();
     current.profile.database.prepare(`

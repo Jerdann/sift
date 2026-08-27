@@ -1650,9 +1650,12 @@ const ProtonOrganizationFlow = ({
     try {
       await onGenerateCleanup(containers, transitionMode);
       setReviewStarted(true);
-    } catch {
+    } catch (caught) {
+      const detail = caught instanceof Error ? caught.message : "";
       setError(
-        "Sift could not build the exact structure review. No folders or messages were changed.",
+        detail.includes("proton_audit_required")
+          ? "The local message index is empty. Return to Scan and finish the Proton mailbox scan; no folders or messages were changed."
+          : "Sift could not refresh the local classification snapshot for this review. Return to Scan and retry the Proton scan; no folders or messages were changed.",
       );
     } finally {
       setBusy(false);
