@@ -14,7 +14,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
   try {
     let page = await electronApp.firstWindow();
     await expect(
-      page.getByRole("heading", { name: "A lighter inbox starts here." }),
+      page.getByRole("heading", { name: "Organize email accounts on this computer." }),
     ).toBeVisible();
 
     await page
@@ -57,13 +57,13 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
     await page.getByRole("button", { name: "Create profile" }).click();
     await expect(
       page.getByRole("heading", {
-        name: "Keep the mail that matters. Clear out the rest.",
+        name: "Scan, organize, filter, unsubscribe, and delete.",
       }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(
       page.getByRole("heading", {
-        name: "Control what Sift keeps and when it updates.",
+        name: "Settings",
       }),
     ).toBeVisible();
     await expect(
@@ -100,7 +100,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
     await page.getByRole("button", { name: "Recovery", exact: true }).click();
     await expect(
       page.getByRole("heading", {
-        name: "Keep the pruning workspace recoverable.",
+        name: "Back up or repair local Sift data.",
       }),
     ).toBeVisible();
     await expect(page.getByText("Counts only—no mail content")).toBeVisible();

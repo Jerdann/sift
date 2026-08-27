@@ -4,6 +4,19 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-08-26
+
+### Changed
+
+- Replaced marketing slogans and internal planning terminology throughout the interface with direct descriptions of the folders, messages, filters, subscriptions, and local data Sift will change.
+- The three existing-folder choices now explicitly say: create new folders alongside the existing setup, use matching existing folders, or replace old folders after their messages are filed.
+- Organize, Rules, Unsubscribe, Delete, Settings, and Recovery now name their exact operations and prerequisites instead of referring to abstract proposals, history, streams, scope, pruning, or cleanup.
+- Removed classifier versions and plan hashes from user-facing screens.
+
+### Fixed
+
+- Updated the end-to-end interface contract and added a regression test that prevents the previous marketing and defensive wording from returning.
+
 ## [1.4.1] - 2026-08-26
 
 ### Fixed
