@@ -4,6 +4,25 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-27
+
+### Added
+
+- Added a dedicated **Spam** step between **Organize** and **Rules**. Each sender and receiving-address pair can be left for review, marked as legitimate mail, or assigned a future Spam rule.
+- Spam reviews show why each sender was included, its message count, latest message, category share, and classification confidence before any choice is saved.
+- Rules can now be enabled or disabled one at a time before approval or Proton filter export.
+
+### Changed
+
+- The workflow is now **Scan → Organize → Spam → Rules → Unsubscribe → Delete** so ordinary filters are built only after spam decisions are complete.
+- Organize leaves Spam and Suspicious messages untouched. Rules turns approved spam choices into future Spam rules and excludes them from ordinary folder rules.
+- Ordinary filter suggestions now require at least 3 messages, a category used by at least 90% of that sender's messages to an address, and at least 82% classification confidence. Personal, Security, Suspicious, Spam, and Unsorted mail are excluded.
+- Every workflow page now states its goal, the information it uses, what it will change, and what it will leave alone in direct language.
+
+### Tests
+
+- Added Spam-review persistence, rule-boundary, threshold, exclusion, individual-selection, security-bridge, and desktop workflow coverage.
+
 ## [1.4.6] - 2026-08-27
 
 ### Fixed

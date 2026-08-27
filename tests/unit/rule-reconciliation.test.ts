@@ -13,6 +13,7 @@ import { JobRepository } from '../../src/main/jobs/job-repository';
 import { ProfileRepository } from '../../src/main/profiles/profile-repository';
 import { ProtonConnectionRepository } from '../../src/main/proton/proton-connection-repository';
 import { RuleReconciliationRepository } from '../../src/main/rules/rule-reconciliation-repository';
+import { SpamReviewRepository } from '../../src/main/spam/spam-review-repository';
 import { SafeStorageVault, type SafeStoragePort } from '../../src/main/secrets/safe-storage-vault';
 import type { DesiredManagedRule, ProviderRuleSnapshot, RuleReconciliationPlan } from '../../src/shared/contracts/rule-management';
 
@@ -62,6 +63,10 @@ const setup = () => {
   );
   add('72ea544e-8999-461d-8bde-287f03e1b2b1', 'mail@offers.example', '50% off today', { 'list-id': 'offers.example' });
   add('ce34d6aa-811d-4a99-9e02-0cc95e404834', 'mail@offers.example', 'Last chance sale', { 'list-id': 'offers.example' });
+  add('aa34d6aa-811d-4a99-9e02-0cc95e404835', 'mail@offers.example', 'Clearance coupon', { 'list-id': 'offers.example' });
+  add('ba34d6aa-811d-4a99-9e02-0cc95e404836', 'orders@shop.example', 'Your order confirmation');
+  add('ca34d6aa-811d-4a99-9e02-0cc95e404837', 'orders@shop.example', 'Your order receipt');
+  add('da34d6aa-811d-4a99-9e02-0cc95e404838', 'orders@shop.example', 'Payment confirmed');
   add('afafc196-49af-4ec5-8d67-62aa05295662', 'alerts@secure.example', 'New login security alert');
   new GmailAnalysisService(profile.database, profileId).analyze(connection);
   new AccountIdentityRepository(profile.database, profileId).update({
@@ -70,6 +75,9 @@ const setup = () => {
   });
   new GmailAnalysisService(profile.database, profileId).analyze(connection);
   new OrganizationProposalRepository(profile.database, profileId).generate('gmail', connection.id);
+  const spamReviews = new SpamReviewRepository(profile.database, profileId);
+  const spamReview = spamReviews.generate('gmail', connection.id);
+  spamReviews.complete({ reviewId: spamReview.id, revision: spamReview.revision, decisions: [] });
   const rules = new RuleReconciliationRepository(profile.database, profileId, { now: () => '2026-08-25T12:30:00.000Z' });
   return { profile, profileId, connection, connections, rules };
 };
@@ -134,7 +142,7 @@ describe('provider rule inventory and reconciliation', () => {
     profile.database.close();
   });
 
-  it('creates a quiet-inbox rule for a repeated uncertain sender stream', () => {
+  it('does not create a filing rule for repeated unsorted mail', () => {
     const { profile, profileId, connection, rules } = setup();
     const insert = profile.database.prepare(`INSERT INTO gmail_indexed_messages(
       id,connection_id,gmail_message_id,thread_id,received_at,subject,sender_json,recipients_json,
@@ -150,14 +158,51 @@ describe('provider rule inventory and reconciliation', () => {
     }
     new GmailAnalysisService(profile.database, profileId).analyze(connection);
     new OrganizationProposalRepository(profile.database, profileId).generate('gmail', connection.id);
+    const spamReviews = new SpamReviewRepository(profile.database, profileId);
+    const spamReview = spamReviews.generate('gmail', connection.id);
+    spamReviews.complete({ reviewId: spamReview.id, revision: spamReview.revision, decisions: [] });
 
     const desired = rules.desired('gmail', connection.id).rules.find(
       (rule) => rule.senderDomain === 'company.example',
     );
-    expect(desired).toMatchObject({
-      category: 'other', targetPath: 'Primary/Review/Unsorted',
-      markRead: true, archive: true, observedMessages: 3,
+    expect(desired).toBeUndefined();
+    profile.database.close();
+  });
+
+  it('carries an approved spam decision into a separate future Spam rule', () => {
+    const { profile, profileId, connection, rules } = setup();
+    const analysis = profile.database.prepare(
+      'SELECT id FROM gmail_mailbox_analyses WHERE connection_id=?',
+    ).get(connection.id) as { id: string };
+    profile.database.prepare(`
+      INSERT INTO gmail_analysis_streams(
+        id,analysis_id,sender_domain,category,receiving_address,message_count,
+        latest_at,confidence,evidence_json
+      ) VALUES (?,?,?,?,?,?,?,?,?)
+    `).run(
+      '9d0a10ef-1ef8-4c17-9472-30d8fa69e351', analysis.id,
+      'junk.example', 'spam', 'owner@example.test', 12,
+      '2026-08-25T10:00:00.000Z', 0.94,
+      '["sender authentication failed","high-risk unsolicited language"]',
+    );
+    const reviews = new SpamReviewRepository(profile.database, profileId);
+    const review = reviews.generate('gmail', connection.id);
+    const candidate = review.candidates.find((item) => item.senderDomain === 'junk.example')!;
+    reviews.complete({
+      reviewId: review.id,
+      revision: review.revision,
+      decisions: [{ candidateId: candidate.id, decision: 'spam' }],
     });
+
+    expect(rules.desired('gmail', connection.id).rules).toContainEqual(
+      expect.objectContaining({
+        senderDomain: 'junk.example',
+        receivingAddress: 'owner@example.test',
+        spam: true,
+        targetPath: 'SPAM',
+        markRead: false,
+      }),
+    );
     profile.database.close();
   });
 
@@ -167,15 +212,20 @@ describe('provider rule inventory and reconciliation', () => {
       id,connection_id,gmail_message_id,thread_id,received_at,subject,sender_json,recipients_json,
       headers_json,label_ids_json,size_bytes,indexed_at
     ) VALUES (?,?,?,?,?,?,?,?,?,'[]',100,'2026-08-25T12:00:00.000Z')`);
-    insert.run(
-      '66a67bd3-3d82-4fb1-adce-542796e65b52', connection.id,
-      '66a67bd3-3d82-4fb1-adce-542796e65b52', 'thread-second-offer',
-      '2026-08-25T11:00:00.000Z', 'Another limited sale',
-      '["mail@second-offers.example"]', '["owner@example.test"]',
-      '{"delivered-to":"owner@example.test","list-id":"second-offers.example"}',
-    );
+    for (let index = 0; index < 3; index += 1) {
+      const id = `66a67bd3-3d82-4fb1-adce-542796e65b5${index}`;
+      insert.run(
+        id, connection.id, id, `thread-second-offer-${index}`,
+        '2026-08-25T11:00:00.000Z', `Another limited sale ${index}`,
+        '["mail@second-offers.example"]', '["owner@example.test"]',
+        '{"delivered-to":"owner@example.test","list-id":"second-offers.example"}',
+      );
+    }
 
     new GmailAnalysisService(profile.database, profileId).analyze(connection);
+    const spamReviews = new SpamReviewRepository(profile.database, profileId);
+    const spamReview = spamReviews.generate('gmail', connection.id);
+    spamReviews.complete({ reviewId: spamReview.id, revision: spamReview.revision, decisions: [] });
 
     const desired = rules.desired('gmail', connection.id).rules;
     expect(desired.length).toBeGreaterThan(0);
@@ -252,17 +302,18 @@ describe('provider rule inventory and reconciliation', () => {
       senderDomain: 'offers.example', receivingAddress: null,
       category: 'promotions', targetPath: 'Primary/Promotions',
       markRead: true, archive: false, spam: false,
-      observedMessages: 5, confidence: 0.95,
+      observedMessages: 5, confidence: 0.95, categoryShare: 1,
     };
     const plan = {
       id: '8e4df6a8-8113-4a51-b9aa-c5dc5ec98c64', provider: 'proton', connectionId: connection.id,
       proposalId: '0f02e04d-a763-477c-a1d1-8eff343ac5e2', proposalRevision: 'c'.repeat(64),
+      spamReviewId: '1f02e04d-a763-477c-a1d1-8eff343ac5e3',
       inventoryId: '479e1574-d90d-437e-9e4a-d30921a7edc6', revision: 'd'.repeat(64),
       state: 'draft', createdAt: '2026-08-27T01:00:00.000Z', approvedAt: null,
       operations: [{
         id: '3740aa88-e30f-42dd-af68-12316d5b0d29', stableKey: desired.stableKey,
         kind: 'create', desired, prior: null, priorManaged: null,
-        state: 'pending', providerRuleId: null, errorCode: null,
+        state: 'pending', providerRuleId: null, errorCode: null, enabled: true,
       }],
       job: null, undoJob: null,
     } satisfies RuleReconciliationPlan;
@@ -287,8 +338,9 @@ describe('provider rule inventory and reconciliation', () => {
     const rules = new RuleReconciliationRepository(profile.database, profileId, { jobs });
     rules.saveInventory('gmail', connection.id, 'live_api', [], 1_000);
     const draft = rules.generate('gmail', connection.id);
-    expect(draft.operations).toHaveLength(1);
-    expect(() => rules.approve(draft.id, draft.revision)).toThrow('organization_folders_required');
+    expect(draft.operations).toHaveLength(2);
+    const selectedOperation = draft.operations[0]!;
+    expect(() => rules.approve(draft.id, draft.revision, [selectedOperation.id])).toThrow('organization_folders_required');
     const appliedProposal = proposalRepository.get('gmail', connection.id)!;
     profile.database.prepare(`
       INSERT INTO gmail_organization_plans(
@@ -303,7 +355,7 @@ describe('provider rule inventory and reconciliation', () => {
       '2026-08-25T12:26:00.000Z', appliedProposal.id,
       appliedProposal.revision, connection.id,
     );
-    const approved = rules.approve(draft.id, draft.revision);
+    const approved = rules.approve(draft.id, draft.revision, [selectedOperation.id]);
     expect(approved.job).not.toBeNull();
 
     const filters: Array<{ id: string; criteria: { from: string; to?: string }; action: { addLabelIds: string[]; removeLabelIds: string[] } }> = [];
@@ -335,18 +387,18 @@ describe('provider rule inventory and reconciliation', () => {
     expect(failed.state).toBe('failed');
     expect(filters).toHaveLength(1);
 
-    const retried = rules.retry(draft.id, [draft.operations[0]!.id]);
+    const retried = rules.retry(draft.id, [selectedOperation.id]);
     const completed = await runner.run(retried.job!.id);
     expect(completed.state).toBe('completed');
     expect(filters).toHaveLength(1);
     expect(fetchPort.mock.calls.filter((call) => String(call[0]).endsWith('/settings/filters') && call[1]?.method === 'POST')).toHaveLength(1);
-    expect(rules.managedRule('gmail', connection.id, draft.operations[0]!.stableKey)).toMatchObject({ provider_rule_id: 'created-filter-1', state: 'active' });
+    expect(rules.managedRule('gmail', connection.id, selectedOperation.stableKey)).toMatchObject({ provider_rule_id: 'created-filter-1', state: 'active' });
 
     const undoing = rules.prepareUndo(draft.id);
     const undone = await runner.undo(undoing.undoJob!.id);
     expect(undone.state).toBe('undone');
     expect(filters).toHaveLength(0);
-    expect(rules.managedRule('gmail', connection.id, draft.operations[0]!.stableKey)?.state).toBe('removed');
+    expect(rules.managedRule('gmail', connection.id, selectedOperation.stableKey)?.state).toBe('removed');
     profile.database.close();
   });
 });

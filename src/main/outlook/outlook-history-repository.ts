@@ -166,7 +166,10 @@ export class OutlookHistoryRepository {
                 confidence: message.confidence,
               }
             : undefined
-          : candidates[0];
+          : candidates.find(
+              (candidate) =>
+                !["spam", "suspicious"].includes(candidate.category),
+            );
       if (
         !item ||
         !item.enabled

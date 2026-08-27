@@ -108,7 +108,9 @@ export class GmailOrganizationRepository {
           && !strings(message.label_ids_json).some((label) => label === 'TRASH' || label === 'SPAM')
           ? { id: `trash\0${message.sender_domain}\0${[...addresses].sort()[0] ?? ''}\0${message.source_category}`, scope_address: [...addresses].sort()[0] ?? null, source_category: message.source_category, category: message.source_category, target_path: 'TRASH', enabled: 1, confidence: message.confidence }
           : undefined
-        : candidates[0];
+        : candidates.find((candidate) =>
+            !['spam', 'suspicious'].includes(candidate.category)
+          );
       if (!item || !item.enabled) {
         skipped += 1;
         continue;

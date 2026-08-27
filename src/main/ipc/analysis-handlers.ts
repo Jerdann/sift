@@ -158,6 +158,12 @@ export const registerAnalysisHandlers = ({
       context.database,
       context.profile.id,
     );
+    if (input.enabledOperationIds)
+      rules.configureEnabledOperations(
+        input.planId,
+        input.revision,
+        input.enabledOperationIds,
+      );
     const plan = rules.getPlan(input.planId);
     const desired = rules.rulesForPlan(input.planId, input.revision);
     const content = renderManagedProtonSieve(desired);

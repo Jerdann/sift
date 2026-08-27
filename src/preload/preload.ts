@@ -145,6 +145,13 @@ import {
   manualUpdateCheckResultSchema,
   updateAppSettingsInputSchema,
 } from "../shared/contracts/settings";
+import {
+  type CompleteSpamReview,
+  type SpamReviewScope,
+  completeSpamReviewSchema,
+  spamReviewSchema,
+  spamReviewScopeSchema,
+} from "../shared/contracts/spam-review";
 
 const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
   getVersion: async () =>
@@ -221,6 +228,29 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
       await ipcRenderer.invoke(
         IPC_CHANNELS.organizationProposalEdit,
         editOrganizationProposalSchema.parse(input),
+      ),
+    ),
+  getSpamReview: async (input: SpamReviewScope) =>
+    spamReviewSchema
+      .nullable()
+      .parse(
+        await ipcRenderer.invoke(
+          IPC_CHANNELS.spamReviewGet,
+          spamReviewScopeSchema.parse(input),
+        ),
+      ),
+  generateSpamReview: async (input: SpamReviewScope) =>
+    spamReviewSchema.parse(
+      await ipcRenderer.invoke(
+        IPC_CHANNELS.spamReviewGenerate,
+        spamReviewScopeSchema.parse(input),
+      ),
+    ),
+  completeSpamReview: async (input: CompleteSpamReview) =>
+    spamReviewSchema.parse(
+      await ipcRenderer.invoke(
+        IPC_CHANNELS.spamReviewComplete,
+        completeSpamReviewSchema.parse(input),
       ),
     ),
   getRuleInventory: async (input: RuleManagementScope) =>

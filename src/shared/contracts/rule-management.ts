@@ -49,6 +49,7 @@ export const desiredManagedRuleSchema = z.object({
   spam: z.boolean(),
   observedMessages: z.number().int().positive(),
   confidence: z.number().min(0).max(1),
+  categoryShare: z.number().min(0).max(1).default(1),
 });
 
 export const ruleReconciliationOperationSchema = z.object({
@@ -61,6 +62,7 @@ export const ruleReconciliationOperationSchema = z.object({
   state: z.enum(['pending', 'running', 'succeeded', 'failed', 'verification_mismatch', 'undone']),
   providerRuleId: z.string().nullable(),
   errorCode: z.string().nullable(),
+  enabled: z.boolean(),
 });
 
 export const ruleReconciliationPlanSchema = z.object({
@@ -69,6 +71,7 @@ export const ruleReconciliationPlanSchema = z.object({
   connectionId: z.uuid(),
   proposalId: z.uuid(),
   proposalRevision: z.string().length(64),
+  spamReviewId: z.uuid(),
   inventoryId: z.uuid(),
   revision: z.string().length(64),
   state: z.enum(['draft', 'approved', 'executing', 'completed', 'failed', 'undone']),
@@ -88,6 +91,7 @@ export const ruleManagementScopeSchema = z.object({
 export const approveRulePlanSchema = z.object({
   planId: z.uuid(),
   revision: z.string().length(64),
+  enabledOperationIds: z.array(z.uuid()).max(5_000).optional(),
 }).strict();
 
 export const retryRulePlanSchema = z.object({
@@ -100,6 +104,7 @@ export const undoRulePlanSchema = z.object({ planId: z.uuid() }).strict();
 export const exportProtonRulePlanSchema = z.object({
   planId: z.uuid(),
   revision: z.string().length(64),
+  enabledOperationIds: z.array(z.uuid()).max(5_000).optional(),
 }).strict();
 
 export const protonRuleExportResultSchema = z.object({

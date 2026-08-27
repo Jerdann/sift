@@ -254,7 +254,7 @@ describe('approved Proton cleanup', () => {
       existingSetup: 'replace',
       proposalId: corrected.id,
       proposalRevision: corrected.revision,
-      actionCount: 4,
+      actionCount: 3,
     });
     expect(plan.impacts).toContainEqual(expect.objectContaining({
       category: 'accounts',
@@ -393,7 +393,7 @@ describe('approved Proton cleanup', () => {
   it('previews exact impact, rejects stale approval, then applies only approved actions', async () => {
     const current = setup();
     const plan = current.plans.generate(current.connection.id, { kind: 'organize', containers: { 'owner@pm.test': 'Primary' }, trashSenderDomains: [] });
-    expect(plan).toMatchObject({ state: 'draft', actionCount: 4, spamCount: 1, skippedCount: 0 });
+    expect(plan).toMatchObject({ state: 'draft', actionCount: 3, spamCount: 0, skippedCount: 1 });
     expect(() => current.plans.approve(plan.id, 'stale-revision')).toThrow('cleanup_plan_changed');
     const approved = current.plans.approve(plan.id, plan.revision);
     expect(approved.job?.kind).toBe('proton-cleanup');
@@ -403,12 +403,12 @@ describe('approved Proton cleanup', () => {
     expect(result.plan.state).toBe('completed');
     expect(result.profileId).toBe(current.profile.profile.id);
     expect(result.plan.job?.state).toBe('succeeded');
-    expect(client.applied).toHaveLength(4);
-    expect(client.applied.some(([, , target]) => target === 'Proton Spam')).toBe(true);
+    expect(client.applied).toHaveLength(3);
+    expect(client.applied.some(([, , target]) => target === 'Proton Spam')).toBe(false);
     expect(client.applied.some(([, , target]) => target === 'Folders/Primary/Important/Security')).toBe(true);
     expect(client.applied.some(([, , target]) => target === 'Folders/Primary/Promotions')).toBe(true);
-    expect((current.profile.database.prepare("SELECT COUNT(*) AS count FROM cleanup_actions WHERE prior_flags_json = '[\"\\\\Flagged\"]' AND state = 'succeeded'").get() as { count: number }).count).toBe(4);
-    expect((current.profile.database.prepare("SELECT COUNT(*) AS count FROM cleanup_actions WHERE resulting_uid IS NOT NULL AND resulting_uid_validity = '2'").get() as { count: number }).count).toBe(4);
+    expect((current.profile.database.prepare("SELECT COUNT(*) AS count FROM cleanup_actions WHERE prior_flags_json = '[\"\\\\Flagged\"]' AND state = 'succeeded'").get() as { count: number }).count).toBe(3);
+    expect((current.profile.database.prepare("SELECT COUNT(*) AS count FROM cleanup_actions WHERE resulting_uid IS NOT NULL AND resulting_uid_validity = '2'").get() as { count: number }).count).toBe(3);
     const nextPlan = current.plans.generate(current.connection.id, { kind: 'organize', containers: {}, trashSenderDomains: [] });
     expect(nextPlan.actionCount).toBe(0);
     expect(client.closed).toBe(true);
@@ -425,14 +425,14 @@ describe('approved Proton cleanup', () => {
     const undoPlan = current.plans.prepareUndo(applied.plan.id);
     const undone = await runner.undo(undoPlan.undoJob!.id);
     expect(undone.plan.undoJob?.state).toBe('succeeded');
-    expect(client.restored).toHaveLength(4);
+    expect(client.restored).toHaveLength(3);
     expect(client.restored.every(([, , , flags]) => JSON.stringify(flags) === JSON.stringify(['\\Flagged']))).toBe(true);
-    expect((current.profile.database.prepare("SELECT COUNT(*) AS count FROM cleanup_actions WHERE undo_state = 'succeeded'").get() as { count: number }).count).toBe(4);
+    expect((current.profile.database.prepare("SELECT COUNT(*) AS count FROM cleanup_actions WHERE undo_state = 'succeeded'").get() as { count: number }).count).toBe(3);
     expect((current.profile.database.prepare(`
       SELECT COUNT(*) AS count FROM indexed_messages im
       JOIN mail_containers mc ON mc.id=im.container_id
       WHERE mc.provider_container_id='INBOX' AND im.uid_validity='3'
-    `).get() as { count: number }).count).toBe(4);
+    `).get() as { count: number }).count).toBe(3);
     current.profile.database.close();
   });
 
@@ -476,7 +476,7 @@ describe('approved Proton cleanup', () => {
     const actions = current.profile.database.prepare(
       "SELECT uid,prior_flags_json FROM cleanup_actions WHERE state='succeeded'",
     ).all() as Array<{ uid: number; prior_flags_json: string }>;
-    expect(actions).toHaveLength(4);
+    expect(actions).toHaveLength(3);
     for (const action of actions) {
       expect(action.prior_flags_json).toBe(
         capturedUids.includes(action.uid) ? '["\\\\Flagged"]' : '["\\\\Seen"]',
@@ -505,9 +505,9 @@ describe('approved Proton cleanup', () => {
 
     const completed = await runner.run(approved.job!.id);
     expect(completed.plan.job?.state).toBe('succeeded');
-    expect(client.applied).toHaveLength(4);
+    expect(client.applied).toHaveLength(3);
     expect(client.applied.slice(0, moveCount)).toHaveLength(moveCount);
-    expect(new Set(client.applied.map(([, uid]) => uid)).size).toBe(4);
+    expect(new Set(client.applied.map(([, uid]) => uid)).size).toBe(3);
     current.profile.database.close();
   });
 
@@ -532,7 +532,7 @@ describe('approved Proton cleanup', () => {
 
     await expect(runner.run(approved.job!.id)).rejects.toThrow('proton_target_rejected');
     expect(current.jobs.getProgress(approved.job!.id).counts).toMatchObject({
-      pending: 4,
+      pending: 3,
       running: 0,
       failed: 0,
     });

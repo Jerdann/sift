@@ -1023,6 +1023,46 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       ALTER TABLE rule_inventories ADD COLUMN containers_json TEXT NOT NULL DEFAULT '[]';
     `,
   },
+  {
+    version: 30,
+    statements: `
+      ALTER TABLE rule_reconciliation_operations
+        ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1));
+      ALTER TABLE rule_reconciliation_plans ADD COLUMN spam_review_id TEXT;
+
+      CREATE TABLE spam_reviews (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL CHECK(provider IN ('proton','gmail','outlook')),
+        connection_id TEXT NOT NULL,
+        analysis_id TEXT NOT NULL,
+        revision TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('draft','completed')),
+        created_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+      CREATE INDEX spam_reviews_scope_idx
+        ON spam_reviews(profile_id,provider,connection_id,created_at DESC);
+
+      CREATE TABLE spam_review_candidates (
+        id TEXT PRIMARY KEY,
+        review_id TEXT NOT NULL REFERENCES spam_reviews(id) ON DELETE CASCADE,
+        sender_domain TEXT NOT NULL,
+        receiving_address TEXT NOT NULL,
+        category TEXT NOT NULL,
+        message_count INTEGER NOT NULL CHECK(message_count > 0),
+        latest_at TEXT,
+        confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1),
+        category_share REAL NOT NULL CHECK(category_share BETWEEN 0 AND 1),
+        evidence_json TEXT NOT NULL,
+        reason TEXT NOT NULL CHECK(reason IN ('likely_spam','suspicious','bulk_mail')),
+        decision TEXT NOT NULL CHECK(decision IN ('review','spam','not_spam')),
+        UNIQUE(review_id,sender_domain,receiving_address)
+      );
+      CREATE INDEX spam_review_candidates_review_idx
+        ON spam_review_candidates(review_id,decision,message_count DESC);
+    `,
+  },
 ]);
 
 export const applyMigrations = (

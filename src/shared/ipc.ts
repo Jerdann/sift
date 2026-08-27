@@ -94,6 +94,11 @@ import type {
   ManualUpdateCheckResult,
   UpdateAppSettingsInput,
 } from "./contracts/settings";
+import type {
+  CompleteSpamReview,
+  SpamReview,
+  SpamReviewScope,
+} from "./contracts/spam-review";
 
 export const IPC_CHANNELS = Object.freeze({
   appGetVersion: "app:get-version",
@@ -108,6 +113,9 @@ export const IPC_CHANNELS = Object.freeze({
   organizationProposalGet: "organization-proposal:get",
   organizationProposalGenerate: "organization-proposal:generate",
   organizationProposalEdit: "organization-proposal:edit",
+  spamReviewGet: "spam-review:get",
+  spamReviewGenerate: "spam-review:generate",
+  spamReviewComplete: "spam-review:complete",
   ruleInventoryGet: "rule-inventory:get",
   ruleInventoryRefresh: "rule-inventory:refresh",
   rulePlanGet: "rule-plan:get",
@@ -215,6 +223,9 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   "getOrganizationProposal",
   "generateOrganizationProposal",
   "editOrganizationProposal",
+  "getSpamReview",
+  "generateSpamReview",
+  "completeSpamReview",
   "getRuleInventory",
   "refreshRuleInventory",
   "getRulePlan",
@@ -334,6 +345,9 @@ export interface EmailOrganizerBridge {
   editOrganizationProposal(
     input: EditOrganizationProposal,
   ): Promise<OrganizationProposal>;
+  getSpamReview(input: SpamReviewScope): Promise<SpamReview | null>;
+  generateSpamReview(input: SpamReviewScope): Promise<SpamReview>;
+  completeSpamReview(input: CompleteSpamReview): Promise<SpamReview>;
   getRuleInventory(input: RuleManagementScope): Promise<RuleInventory | null>;
   refreshRuleInventory(input: RuleManagementScope): Promise<RuleInventory>;
   getRulePlan(

@@ -77,6 +77,7 @@ export const desiredRule = (input: {
   spam: boolean;
   observedMessages: number;
   confidence: number;
+  categoryShare?: number;
 }): DesiredManagedRule => {
   const senderDomain = input.senderDomain.trim().toLowerCase();
   const receivingAddress = input.receivingAddress?.trim().toLowerCase() ?? null;
@@ -104,6 +105,7 @@ export const desiredRule = (input: {
     spam: input.spam,
     observedMessages: input.observedMessages,
     confidence: input.confidence,
+    categoryShare: input.categoryShare ?? 1,
   };
 };
 

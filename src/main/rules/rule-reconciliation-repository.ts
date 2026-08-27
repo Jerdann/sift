@@ -20,6 +20,7 @@ import {
 } from "../../core/rules/rule-reconciliation";
 import { providerHasDestinations } from "../../core/rules/folder-readiness";
 import type { JobRepository } from "../jobs/job-repository";
+import { SpamReviewRepository } from "../spam/spam-review-repository";
 
 interface StreamRow {
   sender_domain: string;
@@ -227,6 +228,7 @@ export class RuleReconciliationRepository {
   ): {
     proposalId: string;
     proposalRevision: string;
+    spamReviewId: string;
     rules: DesiredManagedRule[];
   } {
     this.#assertConnection(provider, connectionId);
@@ -254,6 +256,14 @@ export class RuleReconciliationRepository {
     // rules from the newest scan for this account instead of the proposal's
     // now-stale analysis id.
     const streams = this.#streams(provider, connectionId);
+    const spamReviewRepository = new SpamReviewRepository(
+      this.#database,
+      this.#profileId,
+    );
+    const spamReview = spamReviewRepository.getCurrent(provider, connectionId);
+    if (!spamReview || spamReview.state !== "completed")
+      throw new Error("spam_review_required");
+    const spamDecisions = spamReviewRepository.decisions(provider, connectionId);
     const groups = new Map<string, StreamRow[]>();
     for (const stream of streams) {
       if (
@@ -273,14 +283,36 @@ export class RuleReconciliationRepository {
       );
       const dominant = ordered[0]!;
       const total = ordered.reduce((sum, item) => sum + item.message_count, 0);
-      const repeatedUnsorted =
-        dominant.category === "other" &&
-        dominant.message_count >= 3 &&
-        dominant.confidence >= 0.45;
+      const categoryShare = dominant.message_count / total;
+      const decision = spamDecisions.get(
+        `${dominant.sender_domain.toLowerCase()}\0${dominant.receiving_address.toLowerCase()}`,
+      );
+      if (decision === "spam") {
+        rules.push(
+          desiredRule({
+            provider,
+            connectionId,
+            senderDomain: dominant.sender_domain,
+            receivingAddress: dominant.receiving_address,
+            category: "spam",
+            targetPath: "SPAM",
+            markRead: false,
+            archive: false,
+            spam: true,
+            observedMessages: total,
+            confidence: dominant.confidence,
+            categoryShare,
+          }),
+        );
+        continue;
+      }
       if (
-        dominant.message_count / total < 0.75 ||
-        (!repeatedUnsorted &&
-          dominant.confidence < (dominant.category === "spam" ? 0.94 : 0.82))
+        dominant.message_count < 3 ||
+        categoryShare < 0.9 ||
+        dominant.confidence < 0.82 ||
+        ["personal", "security", "suspicious", "spam", "other"].includes(
+          dominant.category,
+        )
       )
         continue;
       const item = itemBySource.get(
@@ -288,10 +320,11 @@ export class RuleReconciliationRepository {
       );
       if (
         !item?.enabled ||
-        ["personal", "suspicious"].includes(item.category)
+        ["personal", "security", "suspicious", "spam", "other"].includes(
+          item.category,
+        )
       )
         continue;
-      const spam = item.category === "spam";
       rules.push(
         desiredRule({
           provider,
@@ -299,13 +332,13 @@ export class RuleReconciliationRepository {
           senderDomain: dominant.sender_domain,
           receivingAddress: dominant.receiving_address,
           category: item.category,
-          targetPath: spam ? "SPAM" : item.target_path,
-          markRead: item.category !== "security" && !spam,
-          archive:
-            provider !== "proton" && item.category !== "security" && !spam,
-          spam,
-          observedMessages: dominant.message_count,
+          targetPath: item.target_path,
+          markRead: true,
+          archive: provider !== "proton",
+          spam: false,
+          observedMessages: total,
           confidence: dominant.confidence,
+          categoryShare,
         }),
       );
     }
@@ -313,6 +346,7 @@ export class RuleReconciliationRepository {
     return {
       proposalId: String(proposal.id),
       proposalRevision: String(proposal.revision),
+      spamReviewId: spamReview.id,
       rules,
     };
   }
@@ -345,7 +379,7 @@ export class RuleReconciliationRepository {
     const operations: Array<
       Omit<
         RuleReconciliationOperation,
-        "id" | "state" | "providerRuleId" | "errorCode"
+        "id" | "state" | "providerRuleId" | "errorCode" | "enabled"
       >
     > = [];
     for (const rule of desired.rules) {
@@ -443,7 +477,7 @@ export class RuleReconciliationRepository {
         .run(this.#profileId, provider, connectionId);
       this.#database
         .prepare(
-          "INSERT INTO rule_reconciliation_plans(id,profile_id,provider,connection_id,proposal_id,proposal_revision,inventory_id,revision,state,created_at) VALUES (?,?,?,?,?,?,?,?,'draft',?)",
+          "INSERT INTO rule_reconciliation_plans(id,profile_id,provider,connection_id,proposal_id,proposal_revision,spam_review_id,inventory_id,revision,state,created_at) VALUES (?,?,?,?,?,?,?,?,?,'draft',?)",
         )
         .run(
           planId,
@@ -452,6 +486,7 @@ export class RuleReconciliationRepository {
           connectionId,
           desired.proposalId,
           desired.proposalRevision,
+          desired.spamReviewId,
           inventory.id,
           revision,
           now,
@@ -484,7 +519,17 @@ export class RuleReconciliationRepository {
     this.#assertConnection(provider, connectionId);
     const row = this.#database
       .prepare(
-        "SELECT id FROM rule_reconciliation_plans WHERE profile_id=? AND provider=? AND connection_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1",
+        `SELECT plan.id FROM rule_reconciliation_plans plan
+         WHERE plan.profile_id=? AND plan.provider=? AND plan.connection_id=?
+           AND plan.spam_review_id=(
+               SELECT latest.id FROM spam_reviews latest
+               WHERE latest.profile_id=plan.profile_id
+                 AND latest.provider=plan.provider
+                 AND latest.connection_id=plan.connection_id
+                 AND latest.state='completed'
+               ORDER BY latest.created_at DESC,latest.rowid DESC LIMIT 1
+             )
+         ORDER BY plan.created_at DESC,plan.rowid DESC LIMIT 1`,
       )
       .get(this.#profileId, provider, connectionId) as
       | { id: string }
@@ -510,6 +555,7 @@ export class RuleReconciliationRepository {
       connectionId: plan.connection_id,
       proposalId: plan.proposal_id,
       proposalRevision: plan.proposal_revision,
+      spamReviewId: plan.spam_review_id,
       inventoryId: plan.inventory_id,
       revision: plan.revision,
       state: plan.state,
@@ -533,6 +579,7 @@ export class RuleReconciliationRepository {
         state: operation.state,
         providerRuleId: operation.provider_rule_id,
         errorCode: operation.error_code,
+        enabled: Boolean(operation.enabled),
       })),
       job:
         plan.job_id && this.#jobs
@@ -545,13 +592,19 @@ export class RuleReconciliationRepository {
     });
   }
 
-  approve(planId: string, revision: string): RuleReconciliationPlan {
+  approve(
+    planId: string,
+    revision: string,
+    enabledOperationIds?: readonly string[],
+  ): RuleReconciliationPlan {
     if (!this.#jobs) throw new Error("rule_jobs_unavailable");
     const plan = this.getPlan(planId);
     if (plan.state !== "draft" || plan.revision !== revision)
       throw new Error("rule_plan_changed");
     if (!this.organizationApplied(plan))
       throw new Error("organization_folders_required");
+    if (!this.spamReviewCurrent(plan)) throw new Error("spam_review_changed");
+    if (enabledOperationIds) this.#setEnabledOperations(plan, enabledOperationIds);
     const currentProposal = this.#database
       .prepare(
         "SELECT revision,state FROM organization_proposals WHERE id=? AND profile_id=?",
@@ -566,7 +619,10 @@ export class RuleReconciliationRepository {
     ) {
       throw new Error("organization_proposal_changed");
     }
-    const operationIds = plan.operations.map((operation) => operation.id);
+    const selectedPlan = this.getPlan(planId);
+    const operationIds = selectedPlan.operations
+      .filter((operation) => operation.enabled && operation.kind !== "unchanged")
+      .map((operation) => operation.id);
     const now = this.#now();
     if (!operationIds.length) {
       this.#database
@@ -869,9 +925,22 @@ export class RuleReconciliationRepository {
     }
     if (!this.organizationApplied(plan))
       throw new Error("organization_folders_required");
+    if (!this.spamReviewCurrent(plan)) throw new Error("spam_review_changed");
     return plan.operations.flatMap((operation) =>
-      operation.desired ? [operation.desired] : [],
+      operation.enabled && operation.desired ? [operation.desired] : [],
     );
+  }
+
+  configureEnabledOperations(
+    planId: string,
+    revision: string,
+    enabledOperationIds: readonly string[],
+  ): RuleReconciliationPlan {
+    const plan = this.getPlan(planId);
+    if (plan.state !== "draft" || plan.revision !== revision)
+      throw new Error("rule_plan_changed");
+    this.#setEnabledOperations(plan, enabledOperationIds);
+    return this.getPlan(planId);
   }
 
   organizationApplied(plan: RuleReconciliationPlan): boolean {
@@ -895,7 +964,7 @@ export class RuleReconciliationRepository {
     if (plan.provider !== "proton") return false;
 
     const requiredTargets = plan.operations.flatMap((operation) =>
-      operation.desired && !operation.desired.spam
+      operation.enabled && operation.desired && !operation.desired.spam
         ? [operation.desired.targetPath]
         : [],
     );
@@ -904,6 +973,19 @@ export class RuleReconciliationRepository {
       FROM mail_containers WHERE connection_id=?
     `).all(plan.connectionId) as Array<{ path: string; delimiter: string }>;
     return providerHasDestinations("proton", requiredTargets, liveContainers);
+  }
+
+  spamReviewCurrent(plan: RuleReconciliationPlan): boolean {
+    const row = this.#database.prepare(`
+      SELECT id,state FROM spam_reviews
+      WHERE profile_id=? AND provider=? AND connection_id=?
+      ORDER BY created_at DESC,rowid DESC LIMIT 1
+    `).get(this.#profileId, plan.provider, plan.connectionId) as
+      | { id: string; state: string }
+      | undefined;
+    return Boolean(
+      row?.id === plan.spamReviewId && row.state === "completed",
+    );
   }
 
   finalizeProtonExport(
@@ -923,7 +1005,7 @@ export class RuleReconciliationRepository {
     const rules = this.rulesForPlan(planId, revision);
     const now = this.#now();
     this.#database.transaction(() => {
-      for (const operation of plan.operations) {
+      for (const operation of plan.operations.filter((item) => item.enabled)) {
         if (operation.desired) {
           this.activateManagedRule(
             "proton",
@@ -975,7 +1057,7 @@ export class RuleReconciliationRepository {
     })();
     if (
       rules.length !==
-      plan.operations.filter((operation) => operation.desired).length
+      plan.operations.filter((operation) => operation.enabled && operation.desired).length
     )
       throw new Error("proton_rule_export_mismatch");
     return this.getPlan(planId);
@@ -987,6 +1069,34 @@ export class RuleReconciliationRepository {
         "SELECT stable_key,provider_rule_id,fingerprint,desired_json,ownership,state FROM managed_rules WHERE profile_id=? AND provider=? AND connection_id=?",
       )
       .all(this.#profileId, provider, connectionId) as ManagedRow[];
+  }
+
+  #setEnabledOperations(
+    plan: RuleReconciliationPlan,
+    enabledOperationIds: readonly string[],
+  ): void {
+    const unique = new Set(enabledOperationIds);
+    const actionable = plan.operations.filter(
+      (operation) => operation.kind !== "unchanged",
+    );
+    if (
+      unique.size !== enabledOperationIds.length ||
+      [...unique].some(
+        (id) => !actionable.some((operation) => operation.id === id),
+      )
+    )
+      throw new Error("rule_operation_not_found");
+    this.#database.transaction(() => {
+      this.#database
+        .prepare(
+          "UPDATE rule_reconciliation_operations SET enabled=0,updated_at=? WHERE plan_id=? AND operation_kind!='unchanged'",
+        )
+        .run(this.#now(), plan.id);
+      const enable = this.#database.prepare(
+        "UPDATE rule_reconciliation_operations SET enabled=1,updated_at=? WHERE plan_id=? AND id=?",
+      );
+      for (const id of unique) enable.run(this.#now(), plan.id, id);
+    })();
   }
 
   #streams(provider: AccountProvider, connectionId: string): StreamRow[] {

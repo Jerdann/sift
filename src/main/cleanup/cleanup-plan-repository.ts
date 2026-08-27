@@ -137,7 +137,10 @@ export class CleanupPlanRepository {
       // The proposal is the explicit historical-cleanup boundary. Every enabled
       // category is filed and marked read during the approved initial pass;
       // conservative confidence thresholds still apply later to future rules.
-      return Boolean(item?.enabled);
+      return Boolean(
+        item?.enabled &&
+          !["spam", "suspicious"].includes(item.category),
+      );
     });
     const planId = this.#createId();
     const actionValues = actionable.map((candidate) => {

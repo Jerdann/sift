@@ -23,7 +23,7 @@ Sift learns structure from local mailbox history, but never treats a statistical
 - Desktop Electron application running locally on Windows.
 - Proton Mail connects through Proton Bridge; Gmail connects through OAuth.
 - One provider account may contain multiple aliases with different personal, household, gaming, shopping, or joint-account purposes.
-- The pruning sequence is: identities → containers → categories → high-volume/stale senders → filters → unsubscribe → reversible deletion.
+- The pruning sequence is: scan → folders and existing mail → spam decisions → future filters → unsubscribe → reversible deletion.
 
 ## Capabilities and Constraints
 
@@ -50,6 +50,7 @@ The working codebase includes Proton and Gmail scans, local classification, orga
 3. Keep aliases and their purposes visible throughout every proposal.
 4. Show recency beside volume; age changes the correct cleanup action.
 5. Make every destructive outcome explicit, approval-gated, and reversible.
+6. Explain each page's goal, decision logic, exclusions, and exact changes in plain English.
 
 ## Accessibility & Inclusion
 

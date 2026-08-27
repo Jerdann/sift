@@ -39,6 +39,12 @@ import { OutlookConnectionRepository } from "../outlook/outlook-connection-repos
 import { OutlookIdentityService } from "../outlook/outlook-identity-service";
 import { OutlookRuleInventoryService } from "../outlook/outlook-rule-inventory-service";
 import { OutlookRuleReconciliationRunner } from "../outlook/outlook-rule-reconciliation-runner";
+import {
+  completeSpamReviewSchema,
+  spamReviewSchema,
+  spamReviewScopeSchema,
+} from "../../shared/contracts/spam-review";
+import { SpamReviewRepository } from "../spam/spam-review-repository";
 
 export const registerAccountHandlers = ({
   ipcMain,
@@ -79,6 +85,10 @@ export const registerAccountHandlers = ({
         context.profile.id,
       ),
       proposals: new OrganizationProposalRepository(
+        context.database,
+        context.profile.id,
+      ),
+      spamReviews: new SpamReviewRepository(
         context.database,
         context.profile.id,
       ),
@@ -333,6 +343,45 @@ export const registerAccountHandlers = ({
     },
   );
 
+  ipcMain.handle(IPC_CHANNELS.spamReviewGet, (event, rawInput: unknown) => {
+    trust(event);
+    const input = spamReviewScopeSchema.parse(rawInput);
+    return spamReviewSchema
+      .nullable()
+      .parse(
+        repositories().spamReviews.getCurrent(
+          input.provider,
+          input.connectionId,
+        ),
+      );
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.spamReviewGenerate,
+    (event, rawInput: unknown) => {
+      trust(event);
+      const input = spamReviewScopeSchema.parse(rawInput);
+      return spamReviewSchema.parse(
+        repositories().spamReviews.generate(
+          input.provider,
+          input.connectionId,
+        ),
+      );
+    },
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.spamReviewComplete,
+    (event, rawInput: unknown) => {
+      trust(event);
+      return spamReviewSchema.parse(
+        repositories().spamReviews.complete(
+          completeSpamReviewSchema.parse(rawInput),
+        ),
+      );
+    },
+  );
+
   ipcMain.handle(IPC_CHANNELS.ruleInventoryGet, (event, rawInput: unknown) => {
     trust(event);
     const input = ruleManagementScopeSchema.parse(rawInput);
@@ -400,7 +449,11 @@ export const registerAccountHandlers = ({
       trust(event);
       const input = approveRulePlanSchema.parse(rawInput);
       const current = repositories();
-      const approved = current.rules.approve(input.planId, input.revision);
+      const approved = current.rules.approve(
+        input.planId,
+        input.revision,
+        input.enabledOperationIds,
+      );
       if (!approved.job) throw new Error("provider_rule_apply_requires_export");
       const result =
         approved.provider === "gmail"
@@ -495,6 +548,9 @@ export const registerAccountHandlers = ({
       IPC_CHANNELS.organizationProposalGet,
       IPC_CHANNELS.organizationProposalGenerate,
       IPC_CHANNELS.organizationProposalEdit,
+      IPC_CHANNELS.spamReviewGet,
+      IPC_CHANNELS.spamReviewGenerate,
+      IPC_CHANNELS.spamReviewComplete,
       IPC_CHANNELS.ruleInventoryGet,
       IPC_CHANNELS.ruleInventoryRefresh,
       IPC_CHANNELS.rulePlanGet,

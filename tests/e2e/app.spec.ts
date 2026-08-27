@@ -63,7 +63,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
     await page.getByRole("button", { name: "Create profile" }).click();
     await expect(
       page.getByRole("heading", {
-        name: "Scan, organize, filter, unsubscribe, and delete.",
+        name: "Scan, organize, block spam, filter, unsubscribe, and delete.",
       }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -106,7 +106,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
     await page.getByRole("button", { name: "Recovery", exact: true }).click();
     await expect(
       page.getByRole("heading", {
-        name: "Back up or repair local Sift data.",
+        name: "Back up or repair local Sift data",
       }),
     ).toBeVisible();
     await expect(page.getByText("Counts only—no mail content")).toBeVisible();
@@ -184,6 +184,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "approveOutlookOrganizationPlan",
         "approveRulePlan",
         "checkForUpdatesNow",
+        "completeSpamReview",
         "confirmProtonRuleImport",
         "connectGmail",
         "connectOutlook",
@@ -206,6 +207,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "generateOutlookDeletionPlan",
         "generateOutlookOrganizationPlan",
         "generateRulePlan",
+        "generateSpamReview",
         "getAppSettings",
         "getCleanupPlan",
         "getCurrentProtonAudit",
@@ -229,6 +231,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "getProtonDiscovery",
         "getRuleInventory",
         "getRulePlan",
+        "getSpamReview",
         "getSubscriptionDashboard",
         "getVersion",
         "listAccountIdentities",
