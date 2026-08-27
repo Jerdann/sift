@@ -8,8 +8,9 @@ export const gmailHistoryImpactSchema = z.object({
   trash: z.boolean(),
 });
 export const gmailOrganizationPlanSchema = z.object({
-  id: z.uuid(), kind: z.enum(['organize','trash']), revision: z.string(), state: z.enum(['draft','approved','running','completed','failed']),
+  id: z.uuid(), kind: z.enum(['organize','spam','trash']), revision: z.string(), state: z.enum(['draft','approved','running','completed','failed']),
   proposalId: z.uuid().nullable(), proposalRevision: z.string().length(64).nullable(), impactCount: z.number().int().nonnegative(), batchCount: z.number().int().nonnegative(),
+  spamReviewId: z.uuid().nullable(),
   existingMessageCount: z.number().int().nonnegative(), skippedAmbiguousStreams: z.number().int().nonnegative(), impacts: z.array(gmailHistoryImpactSchema),
   job: jobProgressSchema.nullable(), undoJob: jobProgressSchema.nullable(),
   failedBatches: z.array(z.object({ id: z.uuid(), targetLabel: z.string(), state: z.enum(['failed','verification_mismatch']), errorCode: z.string().nullable() })),

@@ -5,6 +5,10 @@ import type { GmailOrganizationPlan } from "../../shared/contracts/gmail-organiz
 import { gmailOrganizationPlanSchema } from "../../shared/contracts/gmail-organize";
 import type { OutlookConnectionSummary } from "../../shared/contracts/outlook";
 import type { JobRepository } from "../jobs/job-repository";
+import {
+  approvedSpamSelection,
+  spamSelectionKey,
+} from "../spam/spam-application";
 
 interface Item {
   id: string;
@@ -72,7 +76,7 @@ export class OutlookHistoryRepository {
   generate(
     connection: OutlookConnectionSummary,
     input: {
-      kind?: "organize" | "trash";
+      kind?: "organize" | "spam" | "trash";
       senderDomains?: readonly string[];
       olderThanDays?: number;
     } = {},
@@ -100,6 +104,16 @@ export class OutlookHistoryRepository {
         | Record<string, unknown>
         | undefined);
     if (!analysis) throw new Error("outlook_analysis_required");
+    const spamSelection =
+      kind === "spam"
+        ? approvedSpamSelection(
+            this.#database,
+            this.#profileId,
+            "outlook",
+            connection.id,
+            String(analysis.analysis_id),
+          )
+        : null;
     const items = proposal
       ? (this.#database
           .prepare(
@@ -118,6 +132,13 @@ export class OutlookHistoryRepository {
         `SELECT oim.graph_message_id,omc.sender_domain,oim.received_at,omc.category source_category,omc.confidence,omc.receiving_addresses_json,oim.parent_folder_id,oim.is_read FROM outlook_message_classifications omc JOIN outlook_indexed_messages oim ON oim.id=omc.message_row_id WHERE omc.analysis_id=? ORDER BY oim.graph_message_id`,
       )
       .all(analysis.analysis_id) as Message[];
+    const providerFolders = this.#database
+      .prepare(
+        "SELECT junk_email_id,deleted_items_id FROM outlook_folder_ids WHERE connection_id=?",
+      )
+      .get(connection.id) as
+      | { junk_email_id: string; deleted_items_id: string }
+      | undefined;
     const domains = new Set(
       (input.senderDomains ?? []).map((value) => value.toLowerCase()),
     );
@@ -150,9 +171,33 @@ export class OutlookHistoryRepository {
             Number(Boolean(right.scope_address)) -
             Number(Boolean(left.scope_address)),
         );
+      const spamAddress =
+        kind === "spam"
+          ? [...addresses]
+              .sort()
+              .find((address) =>
+                spamSelection?.keys.has(
+                  spamSelectionKey(message.sender_domain, address),
+                ),
+              )
+          : undefined;
       const item =
-        kind === "trash"
-          ? domains.has(message.sender_domain.toLowerCase()) &&
+        kind === "spam"
+          ? spamAddress &&
+            message.parent_folder_id !== providerFolders?.junk_email_id &&
+            message.parent_folder_id !== providerFolders?.deleted_items_id
+            ? {
+                id: `spam:${message.sender_domain.toLowerCase()}:${spamAddress}:${message.source_category}`,
+                scope_address: spamAddress,
+                source_category: message.source_category,
+                category: "spam" as const,
+                target_path: "SPAM",
+                enabled: 1,
+                confidence: message.confidence,
+              }
+            : undefined
+          : kind === "trash"
+            ? domains.has(message.sender_domain.toLowerCase()) &&
             !protectedCategories.has(message.source_category) &&
             Boolean(message.received_at) &&
             Date.parse(message.received_at!) < cutoff
@@ -165,11 +210,11 @@ export class OutlookHistoryRepository {
                 enabled: 1,
                 confidence: message.confidence,
               }
-            : undefined
-          : candidates.find(
-              (candidate) =>
-                !["spam", "suspicious"].includes(candidate.category),
-            );
+              : undefined
+            : candidates.find(
+                (candidate) =>
+                  !["spam", "suspicious"].includes(candidate.category),
+              );
       if (
         !item ||
         !item.enabled
@@ -199,6 +244,7 @@ export class OutlookHistoryRepository {
       .update(
         JSON.stringify({
           kind,
+          spamReviewId: spamSelection?.reviewId ?? null,
           proposal: proposal?.revision ?? null,
           selected: normalized.map((group) => [
             group.item.id,
@@ -223,7 +269,7 @@ export class OutlookHistoryRepository {
         .run(connection.id, kind);
       this.#database
         .prepare(
-          "INSERT INTO outlook_history_plans(id,connection_id,analysis_id,proposal_id,proposal_revision,plan_kind,revision,state,skipped_ambiguous_streams,created_at) VALUES (?,?,?,?,?,?,?,'draft',?,?)",
+          "INSERT INTO outlook_history_plans(id,connection_id,analysis_id,proposal_id,proposal_revision,plan_kind,revision,state,skipped_ambiguous_streams,created_at,spam_review_id) VALUES (?,?,?,?,?,?,?,'draft',?,?,?)",
         )
         .run(
           planId,
@@ -235,6 +281,7 @@ export class OutlookHistoryRepository {
           revision,
           skipped,
           now,
+          spamSelection?.reviewId ?? null,
         );
       const addImpact = this.#database.prepare(
         "INSERT INTO outlook_history_impacts(id,plan_id,scope_address,source_category,category,target_folder,mark_read,spam,trash,confidence,existing_messages) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -244,7 +291,9 @@ export class OutlookHistoryRepository {
       );
       for (const group of normalized) {
         const impactId = this.#createId();
-        const spam = kind === "organize" && group.item.category === "spam";
+        const spam =
+          kind === "spam" ||
+          (kind === "organize" && group.item.category === "spam");
         const markRead = true;
         addImpact.run(
           impactId,
@@ -276,7 +325,7 @@ export class OutlookHistoryRepository {
 
   get(
     connectionId: string,
-    kind: "organize" | "trash" = "organize",
+    kind: "organize" | "spam" | "trash" = "organize",
   ): GmailOrganizationPlan | null {
     const row = this.#database
       .prepare(
@@ -319,6 +368,15 @@ export class OutlookHistoryRepository {
         current.revision !== plan.proposalRevision
       )
         throw new Error("outlook_plan_stale");
+    }
+    if (plan.kind === "spam") {
+      const currentReview = this.#database
+        .prepare(
+          "SELECT id FROM spam_reviews WHERE profile_id=? AND provider='outlook' AND connection_id=? AND state='completed' ORDER BY created_at DESC,rowid DESC LIMIT 1",
+        )
+        .get(this.#profileId, connectionId) as { id: string } | undefined;
+      if (!currentReview || currentReview.id !== plan.spamReviewId)
+        throw new Error("spam_review_changed");
     }
     const actions = this.#database
       .prepare(
@@ -502,6 +560,7 @@ export class OutlookHistoryRepository {
       state: row.state,
       proposalId: row.proposal_id,
       proposalRevision: row.proposal_revision,
+      spamReviewId: row.spam_review_id,
       impactCount: impacts.length,
       batchCount: actions.length,
       existingMessageCount: impacts.reduce(

@@ -182,6 +182,14 @@ export const registerOutlookHandlers = ({
       .nullable()
       .parse(connection ? value.plans.get(connection.id, "trash") : null);
   });
+  ipcMain.handle(IPC_CHANNELS.outlookSpamGet, (event) => {
+    trust(event);
+    const value = history();
+    const connection = value.repository.get();
+    return gmailOrganizationPlanSchema
+      .nullable()
+      .parse(connection ? value.plans.get(connection.id, "spam") : null);
+  });
   ipcMain.handle(IPC_CHANNELS.outlookOrganizeGenerate, (event) => {
     trust(event);
     const value = history();
@@ -201,6 +209,15 @@ export const registerOutlookHandlers = ({
         senderDomains: input.senderDomains,
         olderThanDays: input.olderThanDays,
       }),
+    );
+  });
+  ipcMain.handle(IPC_CHANNELS.outlookSpamGenerate, (event) => {
+    trust(event);
+    const value = history();
+    const connection = value.repository.get();
+    if (!connection) throw new Error("outlook_not_connected");
+    return gmailOrganizationPlanSchema.parse(
+      value.plans.generate(connection, { kind: "spam" }),
     );
   });
   ipcMain.handle(IPC_CHANNELS.outlookOrganizeApprove, async (event, raw) => {
@@ -351,6 +368,8 @@ export const registerOutlookHandlers = ({
       IPC_CHANNELS.outlookOrganizeUndo,
       IPC_CHANNELS.outlookDeletionGet,
       IPC_CHANNELS.outlookDeletionGenerate,
+      IPC_CHANNELS.outlookSpamGet,
+      IPC_CHANNELS.outlookSpamGenerate,
       IPC_CHANNELS.outlookUnsubscribeGet,
       IPC_CHANNELS.outlookUnsubscribeScan,
       IPC_CHANNELS.outlookUnsubscribeStart,

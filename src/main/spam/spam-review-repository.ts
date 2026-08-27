@@ -119,9 +119,17 @@ export class SpamReviewRepository {
       const total = ordered.reduce((sum, item) => sum + item.message_count, 0);
       const share = dominant.message_count / total;
       const bulk = ["subscriptions", "promotions"].includes(dominant.category);
+      const ordinaryFilterCandidate =
+        dominant.message_count >= 3 &&
+        share >= 0.9 &&
+        dominant.confidence >= 0.82 &&
+        !["personal", "security", "suspicious", "spam", "other"].includes(
+          dominant.category,
+        );
       if (
         !["spam", "suspicious"].includes(dominant.category) &&
-        !(bulk && dominant.message_count >= 25)
+        !(bulk && dominant.message_count >= 25) &&
+        !ordinaryFilterCandidate
       )
         return [];
       const reason =
@@ -129,7 +137,9 @@ export class SpamReviewRepository {
           ? ("likely_spam" as const)
           : dominant.category === "suspicious"
             ? ("suspicious" as const)
-            : ("bulk_mail" as const);
+            : bulk && dominant.message_count >= 25
+              ? ("bulk_mail" as const)
+              : ("filter_candidate" as const);
       const key = `${group.senderDomain}\0${group.receivingAddress}`;
       return [
         {
@@ -156,8 +166,20 @@ export class SpamReviewRepository {
     });
     candidates.sort(
       (left, right) =>
-        (left.reason === "likely_spam" ? 0 : left.reason === "suspicious" ? 1 : 2) -
-          (right.reason === "likely_spam" ? 0 : right.reason === "suspicious" ? 1 : 2) ||
+        (left.reason === "likely_spam"
+          ? 0
+          : left.reason === "suspicious"
+            ? 1
+            : left.reason === "bulk_mail"
+              ? 2
+              : 3) -
+          (right.reason === "likely_spam"
+            ? 0
+            : right.reason === "suspicious"
+              ? 1
+              : right.reason === "bulk_mail"
+                ? 2
+                : 3) ||
         right.messageCount - left.messageCount ||
         left.senderDomain.localeCompare(right.senderDomain),
     );
@@ -267,7 +289,7 @@ export class SpamReviewRepository {
       .prepare(
         `SELECT * FROM spam_review_candidates
          WHERE review_id=?
-         ORDER BY CASE reason WHEN 'likely_spam' THEN 0 WHEN 'suspicious' THEN 1 ELSE 2 END,
+         ORDER BY CASE reason WHEN 'likely_spam' THEN 0 WHEN 'suspicious' THEN 1 WHEN 'bulk_mail' THEN 2 ELSE 3 END,
                   message_count DESC,sender_domain`,
       )
       .all(reviewId) as Array<Record<string, unknown>>;

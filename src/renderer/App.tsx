@@ -82,6 +82,8 @@ import type {
   SpamReviewDecision,
 } from "../shared/contracts/spam-review";
 
+type SpamApplicationPlan = CleanupPlan | GmailOrganizationPlan;
+
 const mailCategoryOptions: MailCategory[] = [
   "personal",
   "security",
@@ -707,11 +709,16 @@ interface AppShellProps {
   onGenerateProposal(account: MailAccountSummary): Promise<void>;
   onEditProposal(input: EditOrganizationProposal): Promise<void>;
   spamReviews: Record<string, SpamReview | null>;
+  spamApplications: Record<string, SpamApplicationPlan | null>;
   onGenerateSpamReview(account: MailAccountSummary): Promise<void>;
+  onPrepareSpamApplication(account: MailAccountSummary): Promise<void>;
   onCompleteSpamReview(
     review: SpamReview,
     decisions: Array<{ candidateId: string; decision: SpamReviewDecision }>,
   ): Promise<void>;
+  onApplySpam(account: MailAccountSummary, plan: SpamApplicationPlan): Promise<void>;
+  onRetrySpam(account: MailAccountSummary, plan: SpamApplicationPlan): Promise<void>;
+  onUndoSpam(account: MailAccountSummary, plan: SpamApplicationPlan): Promise<void>;
   ruleInventories: Record<string, RuleInventory | null>;
   rulePlans: Record<string, RuleReconciliationPlan | null>;
   onRefreshRuleInventory(account: MailAccountSummary): Promise<void>;
@@ -4366,16 +4373,26 @@ const OrganizationProposalEditor = ({
 const SpamReviewPanel = ({
   account,
   review,
+  application,
   onGenerate,
+  onPrepare,
   onComplete,
+  onApply,
+  onRetry,
+  onUndo,
 }: {
   account: MailAccountSummary;
   review: SpamReview | null;
+  application: SpamApplicationPlan | null;
   onGenerate(account: MailAccountSummary): Promise<void>;
+  onPrepare(account: MailAccountSummary): Promise<void>;
   onComplete(
     review: SpamReview,
     decisions: Array<{ candidateId: string; decision: SpamReviewDecision }>,
   ): Promise<void>;
+  onApply(account: MailAccountSummary, plan: SpamApplicationPlan): Promise<void>;
+  onRetry(account: MailAccountSummary, plan: SpamApplicationPlan): Promise<void>;
+  onUndo(account: MailAccountSummary, plan: SpamApplicationPlan): Promise<void>;
 }) => {
   const [decisions, setDecisions] = useState<Record<string, SpamReviewDecision>>({});
   const [showAll, setShowAll] = useState(false);
@@ -4402,8 +4419,16 @@ const SpamReviewPanel = ({
     } catch {
       setError(
         key === "save"
-          ? "Sift could not save these spam decisions. No email or filters were changed."
-          : "Sift could not build the spam review from the saved scan. Run Scan again, then retry.",
+          ? "Sift could not finish preparing the Spam action. Your saved decisions remain saved; no email or filters were changed. Use Build existing-message action to retry."
+          : key === "prepare"
+            ? "Sift could not build the existing-message Spam action. No email or filters were changed. Run Scan again if retrying still fails."
+          : key === "apply"
+            ? "Sift could not finish moving the selected messages to Spam. Completed moves remain saved; retry the failed items."
+            : key === "retry"
+              ? "Some messages still could not be moved to Spam. The completed moves remain saved."
+              : key === "undo"
+                ? "Sift could not restore every message. Check the failed items and retry."
+                : "Sift could not build the spam review from the saved scan. Run Scan again, then retry.",
       );
     } finally {
       setBusy("");
@@ -4444,7 +4469,22 @@ const SpamReviewPanel = ({
     likely_spam: "Likely spam",
     suspicious: "Suspicious",
     bulk_mail: "High-volume marketing",
+    filter_candidate: "Could become a filing filter",
   } as const;
+  const applicationMatches = Boolean(
+    application && review.state === "completed" && application.spamReviewId === review.id,
+  );
+  const applicationCount = applicationMatches && application
+    ? "actionCount" in application
+      ? application.actionCount
+      : application.existingMessageCount
+    : 0;
+  const failedApplicationIds = applicationMatches && application
+    ? "failedActions" in application
+      ? application.failedActions.map((item) => item.id)
+      : application.failedBatches.map((item) => item.id)
+    : [];
+  const applicationJob = applicationMatches ? application?.job : null;
 
   return (
     <section className="readiness-panel spam-review" aria-labelledby={`spam-${account.id}`}>
@@ -4459,16 +4499,16 @@ const SpamReviewPanel = ({
       </div>
       <div className="spam-review-summary">
         <span><b>{review.candidates.length}</b><small>senders to review</small></span>
-        <span><b>{selectedSpam}</b><small>future Spam rules</small></span>
+        <span><b>{selectedSpam}</b><small>selected as Spam</small></span>
         <span><b>{selectedNotSpam}</b><small>not spam</small></span>
       </div>
       <div className="plain-logic" role="note">
         <strong>How this list is built</strong>
         <ul>
           <li>One row represents one sender domain sending to one of your addresses.</li>
-          <li>Sift includes mail classified as likely spam or suspicious, plus marketing streams with at least 25 messages.</li>
-          <li>Choosing Spam rule excludes that sender from normal filing filters and adds a future Spam rule in the Rules step.</li>
-          <li>Choosing Not spam prevents a Spam rule. An ordinary filing filter is proposed only if the sender separately meets the Rules thresholds. Review makes no decision.</li>
+          <li>Sift includes likely spam, suspicious mail, marketing streams with at least 25 messages, and every sender that could otherwise appear in Rules.</li>
+          <li>Choosing Spam marks matching existing messages read, removes them from Inbox, and moves them to the provider’s Spam or Junk folder after you approve the exact count below.</li>
+          <li>The Rules step then proposes a future Spam rule for that sender and address. Choosing Not spam prevents that Spam rule. Review makes no decision.</li>
         </ul>
       </div>
       {review.candidates.length ? (
@@ -4543,7 +4583,7 @@ const SpamReviewPanel = ({
                     >
                       <option value="review">Review — no change</option>
                       <option value="not_spam">Not spam</option>
-                      <option value="spam">Spam rule</option>
+                      <option value="spam">Spam — existing mail and future rule</option>
                     </select>
                   </label>
                 </div>
@@ -4564,17 +4604,55 @@ const SpamReviewPanel = ({
       <div className="next-action spam-review-action">
         <span>
           <strong>
-            {review.state === "completed" ? "Spam decisions are saved" : "Save these decisions before creating normal filters"}
+            {review.state === "completed"
+              ? applicationCount > 0
+                ? `${applicationCount.toLocaleString()} existing messages match your Spam choices`
+                : "No existing messages need to move"
+              : "Save these decisions before creating normal filters"}
           </strong>
           <small>
             {review.state === "completed"
-              ? "Rules will use these choices. Generate a new review if the mailbox scan changes."
-              : "This saves decisions only. Existing messages are not moved on this page; selected future Spam rules are created in Rules."}
+              ? applicationCount > 0
+                ? "Apply marks these messages read, removes them from Inbox, and moves them to the provider’s Spam or Junk folder. Rules remain locked until this finishes."
+                : "Rules will use these choices. No matching message outside Spam or Trash needs to move."
+              : "Saving builds the exact existing-message action. Nothing moves until you approve that action."}
           </small>
         </span>
-        {review.state === "completed" ? (
-          <button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => void run("generate", () => onGenerate(account))}>
-            {busy === "generate" ? "Rebuilding…" : "Build review again"}
+        {review.state === "completed" && applicationMatches && application ? (
+          applicationCount === 0 ? (
+            <button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => void run("generate", () => onGenerate(account))}>
+              {busy === "generate" ? "Rebuilding…" : "Change spam choices"}
+            </button>
+          ) : application.state === "draft" ? (
+            <button className="primary-button compact" type="button" disabled={Boolean(busy)} onClick={() => void run("apply", () => onApply(account, application))}>
+              {busy === "apply" ? "Moving messages to Spam…" : `Mark ${applicationCount.toLocaleString()} messages as Spam`}
+            </button>
+          ) : application.state === "failed" ? (
+            <button className="primary-button compact" type="button" disabled={Boolean(busy) || failedApplicationIds.length === 0} onClick={() => void run("retry", () => onRetry(account, application))}>
+              {busy === "retry" ? "Retrying failed messages…" : `Retry ${failedApplicationIds.length.toLocaleString()} failed items`}
+            </button>
+          ) : application.state === "completed" ? (
+            <div className="spam-complete-actions">
+              <button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => void run("generate", () => onGenerate(account))}>
+                {busy === "generate" ? "Rebuilding…" : "Change spam choices"}
+              </button>
+              <button className="secondary-button" type="button" disabled={Boolean(busy) || !applicationJob} onClick={() => void run("undo", () => onUndo(account, application))}>
+                {busy === "undo" ? "Restoring messages…" : "Undo existing-message changes"}
+              </button>
+            </div>
+          ) : (
+            <span className="application-progress" role="status">
+              Moving messages to Spam… {applicationJob ? `${applicationJob.completedItems.toLocaleString()} of ${applicationJob.totalItems.toLocaleString()}` : ""}
+            </span>
+          )
+        ) : review.state === "completed" ? (
+          <button
+            className="primary-button compact"
+            type="button"
+            disabled={Boolean(busy)}
+            onClick={() => void run("prepare", () => onPrepare(account))}
+          >
+            {busy === "prepare" ? "Building action…" : "Build existing-message action"}
           </button>
         ) : (
           <button
@@ -4597,6 +4675,11 @@ const SpamReviewPanel = ({
           </button>
         )}
       </div>
+      {review.state === "completed" ? (
+        <p className="spam-provider-note">
+          Sift uses the provider’s native Spam or Junk folder and creates a future rule in Rules. Email providers do not expose one consistent API for editing their private spam-training model or blocked-sender list, so Sift does not claim to change either one.
+        </p>
+      ) : null}
       {error ? <p className="connection-error" role="alert">{error}</p> : null}
     </section>
   );
@@ -5426,8 +5509,13 @@ const AppShell = ({
   onGenerateProposal,
   onEditProposal,
   spamReviews,
+  spamApplications,
   onGenerateSpamReview,
+  onPrepareSpamApplication,
   onCompleteSpamReview,
+  onApplySpam,
+  onRetrySpam,
+  onUndoSpam,
   ruleInventories,
   rulePlans,
   onRefreshRuleInventory,
@@ -5590,8 +5678,22 @@ const AppShell = ({
         historyPlan.proposalRevision === proposal.revision,
     );
   };
-  const spamReadyFor = (account: MailAccountSummary): boolean =>
-    foldersReadyFor(account) && spamReviews[account.id]?.state === "completed";
+  const spamReadyFor = (account: MailAccountSummary): boolean => {
+    const review = spamReviews[account.id];
+    const application = spamApplications[account.id];
+    if (
+      !foldersReadyFor(account) ||
+      review?.state !== "completed" ||
+      !application ||
+      application.spamReviewId !== review.id
+    )
+      return false;
+    const existingMessages =
+      "actionCount" in application
+        ? application.actionCount
+        : application.existingMessageCount;
+    return application.state === "completed" || existingMessages === 0;
+  };
   const rulesReadyFor = (account: MailAccountSummary): boolean =>
     spamReadyFor(account) && rulePlans[account.id]?.state === "completed";
   const subscriptionDashboardFor = (
@@ -6153,9 +6255,10 @@ const AppShell = ({
                 "Remove spam candidates from the normal-mail pool before Sift proposes filing filters.",
                 [
                   "Sift groups mail by sender domain and the address that received it.",
-                  "It shows likely spam, suspicious mail, and marketing streams with at least 25 messages.",
-                  "Nothing is marked as Spam automatically. You choose Spam, Not spam, or Review for each sender.",
-                  "Spam choices become future Spam rules. Not spam prevents a Spam rule; ordinary Rules still require their own evidence.",
+                  "It shows likely spam, suspicious mail, high-volume marketing, and every sender that could otherwise receive an ordinary filing filter.",
+                  "Nothing is marked as Spam automatically. You choose Spam, Not spam, or Review for each sender and address.",
+                  "After approval, matching existing messages are marked read, removed from Inbox, and moved to Spam or Junk.",
+                  "Rules then proposes a future Spam rule for each Spam choice. Not spam prevents that Spam rule.",
                 ],
               )}
               {!organizationReady ? (
@@ -6172,17 +6275,22 @@ const AppShell = ({
                       key={account.id}
                       account={account}
                       review={spamReviews[account.id] ?? null}
+                      application={spamApplications[account.id] ?? null}
                       onGenerate={onGenerateSpamReview}
+                      onPrepare={onPrepareSpamApplication}
                       onComplete={onCompleteSpamReview}
+                      onApply={onApplySpam}
+                      onRetry={onRetrySpam}
+                      onUndo={onUndoSpam}
                     />
                   ))}
                   <section className="next-action">
                     <span>
-                      <strong>{spamReady ? "Create normal filing filters" : "Save a spam review for every selected account"}</strong>
+                      <strong>{spamReady ? "Create normal filing filters" : "Finish every Spam action"}</strong>
                       <small>
                         {spamReady
                           ? "Rules will exclude Spam, Suspicious, Personal, Security, and Unsorted mail from ordinary filing proposals."
-                          : "A saved review is required even when no spam candidates were found."}
+                          : "Save each review and apply its existing-message changes. If no existing messages match, Sift records that nothing needs to move."}
                       </small>
                     </span>
                     <button className="primary-button compact" type="button" disabled={!spamReady} onClick={() => setActivePage("rules")}>
@@ -6469,6 +6577,9 @@ export const App = () => {
   const [spamReviews, setSpamReviews] = useState<
     Record<string, SpamReview | null>
   >({});
+  const [spamApplications, setSpamApplications] = useState<
+    Record<string, SpamApplicationPlan | null>
+  >({});
   const [ruleInventories, setRuleInventories] = useState<
     Record<string, RuleInventory | null>
   >({});
@@ -6487,18 +6598,21 @@ export const App = () => {
       mailboxAnalysis,
       currentCleanupPlan,
       currentDeletionPlan,
+      currentProtonSpam,
       currentSubscriptions,
       currentGmail,
       currentGmailAudit,
       currentGmailAnalysis,
       currentGmailOrganization,
       currentGmailDeletion,
+      currentGmailSpam,
       currentGmailSubscriptions,
       currentOutlook,
       currentOutlookAudit,
       currentOutlookAnalysis,
       currentOutlookOrganization,
       currentOutlookDeletion,
+      currentOutlookSpam,
       currentOutlookSubscriptions,
       currentAccounts,
       currentDiagnostics,
@@ -6509,18 +6623,21 @@ export const App = () => {
       window.emailOrganizer.getMailboxAnalysis(),
       window.emailOrganizer.getCleanupPlan({ kind: "organize" }),
       window.emailOrganizer.getCleanupPlan({ kind: "trash" }),
+      window.emailOrganizer.getCleanupPlan({ kind: "spam" }),
       window.emailOrganizer.getSubscriptionDashboard(),
       window.emailOrganizer.getGmailConnection(),
       window.emailOrganizer.getGmailAudit(),
       window.emailOrganizer.getGmailAnalysis(),
       window.emailOrganizer.getGmailOrganizationPlan(),
       window.emailOrganizer.getGmailDeletionPlan(),
+      window.emailOrganizer.getGmailSpamPlan(),
       window.emailOrganizer.getGmailSubscriptionDashboard(),
       window.emailOrganizer.getOutlookConnection(),
       window.emailOrganizer.getOutlookAudit(),
       window.emailOrganizer.getOutlookAnalysis(),
       window.emailOrganizer.getOutlookOrganizationPlan(),
       window.emailOrganizer.getOutlookDeletionPlan(),
+      window.emailOrganizer.getOutlookSpamPlan(),
       window.emailOrganizer.getOutlookSubscriptionDashboard(),
       window.emailOrganizer.listMailAccounts(),
       window.emailOrganizer.getDiagnostics(),
@@ -6546,6 +6663,16 @@ export const App = () => {
     setOutlookDeletion(currentOutlookDeletion);
     setOutlookSubscriptions(currentOutlookSubscriptions);
     setDiagnostics(currentDiagnostics);
+    const currentSpamApplications: Record<
+      string,
+      SpamApplicationPlan | null
+    > = {};
+    if (connection) currentSpamApplications[connection.id] = currentProtonSpam;
+    if (currentGmail)
+      currentSpamApplications[currentGmail.id] = currentGmailSpam;
+    if (currentOutlook)
+      currentSpamApplications[currentOutlook.id] = currentOutlookSpam;
+    setSpamApplications(currentSpamApplications);
     const identityEntries = await Promise.all(
       currentAccounts.map(
         async (account) =>
@@ -6654,18 +6781,28 @@ export const App = () => {
       window.emailOrganizer.onCleanupProgress((progress: CleanupProgress) => {
         if (progress.profileId !== activeProfile?.id) return;
         if (progress.plan.kind === "trash") setDeletionPlan(progress.plan);
+        else if (progress.plan.kind === "spam" && protonConnection)
+          setSpamApplications((current) => ({
+            ...current,
+            [protonConnection.id]: progress.plan,
+          }));
         else setCleanupPlan(progress.plan);
       }),
-    [activeProfile?.id],
+    [activeProfile?.id, protonConnection],
   );
   useEffect(
     () =>
       window.emailOrganizer.onGmailOrganizationProgress((progress) => {
         if (progress.profileId !== activeProfile?.id) return;
         if (progress.plan.kind === "trash") setGmailDeletion(progress.plan);
+        else if (progress.plan.kind === "spam" && gmailConnection)
+          setSpamApplications((current) => ({
+            ...current,
+            [gmailConnection.id]: progress.plan,
+          }));
         else setGmailOrganization(progress.plan);
       }),
-    [activeProfile?.id],
+    [activeProfile?.id, gmailConnection],
   );
   useEffect(
     () =>
@@ -6706,9 +6843,14 @@ export const App = () => {
       window.emailOrganizer.onOutlookOrganizationProgress((progress) => {
         if (progress.profileId !== activeProfile?.id) return;
         if (progress.plan.kind === "trash") setOutlookDeletion(progress.plan);
+        else if (progress.plan.kind === "spam" && outlookConnection)
+          setSpamApplications((current) => ({
+            ...current,
+            [outlookConnection.id]: progress.plan,
+          }));
         else setOutlookOrganization(progress.plan);
       }),
-    [activeProfile?.id],
+    [activeProfile?.id, outlookConnection],
   );
   useEffect(
     () =>
@@ -6775,6 +6917,8 @@ export const App = () => {
     setSubscriptions(null);
     if (protonConnection)
       setSpamReviews((current) => ({ ...current, [protonConnection.id]: null }));
+    if (protonConnection)
+      setSpamApplications((current) => ({ ...current, [protonConnection.id]: null }));
   };
 
   const generateCleanup = async (
@@ -6889,6 +7033,7 @@ export const App = () => {
     setProposals((current) => ({ ...current, [account.id]: null }));
     setRulePlans((current) => ({ ...current, [account.id]: null }));
     setSpamReviews((current) => ({ ...current, [account.id]: null }));
+    setSpamApplications((current) => ({ ...current, [account.id]: null }));
   };
   const connectOutlook = async (
     clientId: string,
@@ -6907,6 +7052,8 @@ export const App = () => {
     setOutlookAnalysis(await window.emailOrganizer.analyzeOutlook());
     if (outlookConnection)
       setSpamReviews((current) => ({ ...current, [outlookConnection.id]: null }));
+    if (outlookConnection)
+      setSpamApplications((current) => ({ ...current, [outlookConnection.id]: null }));
   };
   const generateOutlookOrganization = async () =>
     setOutlookOrganization(
@@ -7032,6 +7179,7 @@ export const App = () => {
     setProposals((current) => ({ ...current, [input.connectionId]: null }));
     setRulePlans((current) => ({ ...current, [input.connectionId]: null }));
     setSpamReviews((current) => ({ ...current, [input.connectionId]: null }));
+    setSpamApplications((current) => ({ ...current, [input.connectionId]: null }));
     if (input.provider === "gmail") setGmailOrganization(null);
     else if (input.provider === "outlook") setOutlookOrganization(null);
     else setCleanupPlan(null);
@@ -7054,6 +7202,7 @@ export const App = () => {
     setProposals((current) => ({ ...current, [account.id]: proposal }));
     setRulePlans((current) => ({ ...current, [account.id]: null }));
     setSpamReviews((current) => ({ ...current, [account.id]: null }));
+    setSpamApplications((current) => ({ ...current, [account.id]: null }));
     if (account.provider === "gmail") setGmailOrganization(null);
     else if (account.provider === "outlook") setOutlookOrganization(null);
     else setCleanupPlan(null);
@@ -7076,8 +7225,32 @@ export const App = () => {
       connectionId: account.id,
     });
     setSpamReviews((current) => ({ ...current, [account.id]: review }));
+    setSpamApplications((current) => ({ ...current, [account.id]: null }));
     setRulePlans((current) => ({ ...current, [account.id]: null }));
   };
+  const prepareSpamApplicationFor = async (
+    provider: MailAccountSummary["provider"],
+    connectionId: string,
+  ) => {
+    const application =
+      provider === "proton"
+        ? await window.emailOrganizer.generateCleanupPlan({
+            kind: "spam",
+            existingSetup: "extend",
+            containers: {},
+            trashSenderDomains: [],
+          })
+        : provider === "gmail"
+          ? await window.emailOrganizer.generateGmailSpamPlan()
+          : await window.emailOrganizer.generateOutlookSpamPlan();
+    setSpamApplications((current) => ({
+      ...current,
+      [connectionId]: application,
+    }));
+    setRulePlans((current) => ({ ...current, [connectionId]: null }));
+  };
+  const prepareSpamApplication = async (account: MailAccountSummary) =>
+    prepareSpamApplicationFor(account.provider, account.id);
   const completeSpamReview = async (
     review: SpamReview,
     decisions: Array<{ candidateId: string; decision: SpamReviewDecision }>,
@@ -7091,10 +7264,70 @@ export const App = () => {
       ...current,
       [completed.connectionId]: completed,
     }));
-    setRulePlans((current) => ({
-      ...current,
-      [completed.connectionId]: null,
-    }));
+    await prepareSpamApplicationFor(completed.provider, completed.connectionId);
+  };
+  const applySpam = async (
+    account: MailAccountSummary,
+    plan: SpamApplicationPlan,
+  ) => {
+    const updated =
+      account.provider === "proton"
+        ? (
+            await window.emailOrganizer.approveCleanupPlan({
+              planId: plan.id,
+              revision: plan.revision,
+            })
+          ).plan
+        : account.provider === "gmail"
+          ? await window.emailOrganizer.approveGmailOrganizationPlan({
+              planId: plan.id,
+              revision: plan.revision,
+            })
+          : await window.emailOrganizer.approveOutlookOrganizationPlan({
+              planId: plan.id,
+              revision: plan.revision,
+            });
+    setSpamApplications((current) => ({ ...current, [account.id]: updated }));
+  };
+  const retrySpam = async (
+    account: MailAccountSummary,
+    plan: SpamApplicationPlan,
+  ) => {
+    const failedIds =
+      "failedActions" in plan
+        ? plan.failedActions.map((item) => item.id)
+        : plan.failedBatches.map((item) => item.id);
+    if (!failedIds.length) return;
+    const updated =
+      account.provider === "proton"
+        ? (
+            await window.emailOrganizer.retryCleanupPlan({
+              planId: plan.id,
+              actionIds: failedIds,
+            })
+          ).plan
+        : account.provider === "gmail"
+          ? await window.emailOrganizer.retryGmailOrganizationPlan({
+              planId: plan.id,
+              batchIds: failedIds,
+            })
+          : await window.emailOrganizer.retryOutlookOrganizationPlan({
+              planId: plan.id,
+              batchIds: failedIds,
+            });
+    setSpamApplications((current) => ({ ...current, [account.id]: updated }));
+  };
+  const undoSpam = async (
+    account: MailAccountSummary,
+    plan: SpamApplicationPlan,
+  ) => {
+    const updated =
+      account.provider === "proton"
+        ? (await window.emailOrganizer.undoCleanupPlan({ planId: plan.id })).plan
+        : account.provider === "gmail"
+          ? await window.emailOrganizer.undoGmailOrganizationPlan({ planId: plan.id })
+          : await window.emailOrganizer.undoOutlookOrganizationPlan({ planId: plan.id });
+    setSpamApplications((current) => ({ ...current, [account.id]: updated }));
   };
   const refreshRuleInventory = async (account: MailAccountSummary) => {
     const inventory = await window.emailOrganizer.refreshRuleInventory({
@@ -7187,9 +7420,18 @@ export const App = () => {
     setGmailAnalysis(await window.emailOrganizer.analyzeGmail());
     if (gmailConnection)
       setSpamReviews((current) => ({ ...current, [gmailConnection.id]: null }));
+    if (gmailConnection)
+      setSpamApplications((current) => ({ ...current, [gmailConnection.id]: null }));
   };
-  const setGmailHistoryPlan = (plan: GmailOrganizationPlan) =>
-    plan.kind === "trash" ? setGmailDeletion(plan) : setGmailOrganization(plan);
+  const setGmailHistoryPlan = (plan: GmailOrganizationPlan) => {
+    if (plan.kind === "trash") setGmailDeletion(plan);
+    else if (plan.kind === "spam" && gmailConnection)
+      setSpamApplications((current) => ({
+        ...current,
+        [gmailConnection.id]: plan,
+      }));
+    else setGmailOrganization(plan);
+  };
   const generateGmailOrganization = async () =>
     setGmailHistoryPlan(
       await window.emailOrganizer.generateGmailOrganizationPlan(),
@@ -7268,8 +7510,13 @@ export const App = () => {
       onGenerateProposal={generateProposal}
       onEditProposal={editProposal}
       spamReviews={spamReviews}
+      spamApplications={spamApplications}
       onGenerateSpamReview={generateSpamReview}
+      onPrepareSpamApplication={prepareSpamApplication}
       onCompleteSpamReview={completeSpamReview}
+      onApplySpam={applySpam}
+      onRetrySpam={retrySpam}
+      onUndoSpam={undoSpam}
       ruleInventories={ruleInventories}
       rulePlans={rulePlans}
       onRefreshRuleInventory={refreshRuleInventory}

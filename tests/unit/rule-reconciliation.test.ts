@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { normalizeGmailFilter, sha256 } from '../../src/core/rules/rule-reconciliation';
 import { GmailAnalysisService } from '../../src/main/gmail/gmail-analysis-service';
 import { GmailConnectionRepository } from '../../src/main/gmail/gmail-connection-repository';
+import { GmailOrganizationRepository } from '../../src/main/gmail/gmail-organization-repository';
 import { GmailRuleInventoryService } from '../../src/main/gmail/gmail-rule-inventory-service';
 import { GmailRuleReconciliationRunner } from '../../src/main/gmail/gmail-rule-reconciliation-runner';
 import { AccountIdentityRepository } from '../../src/main/identity/account-identity-repository';
@@ -42,6 +43,16 @@ const providerSnapshot = (id: string, desired: DesiredManagedRule): Omit<Provide
   },
 });
 
+const buildSpamApplication = (
+  profile: ReturnType<ProfileRepository['createProfile']>,
+  profileId: string,
+  connection: ReturnType<GmailConnectionRepository['save']>,
+) => new GmailOrganizationRepository(
+  profile.database,
+  new JobRepository(profile.database),
+  profileId,
+).generate(connection, { kind: 'spam' });
+
 const setup = () => {
   const root = mkdtempSync(path.join(tmpdir(), 'sift-rules-')); roots.push(root);
   const profileId = '592ba97f-e105-44ce-9341-c9997e1ae9d1';
@@ -78,6 +89,7 @@ const setup = () => {
   const spamReviews = new SpamReviewRepository(profile.database, profileId);
   const spamReview = spamReviews.generate('gmail', connection.id);
   spamReviews.complete({ reviewId: spamReview.id, revision: spamReview.revision, decisions: [] });
+  buildSpamApplication(profile, profileId, connection);
   const rules = new RuleReconciliationRepository(profile.database, profileId, { now: () => '2026-08-25T12:30:00.000Z' });
   return { profile, profileId, connection, connections, rules };
 };
@@ -161,6 +173,7 @@ describe('provider rule inventory and reconciliation', () => {
     const spamReviews = new SpamReviewRepository(profile.database, profileId);
     const spamReview = spamReviews.generate('gmail', connection.id);
     spamReviews.complete({ reviewId: spamReview.id, revision: spamReview.revision, decisions: [] });
+    buildSpamApplication(profile, profileId, connection);
 
     const desired = rules.desired('gmail', connection.id).rules.find(
       (rule) => rule.senderDomain === 'company.example',
@@ -193,6 +206,7 @@ describe('provider rule inventory and reconciliation', () => {
       revision: review.revision,
       decisions: [{ candidateId: candidate.id, decision: 'spam' }],
     });
+    buildSpamApplication(profile, profileId, connection);
 
     expect(rules.desired('gmail', connection.id).rules).toContainEqual(
       expect.objectContaining({
@@ -226,6 +240,7 @@ describe('provider rule inventory and reconciliation', () => {
     const spamReviews = new SpamReviewRepository(profile.database, profileId);
     const spamReview = spamReviews.generate('gmail', connection.id);
     spamReviews.complete({ reviewId: spamReview.id, revision: spamReview.revision, decisions: [] });
+    buildSpamApplication(profile, profileId, connection);
 
     const desired = rules.desired('gmail', connection.id).rules;
     expect(desired.length).toBeGreaterThan(0);

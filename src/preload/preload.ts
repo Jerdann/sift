@@ -553,6 +553,14 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
         generateGmailDeletionInputSchema.parse(input),
       ),
     ),
+  getGmailSpamPlan: async () =>
+    gmailOrganizationPlanSchema
+      .nullable()
+      .parse(await ipcRenderer.invoke(IPC_CHANNELS.gmailSpamGet)),
+  generateGmailSpamPlan: async () =>
+    gmailOrganizationPlanSchema.parse(
+      await ipcRenderer.invoke(IPC_CHANNELS.gmailSpamGenerate),
+    ),
   getGmailSubscriptionDashboard: async () =>
     subscriptionDashboardSchema
       .nullable()
@@ -700,6 +708,14 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
         IPC_CHANNELS.outlookDeletionGenerate,
         generateGmailDeletionInputSchema.parse(input),
       ),
+    ),
+  getOutlookSpamPlan: async () =>
+    gmailOrganizationPlanSchema
+      .nullable()
+      .parse(await ipcRenderer.invoke(IPC_CHANNELS.outlookSpamGet)),
+  generateOutlookSpamPlan: async () =>
+    gmailOrganizationPlanSchema.parse(
+      await ipcRenderer.invoke(IPC_CHANNELS.outlookSpamGenerate),
     ),
   getOutlookSubscriptionDashboard: async () =>
     subscriptionDashboardSchema

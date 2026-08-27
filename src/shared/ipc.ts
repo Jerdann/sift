@@ -162,6 +162,8 @@ export const IPC_CHANNELS = Object.freeze({
   gmailOrganizeProgress: "gmail-organize:progress",
   gmailDeletionGet: "gmail-deletion:get",
   gmailDeletionGenerate: "gmail-deletion:generate",
+  gmailSpamGet: "gmail-spam:get",
+  gmailSpamGenerate: "gmail-spam:generate",
   gmailUnsubscribeGet: "gmail-unsubscribe:get",
   gmailUnsubscribeScan: "gmail-unsubscribe:scan",
   gmailUnsubscribeStart: "gmail-unsubscribe:start",
@@ -184,6 +186,8 @@ export const IPC_CHANNELS = Object.freeze({
   outlookOrganizeProgress: "outlook-organize:progress",
   outlookDeletionGet: "outlook-deletion:get",
   outlookDeletionGenerate: "outlook-deletion:generate",
+  outlookSpamGet: "outlook-spam:get",
+  outlookSpamGenerate: "outlook-spam:generate",
   outlookUnsubscribeGet: "outlook-unsubscribe:get",
   outlookUnsubscribeScan: "outlook-unsubscribe:scan",
   outlookUnsubscribeStart: "outlook-unsubscribe:start",
@@ -272,6 +276,8 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   "onGmailOrganizationProgress",
   "getGmailDeletionPlan",
   "generateGmailDeletionPlan",
+  "getGmailSpamPlan",
+  "generateGmailSpamPlan",
   "getGmailSubscriptionDashboard",
   "scanGmailSubscriptions",
   "startGmailBulkUnsubscribe",
@@ -294,6 +300,8 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   "onOutlookOrganizationProgress",
   "getOutlookDeletionPlan",
   "generateOutlookDeletionPlan",
+  "getOutlookSpamPlan",
+  "generateOutlookSpamPlan",
   "getOutlookSubscriptionDashboard",
   "scanOutlookSubscriptions",
   "startOutlookBulkUnsubscribe",
@@ -420,6 +428,8 @@ export interface EmailOrganizerBridge {
   generateGmailDeletionPlan(
     input: GenerateGmailDeletionInput,
   ): Promise<GmailOrganizationPlan>;
+  getGmailSpamPlan(): Promise<GmailOrganizationPlan | null>;
+  generateGmailSpamPlan(): Promise<GmailOrganizationPlan>;
   getGmailSubscriptionDashboard(): Promise<SubscriptionDashboard | null>;
   scanGmailSubscriptions(): Promise<SubscriptionDashboard>;
   startGmailBulkUnsubscribe(
@@ -468,6 +478,8 @@ export interface EmailOrganizerBridge {
   generateOutlookDeletionPlan(
     input: GenerateGmailDeletionInput,
   ): Promise<GmailOrganizationPlan>;
+  getOutlookSpamPlan(): Promise<GmailOrganizationPlan | null>;
+  generateOutlookSpamPlan(): Promise<GmailOrganizationPlan>;
   getOutlookSubscriptionDashboard(): Promise<SubscriptionDashboard | null>;
   scanOutlookSubscriptions(): Promise<SubscriptionDashboard>;
   startOutlookBulkUnsubscribe(

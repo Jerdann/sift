@@ -6,6 +6,7 @@ import { CATEGORY_PRESENTATION } from '../../core/classification/mail-classifier
 import type { MailCategory } from '../../shared/contracts/analysis';
 import { type CleanupPlan, cleanupPlanSchema, type GenerateCleanupInput } from '../../shared/contracts/cleanup';
 import { analyzeMailbox } from '../analysis/mailbox-analysis-service';
+import { approvedSpamSelection, spamSelectionKey } from '../spam/spam-application';
 
 interface CandidateRow {
   analysis_id: string;
@@ -91,7 +92,8 @@ export class CleanupPlanRepository {
     // the exact-review boundary so a still-visible organization proposal never
     // produces an empty or partial filing plan. The proposal itself remains
     // untouched, preserving the user's category edits and alias containers.
-    analyzeMailbox(this.#database, this.#profileId, connectionId);
+    if (input.kind === 'organize')
+      analyzeMailbox(this.#database, this.#profileId, connectionId);
     const existingSetup = input.existingSetup ?? 'extend';
     const candidates = this.#database.prepare(`
       SELECT ma.id AS analysis_id, mc.message_row_id, mc.canonical_key,
@@ -107,6 +109,15 @@ export class CleanupPlanRepository {
     `).all(connectionId, this.#profileId) as CandidateRow[];
     if (!candidates.length) throw new Error('mailbox_analysis_required');
     const analysisId = candidates[0]!.analysis_id;
+    const spamSelection = input.kind === 'spam'
+      ? approvedSpamSelection(
+          this.#database,
+          this.#profileId,
+          'proton',
+          connectionId,
+          analysisId,
+        )
+      : null;
     const proposal = input.kind === 'organize' ? this.#database.prepare("SELECT id,revision FROM organization_proposals WHERE profile_id=? AND provider='proton' AND connection_id=? AND state='draft' ORDER BY updated_at DESC,rowid DESC LIMIT 1")
       .get(this.#profileId, connectionId) as { id: string; revision: string } | undefined : undefined;
     if (input.kind === 'organize' && !proposal) throw new Error('organization_proposal_required');
@@ -129,6 +140,14 @@ export class CleanupPlanRepository {
         ...(JSON.parse(candidate.container_flags_json) as string[]).map((flag) => flag.toLowerCase()),
       ]);
       if ([...roles].some((role) => excludedContainerRoles.has(role))) return false;
+      if (input.kind === 'spam') {
+        const receiving = JSON.parse(candidate.receiving_addresses_json) as string[];
+        return receiving.some((address) =>
+          spamSelection?.keys.has(
+            spamSelectionKey(candidate.sender_domain, address),
+          ),
+        );
+      }
       if (input.kind === 'trash') {
         return trashDomains.has(candidate.sender_domain.toLowerCase()) &&
           !['personal', 'security', 'accounts', 'transactions', 'finance', 'suspicious'].includes(candidate.category);
@@ -145,15 +164,27 @@ export class CleanupPlanRepository {
     const planId = this.#createId();
     const actionValues = actionable.map((candidate) => {
       const item = proposedItem(candidate);
-      const effectiveCategory = item?.category ?? candidate.category;
+      const effectiveCategory = input.kind === 'spam'
+        ? 'spam' as const
+        : item?.category ?? candidate.category;
       const categoryPath = item?.target_path ?? CATEGORY_PRESENTATION[effectiveCategory].folder;
+      const scopeAddress = input.kind === 'spam'
+        ? (JSON.parse(candidate.receiving_addresses_json) as string[])
+            .map((address) => address.toLowerCase())
+            .sort()
+            .find((address) =>
+              spamSelection?.keys.has(
+                spamSelectionKey(candidate.sender_domain, address),
+              ),
+            ) ?? null
+        : item?.scope_address ?? null;
       return {
         ...candidate,
-        scopeAddress: item?.scope_address ?? null,
+        scopeAddress,
         containerName: item?.container_name ?? null,
         category: effectiveCategory,
-        targetPath: input.kind === 'trash' ? 'Trash' : effectiveCategory === 'spam' ? 'Spam' : categoryPath,
-        actionKind: input.kind === 'trash' ? 'native_trash' as const : effectiveCategory === 'spam' ? 'native_spam' as const : 'sort_read_archive' as const,
+        targetPath: input.kind === 'trash' ? 'Trash' : input.kind === 'spam' ? 'Spam' : categoryPath,
+        actionKind: input.kind === 'trash' ? 'native_trash' as const : input.kind === 'spam' ? 'native_spam' as const : 'sort_read_archive' as const,
       };
     }).filter((action) => action.actionKind !== 'sort_read_archive' || !isSameProtonFolder(action.source_path, action.targetPath));
     const targetPaths = actionValues
@@ -185,6 +216,7 @@ export class CleanupPlanRepository {
       : [];
     const revision = createHash('sha256').update(JSON.stringify({
       existingSetup,
+      spamReviewId: spamSelection?.reviewId ?? null,
       actions: actionValues.map((action) => [
         action.canonical_key, action.source_path, action.uid_validity, action.uid, action.targetPath, action.actionKind,
       ]),
@@ -196,11 +228,12 @@ export class CleanupPlanRepository {
       this.#database.prepare(`
         INSERT INTO cleanup_plans(
           id, connection_id, analysis_id, revision, state, skipped_count, created_at, plan_kind,
-          proposal_id, proposal_revision, existing_setup
-        ) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?)
+          proposal_id, proposal_revision, existing_setup, spam_review_id
+        ) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?)
       `).run(
         planId, connectionId, analysisId, revision, candidates.length - actionValues.length,
         timestamp, input.kind, proposal?.id ?? null, proposal?.revision ?? null, existingSetup,
+        spamSelection?.reviewId ?? null,
       );
       const insert = this.#database.prepare(`
         INSERT INTO cleanup_actions(
@@ -249,7 +282,7 @@ export class CleanupPlanRepository {
       WHERE cleanup_plans.id = ? AND pc.profile_id = ?
     `).get(planId, this.#profileId) as {
       id: string; connection_id: string; revision: string; state: CleanupPlan['state']; plan_kind: CleanupPlan['kind'];
-      proposal_id: string | null; proposal_revision: string | null; existing_setup: 'extend' | 'reuse' | 'replace';
+      proposal_id: string | null; proposal_revision: string | null; existing_setup: 'extend' | 'reuse' | 'replace'; spam_review_id: string | null;
       skipped_count: number; job_id: string | null; undo_job_id: string | null; created_at: string; approved_at: string | null;
     } | undefined;
     if (!row) throw new Error('Cleanup plan was not found');
@@ -284,6 +317,7 @@ export class CleanupPlanRepository {
       revision: row.revision,
       proposalId: row.proposal_id,
       proposalRevision: row.proposal_revision,
+      spamReviewId: row.spam_review_id,
       state: row.state,
       createdAt: row.created_at,
       approvedAt: row.approved_at,
@@ -343,6 +377,13 @@ export class CleanupPlanRepository {
       const current = this.#database.prepare("SELECT id,revision FROM organization_proposals WHERE profile_id=? AND provider='proton' AND connection_id=? AND state='draft' ORDER BY updated_at DESC,rowid DESC LIMIT 1")
         .get(this.#profileId, planScope.connection_id) as { id: string; revision: string } | undefined;
       if (!current || current.id !== planScope.proposal_id || current.revision !== planScope.proposal_revision) throw new Error('cleanup_plan_changed');
+    }
+    if (planScope.plan_kind === 'spam') {
+      const currentReview = this.#database.prepare(
+        "SELECT id FROM spam_reviews WHERE profile_id=? AND provider='proton' AND connection_id=? AND state='completed' ORDER BY created_at DESC,rowid DESC LIMIT 1",
+      ).get(this.#profileId, planScope.connection_id) as { id: string } | undefined;
+      if (!currentReview || currentReview.id !== plan.spamReviewId)
+        throw new Error('spam_review_changed');
     }
     const actions = this.#database.prepare('SELECT id FROM cleanup_actions WHERE plan_id = ? ORDER BY rowid').all(planId) as Array<{ id: string }>;
     const legacyContainers = this.#database.prepare('SELECT id FROM cleanup_legacy_containers WHERE plan_id=? ORDER BY rowid')

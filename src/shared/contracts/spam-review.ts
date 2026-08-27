@@ -18,7 +18,12 @@ export const spamReviewCandidateSchema = z.object({
   confidence: z.number().min(0).max(1),
   categoryShare: z.number().min(0).max(1),
   evidence: z.array(z.string()),
-  reason: z.enum(["likely_spam", "suspicious", "bulk_mail"]),
+  reason: z.enum([
+    "likely_spam",
+    "suspicious",
+    "bulk_mail",
+    "filter_candidate",
+  ]),
   decision: spamReviewDecisionSchema,
 });
 

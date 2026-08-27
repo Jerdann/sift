@@ -1063,6 +1063,119 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
         ON spam_review_candidates(review_id,decision,message_count DESC);
     `,
   },
+  {
+    version: 31,
+    foreignKeysOff: true,
+    statements: `
+      PRAGMA legacy_alter_table = ON;
+
+      ALTER TABLE cleanup_plans RENAME TO cleanup_plans_v30;
+      CREATE TABLE cleanup_plans (
+        id TEXT PRIMARY KEY,
+        connection_id TEXT NOT NULL REFERENCES provider_connections(id) ON DELETE CASCADE,
+        analysis_id TEXT NOT NULL REFERENCES mailbox_analyses(id) ON DELETE CASCADE,
+        revision TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('draft','approved','executing','completed','failed')),
+        skipped_count INTEGER NOT NULL DEFAULT 0 CHECK(skipped_count >= 0),
+        job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        approved_at TEXT,
+        plan_kind TEXT NOT NULL DEFAULT 'organize' CHECK(plan_kind IN ('organize','spam','trash')),
+        undo_job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+        proposal_id TEXT REFERENCES organization_proposals(id) ON DELETE CASCADE,
+        proposal_revision TEXT,
+        existing_setup TEXT NOT NULL DEFAULT 'extend' CHECK(existing_setup IN ('extend','reuse','replace')),
+        spam_review_id TEXT REFERENCES spam_reviews(id) ON DELETE CASCADE
+      );
+      INSERT INTO cleanup_plans(
+        id,connection_id,analysis_id,revision,state,skipped_count,job_id,created_at,
+        approved_at,plan_kind,undo_job_id,proposal_id,proposal_revision,existing_setup
+      ) SELECT
+        id,connection_id,analysis_id,revision,state,skipped_count,job_id,created_at,
+        approved_at,plan_kind,undo_job_id,proposal_id,proposal_revision,existing_setup
+      FROM cleanup_plans_v30;
+      DROP TABLE cleanup_plans_v30;
+
+      ALTER TABLE gmail_organization_plans RENAME TO gmail_organization_plans_v30;
+      CREATE TABLE gmail_organization_plans (
+        id TEXT PRIMARY KEY,
+        connection_id TEXT NOT NULL REFERENCES gmail_connections(id) ON DELETE CASCADE,
+        analysis_id TEXT NOT NULL REFERENCES gmail_mailbox_analyses(id) ON DELETE CASCADE,
+        revision TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('draft','approved','running','completed','failed')),
+        skipped_ambiguous_streams INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        approved_at TEXT,
+        proposal_id TEXT REFERENCES organization_proposals(id) ON DELETE CASCADE,
+        proposal_revision TEXT,
+        job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+        undo_job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+        plan_kind TEXT NOT NULL DEFAULT 'organize' CHECK(plan_kind IN ('organize','spam','trash')),
+        spam_review_id TEXT REFERENCES spam_reviews(id) ON DELETE CASCADE
+      );
+      INSERT INTO gmail_organization_plans(
+        id,connection_id,analysis_id,revision,state,skipped_ambiguous_streams,
+        created_at,approved_at,proposal_id,proposal_revision,job_id,undo_job_id,plan_kind
+      ) SELECT
+        id,connection_id,analysis_id,revision,state,skipped_ambiguous_streams,
+        created_at,approved_at,proposal_id,proposal_revision,job_id,undo_job_id,plan_kind
+      FROM gmail_organization_plans_v30;
+      DROP TABLE gmail_organization_plans_v30;
+
+      DROP INDEX outlook_history_plans_scope_idx;
+      ALTER TABLE outlook_history_plans RENAME TO outlook_history_plans_v30;
+      CREATE TABLE outlook_history_plans (
+        id TEXT PRIMARY KEY,
+        connection_id TEXT NOT NULL REFERENCES outlook_connections(id) ON DELETE CASCADE,
+        analysis_id TEXT NOT NULL REFERENCES outlook_mailbox_analyses(id) ON DELETE CASCADE,
+        proposal_id TEXT REFERENCES organization_proposals(id) ON DELETE CASCADE,
+        proposal_revision TEXT,
+        plan_kind TEXT NOT NULL CHECK(plan_kind IN ('organize','spam','trash')),
+        revision TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('draft','approved','running','completed','failed')),
+        skipped_ambiguous_streams INTEGER NOT NULL DEFAULT 0,
+        job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+        undo_job_id TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        approved_at TEXT,
+        spam_review_id TEXT REFERENCES spam_reviews(id) ON DELETE CASCADE
+      );
+      INSERT INTO outlook_history_plans(
+        id,connection_id,analysis_id,proposal_id,proposal_revision,plan_kind,
+        revision,state,skipped_ambiguous_streams,job_id,undo_job_id,created_at,approved_at
+      ) SELECT
+        id,connection_id,analysis_id,proposal_id,proposal_revision,plan_kind,
+        revision,state,skipped_ambiguous_streams,job_id,undo_job_id,created_at,approved_at
+      FROM outlook_history_plans_v30;
+      DROP TABLE outlook_history_plans_v30;
+      CREATE INDEX outlook_history_plans_scope_idx
+        ON outlook_history_plans(connection_id,plan_kind,created_at DESC);
+
+      DROP INDEX spam_review_candidates_review_idx;
+      ALTER TABLE spam_review_candidates RENAME TO spam_review_candidates_v30;
+      CREATE TABLE spam_review_candidates (
+        id TEXT PRIMARY KEY,
+        review_id TEXT NOT NULL REFERENCES spam_reviews(id) ON DELETE CASCADE,
+        sender_domain TEXT NOT NULL,
+        receiving_address TEXT NOT NULL,
+        category TEXT NOT NULL,
+        message_count INTEGER NOT NULL CHECK(message_count > 0),
+        latest_at TEXT,
+        confidence REAL NOT NULL CHECK(confidence BETWEEN 0 AND 1),
+        category_share REAL NOT NULL CHECK(category_share BETWEEN 0 AND 1),
+        evidence_json TEXT NOT NULL,
+        reason TEXT NOT NULL CHECK(reason IN ('likely_spam','suspicious','bulk_mail','filter_candidate')),
+        decision TEXT NOT NULL CHECK(decision IN ('review','spam','not_spam')),
+        UNIQUE(review_id,sender_domain,receiving_address)
+      );
+      INSERT INTO spam_review_candidates SELECT * FROM spam_review_candidates_v30;
+      DROP TABLE spam_review_candidates_v30;
+      CREATE INDEX spam_review_candidates_review_idx
+        ON spam_review_candidates(review_id,decision,message_count DESC);
+
+      PRAGMA legacy_alter_table = OFF;
+    `,
+  },
 ]);
 
 export const applyMigrations = (

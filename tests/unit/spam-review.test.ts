@@ -49,14 +49,17 @@ describe("spam review", () => {
 
     const repository = new SpamReviewRepository(profile.database, profileId);
     const review = repository.generate("gmail", connection.id);
-    expect(review.candidates).toHaveLength(3);
+    expect(review.candidates).toHaveLength(4);
     expect(review.candidates.find((item) => item.senderDomain === "junk.example")).toMatchObject({
       messageCount: 10,
       categoryShare: 0.8,
       reason: "likely_spam",
       decision: "review",
     });
-    expect(review.candidates.some((item) => item.senderDomain === "small-list.example")).toBe(false);
+    expect(review.candidates.find((item) => item.senderDomain === "small-list.example")).toMatchObject({
+      reason: "filter_candidate",
+      decision: "review",
+    });
 
     const junk = review.candidates.find((item) => item.senderDomain === "junk.example")!;
     const maybe = review.candidates.find((item) => item.senderDomain === "maybe.example")!;

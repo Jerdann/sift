@@ -14,6 +14,7 @@ import { JobRepository } from '../../src/main/jobs/job-repository';
 import { OrganizationProposalRepository } from '../../src/main/organization/organization-proposal-repository';
 import { ProfileRepository } from '../../src/main/profiles/profile-repository';
 import { SafeStorageVault, type SafeStoragePort } from '../../src/main/secrets/safe-storage-vault';
+import { SpamReviewRepository } from '../../src/main/spam/spam-review-repository';
 import { UnsubscribeRunner } from '../../src/main/unsubscribe/unsubscribe-runner';
 import type { GmailAuditSummary } from '../../src/shared/contracts/gmail';
 
@@ -155,6 +156,41 @@ describe('Gmail OAuth connection', () => {
     const trashUndone = await new GmailOrganizationRunner(repository, trashRepository, jobs, actionFetch as typeof fetch).undo(trashUndo.undoJob!.id);
     expect(trashUndone.undoJob?.state).toBe('succeeded');
     expect(providerLabels.get('gmail-2')).not.toContain('TRASH');
+
+    profile.database.prepare(`
+      UPDATE gmail_analysis_streams
+      SET category='spam',confidence=0.95,evidence_json='["synthetic spam signal"]'
+      WHERE analysis_id=(SELECT id FROM gmail_mailbox_analyses WHERE connection_id=? ORDER BY rowid DESC LIMIT 1)
+        AND sender_domain='news.example'
+    `).run(repository.get()!.id);
+    const spamReviews = new SpamReviewRepository(profile.database, profileId);
+    const spamReview = spamReviews.generate('gmail', repository.get()!.id);
+    const newsCandidate = spamReview.candidates.find((candidate) => candidate.senderDomain === 'news.example')!;
+    spamReviews.complete({
+      reviewId: spamReview.id,
+      revision: spamReview.revision,
+      decisions: [{ candidateId: newsCandidate.id, decision: 'spam' }],
+    });
+    const spamPlan = organization.generate(repository.get()!, { kind: 'spam' });
+    expect(spamPlan).toMatchObject({
+      kind: 'spam',
+      spamReviewId: spamReview.id,
+      existingMessageCount: 1,
+      batchCount: 1,
+    });
+    expect(spamPlan.impacts[0]).toMatchObject({
+      scopeAddress: 'owner@example.test',
+      targetLabel: 'SPAM',
+      markRead: true,
+      archive: true,
+      spam: true,
+    });
+    const spamApproved = organization.approve(repository.get()!.id, spamPlan.id, spamPlan.revision);
+    const spamCompleted = await new GmailOrganizationRunner(repository, organization, jobs, actionFetch as typeof fetch).run(spamApproved.job!.id);
+    expect(spamCompleted.state).toBe('completed');
+    expect(providerLabels.get('gmail-2')).toContain('SPAM');
+    expect(providerLabels.get('gmail-2')).not.toContain('INBOX');
+    expect(providerLabels.get('gmail-2')).not.toContain('UNREAD');
     profile.database.close();
   });
 });

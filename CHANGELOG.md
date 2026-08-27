@@ -4,6 +4,24 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-08-27
+
+### Fixed
+
+- Choosing **Spam** now builds an explicit existing-message action. After approval, matching mail is marked read, removed from Inbox, and moved to the provider's native Spam or Junk folder.
+- Every sender eligible for an ordinary filing filter now appears in Spam review first, so users can classify it as Spam instead of letting it pass into Rules.
+- Rules remains locked until the saved Spam choices have been applied to existing mail, or Sift verifies that no existing messages need to move.
+- Saved Spam reviews from version 1.5.0 can build the missing existing-message action without repeating the review.
+- Failed Spam moves can be retried, and completed existing-message changes can be undone.
+
+### Changed
+
+- Spam review now states the exact effects of each choice and distinguishes native Spam/Junk moves and future filters from provider-private spam training and blocked-sender lists.
+
+### Tests
+
+- Added existing-message Spam application, filter-boundary, provider mutation, migration, desktop bridge, and upgrade recovery coverage.
+
 ## [1.5.0] - 2026-08-27
 
 ### Added

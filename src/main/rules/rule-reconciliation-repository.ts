@@ -21,6 +21,7 @@ import {
 import { providerHasDestinations } from "../../core/rules/folder-readiness";
 import type { JobRepository } from "../jobs/job-repository";
 import { SpamReviewRepository } from "../spam/spam-review-repository";
+import { spamApplicationComplete } from "../spam/spam-application";
 
 interface StreamRow {
   sender_domain: string;
@@ -263,6 +264,15 @@ export class RuleReconciliationRepository {
     const spamReview = spamReviewRepository.getCurrent(provider, connectionId);
     if (!spamReview || spamReview.state !== "completed")
       throw new Error("spam_review_required");
+    if (
+      !spamApplicationComplete(
+        this.#database,
+        provider,
+        connectionId,
+        spamReview.id,
+      )
+    )
+      throw new Error("spam_application_required");
     const spamDecisions = spamReviewRepository.decisions(provider, connectionId);
     const groups = new Map<string, StreamRow[]>();
     for (const stream of streams) {

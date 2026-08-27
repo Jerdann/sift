@@ -14,11 +14,12 @@ export const cleanupImpactSchema = z.object({
 export const cleanupPlanSchema = z.object({
   id: z.uuid(),
   connectionId: z.uuid(),
-  kind: z.enum(['organize', 'trash']),
+  kind: z.enum(['organize', 'spam', 'trash']),
   existingSetup: z.enum(['extend', 'reuse', 'replace']),
   revision: z.string(),
   proposalId: z.uuid().nullable(),
   proposalRevision: z.string().length(64).nullable(),
+  spamReviewId: z.uuid().nullable(),
   state: z.enum(['draft', 'approved', 'executing', 'completed', 'failed']),
   createdAt: z.iso.datetime(),
   approvedAt: z.iso.datetime().nullable(),
@@ -52,7 +53,7 @@ export const approveCleanupInputSchema = z.object({
 });
 
 export const generateCleanupInputSchema = z.object({
-  kind: z.enum(['organize', 'trash']).default('organize'),
+  kind: z.enum(['organize', 'spam', 'trash']).default('organize'),
   existingSetup: z.enum(['extend', 'reuse', 'replace']).default('extend'),
   containers: z.record(
     z.string().email(),
@@ -62,7 +63,7 @@ export const generateCleanupInputSchema = z.object({
 });
 
 export const getCleanupInputSchema = z.object({
-  kind: z.enum(['organize', 'trash']).default('organize'),
+  kind: z.enum(['organize', 'spam', 'trash']).default('organize'),
 });
 
 export const retryCleanupInputSchema = z.object({
