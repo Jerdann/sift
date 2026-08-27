@@ -4,6 +4,18 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.5.3] - 2026-08-27
+
+### Fixed
+
+- Failed one-click unsubscribe requests no longer block the Delete step.
+- Delete unlocks after mailing lists have been scanned and no unsubscribe job is actively pending or running. Unavailable, protected, spam-skipped, unselected, and failed lists may remain.
+- The Unsubscribe page now reports how many failed and unselected requests are being left behind and keeps failed requests available for retry.
+
+### Tests
+
+- Added readiness coverage for unscanned accounts, review-only scans, active jobs, failed jobs, skipped jobs, and verification failures.
+
 ## [1.5.2] - 2026-08-27
 
 ### Fixed

@@ -40,6 +40,7 @@ import type {
   SubscriptionDashboard,
   UnsubscribeProgress,
 } from "../shared/contracts/unsubscribe";
+import { unsubscribeAllowsDelete } from "../core/unsubscribe/unsubscribe-readiness";
 import { buildPortableRulePack } from "../core/rules/rule-pack";
 import { providerHasDestinations } from "../core/rules/folder-readiness";
 import type {
@@ -5707,13 +5708,7 @@ const AppShell = ({
         : outlookSubscriptions;
   const unsubscribeReadyFor = (account: MailAccountSummary): boolean => {
     const dashboard = subscriptionDashboardFor(account);
-    if (!dashboard) return false;
-    return dashboard.candidates.every(
-      (candidate) =>
-        candidate.eligibility !== "eligible" ||
-        candidate.status === "unsubscribed" ||
-        candidate.status === "manual",
-    );
+    return unsubscribeAllowsDelete(dashboard);
   };
   const organizationReady =
     selectedAccounts.length > 0 && selectedAccounts.every(foldersReadyFor);
@@ -5723,6 +5718,26 @@ const AppShell = ({
     selectedAccounts.length > 0 && selectedAccounts.every(rulesReadyFor);
   const unsubscribeReady =
     selectedAccounts.length > 0 && selectedAccounts.every(unsubscribeReadyFor);
+  const unsubscribeFailureCount = selectedAccounts.reduce(
+    (sum, account) =>
+      sum +
+      (subscriptionDashboardFor(account)?.candidates.filter(
+        (candidate) => candidate.status === "failed",
+      ).length ?? 0),
+    0,
+  );
+  const unsubscribePendingChoiceCount = selectedAccounts.reduce(
+    (sum, account) =>
+      sum +
+      (subscriptionDashboardFor(account)?.candidates.filter(
+        (candidate) =>
+          candidate.eligibility === "eligible" &&
+          candidate.status === "pending",
+      ).length ?? 0),
+    0,
+  );
+  const unsubscribeDeferredCount =
+    unsubscribeFailureCount + unsubscribePendingChoiceCount;
   const completeScanInventory = async () => {
     setScanInventoryBusy(true);
     setScanInventoryError("");
@@ -6410,11 +6425,17 @@ const AppShell = ({
                   />
                   <section className="next-action">
                     <span>
-                      <strong>{unsubscribeReady ? "Review old messages for deletion" : "Unsubscribe from or skip every listed mailing list"}</strong>
+                      <strong>
+                        {unsubscribeReady
+                          ? "Review old messages for deletion"
+                          : "Finish active unsubscribe requests"}
+                      </strong>
                       <small>
                         {unsubscribeReady
-                          ? "The Delete step lists old messages that can move to Trash or Deleted Items. Security, account, transaction, finance, personal, and suspicious messages are excluded."
-                          : "Unsubscribe from or skip every listed mailing list before Delete unlocks. Suspected spam senders are not contacted."}
+                          ? unsubscribeDeferredCount > 0
+                            ? `${unsubscribeFailureCount.toLocaleString()} failed and ${unsubscribePendingChoiceCount.toLocaleString()} unselected unsubscribe request${unsubscribeDeferredCount === 1 ? "" : "s"} can remain here. They do not block Delete, and failed requests can be retried later.`
+                            : "The Delete step lists old messages that can move to Trash or Deleted Items. Security, account, transaction, finance, personal, and suspicious messages are excluded."
+                          : "Find mailing lists for every selected account and let any active unsubscribe job finish. Failed, unavailable, protected, spam, and unselected lists do not block Delete."}
                       </small>
                     </span>
                     <button
@@ -6423,7 +6444,7 @@ const AppShell = ({
                       disabled={!unsubscribeReady}
                       onClick={() => setActivePage("delete")}
                     >
-                      {unsubscribeReady ? "Continue to Delete" : "Finish unsubscribe choices"}
+                      {unsubscribeReady ? "Continue to Delete" : "Unsubscribe still running"}
                     </button>
                   </section>
                 </>
@@ -6445,7 +6466,7 @@ const AppShell = ({
               {!unsubscribeReady ? (
                 prerequisite(
                   "Finish Unsubscribe first",
-                  "Complete Scan, Organize, Spam, Rules, and Unsubscribe before selecting old messages to move to Trash or Deleted Items.",
+                  "Find mailing lists for every selected account and let active unsubscribe requests finish. Failed, unavailable, protected, spam, and unselected lists do not block Delete.",
                   rulesReady ? "unsubscribe" : spamReady ? "rules" : organizationReady ? "spam" : scannedCount ? "organize" : "audit",
                   rulesReady ? "Open unsubscribe" : spamReady ? "Open rules" : organizationReady ? "Open spam review" : scannedCount ? "Open organize" : "Open scan",
                 )
