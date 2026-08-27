@@ -1,15 +1,20 @@
 import { app, autoUpdater, BrowserWindow, dialog } from "electron";
-import type { AppSettings } from "../../shared/contracts/settings";
+import type {
+  AppSettings,
+  ManualUpdateCheckResult,
+} from "../../shared/contracts/settings";
 import type { AppSettingsRepository } from "../settings/app-settings-repository";
 import { automaticUpdateDelay } from "./update-policy";
 
 const UPDATE_INTERVAL_MS = 60 * 60 * 1_000;
+const MANUAL_CHECK_TIMEOUT_MS = 30_000;
 const UPDATE_FEED_ROOT = "https://update.electronjs.org/Jerdann/sift";
 
 export interface AutomaticUpdateController {
   start(): void;
   getSettings(): AppSettings;
   setAutoUpdateEnabled(enabled: boolean): AppSettings;
+  checkForUpdatesNow(): Promise<ManualUpdateCheckResult>;
 }
 
 export class SiftAutomaticUpdateController
@@ -19,6 +24,12 @@ export class SiftAutomaticUpdateController
   #delayTimer: NodeJS.Timeout | null = null;
   #intervalTimer: NodeJS.Timeout | null = null;
   #initialized = false;
+  #manualDownloadRequested = false;
+  #pendingManualCheck: {
+    resolve(result: ManualUpdateCheckResult): void;
+    reject(error: Error): void;
+    timeout: NodeJS.Timeout;
+  } | null = null;
 
   constructor(settings: AppSettingsRepository) {
     this.#settings = settings;
@@ -45,6 +56,36 @@ export class SiftAutomaticUpdateController
     this.#stopSchedule();
     if (enabled) this.#schedule(0);
     return this.getSettings();
+  }
+
+  checkForUpdatesNow(): Promise<ManualUpdateCheckResult> {
+    const settings = this.getSettings();
+    const environmentDisabled = process.env.SIFT_DISABLE_AUTO_UPDATE === "1";
+    if (!settings.updatesSupported || environmentDisabled) {
+      return Promise.resolve({
+        status: "unsupported",
+        currentVersion: settings.appVersion,
+      });
+    }
+    if (this.#pendingManualCheck) {
+      return Promise.reject(new Error("update_check_already_running"));
+    }
+
+    this.#initializeUpdater();
+    this.#manualDownloadRequested = true;
+    return new Promise<ManualUpdateCheckResult>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.#manualDownloadRequested = false;
+        this.#failManualCheck(new Error("update_check_timed_out"));
+      }, MANUAL_CHECK_TIMEOUT_MS);
+      timeout.unref();
+      this.#pendingManualCheck = { resolve, reject, timeout };
+      void Promise.resolve(autoUpdater.checkForUpdates()).catch((error) =>
+        this.#failManualCheck(
+          error instanceof Error ? error : new Error(String(error)),
+        ),
+      );
+    });
   }
 
   start(): void {
@@ -79,11 +120,24 @@ export class SiftAutomaticUpdateController
         "User-Agent": `Sift/${app.getVersion()} (${process.platform}; ${process.arch})`,
       },
     });
-    autoUpdater.on("error", (error) =>
-      console.error("Sift update check failed", error),
+    autoUpdater.on("error", (error) => {
+      console.error("Sift update check failed", error);
+      this.#manualDownloadRequested = false;
+      this.#failManualCheck(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    });
+    autoUpdater.on("update-available", () =>
+      this.#completeManualCheck("update_available"),
     );
+    autoUpdater.on("update-not-available", () => {
+      this.#manualDownloadRequested = false;
+      this.#completeManualCheck("up_to_date");
+    });
     autoUpdater.on("update-downloaded", () => {
-      void this.#offerRestart();
+      const manualRequest = this.#manualDownloadRequested;
+      this.#manualDownloadRequested = false;
+      void this.#offerRestart(manualRequest);
     });
   }
 
@@ -105,8 +159,8 @@ export class SiftAutomaticUpdateController
     );
   }
 
-  async #offerRestart(): Promise<void> {
-    if (!this.getSettings().automaticUpdatesActive) return;
+  async #offerRestart(manualRequest = false): Promise<void> {
+    if (!manualRequest && !this.getSettings().automaticUpdatesActive) return;
     const options: Electron.MessageBoxOptions = {
       type: "info",
       buttons: ["Restart and update", "Later"],
@@ -124,10 +178,28 @@ export class SiftAutomaticUpdateController
       : await dialog.showMessageBox(options);
     if (
       result.response === 0 &&
-      this.getSettings().automaticUpdatesActive
+      (manualRequest || this.getSettings().automaticUpdatesActive)
     ) {
       autoUpdater.quitAndInstall();
     }
+  }
+
+  #completeManualCheck(
+    status: ManualUpdateCheckResult["status"],
+  ): void {
+    const pending = this.#pendingManualCheck;
+    if (!pending) return;
+    this.#pendingManualCheck = null;
+    clearTimeout(pending.timeout);
+    pending.resolve({ status, currentVersion: app.getVersion() });
+  }
+
+  #failManualCheck(error: Error): void {
+    const pending = this.#pendingManualCheck;
+    if (!pending) return;
+    this.#pendingManualCheck = null;
+    clearTimeout(pending.timeout);
+    pending.reject(error);
   }
 
   #stopSchedule(): void {

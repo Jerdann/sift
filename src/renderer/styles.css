@@ -1069,6 +1069,15 @@ select:focus-visible {
 .settings-switch input:focus-visible + span { outline: 2px solid #b9f4e2; outline-offset: 3px; }
 .settings-switch input:disabled + span { cursor: wait; opacity: .55; }
 .settings-switch b { color: #a7b1ae; font-family: 'IBM Plex Mono', monospace; font-size: 9px; text-transform: uppercase; }
+.settings-update-check { min-height: 76px; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); background: #12161c; }
+.settings-update-check > span strong,
+.settings-update-check > span small { display: block; }
+.settings-update-check > span strong { font-size: 12px; }
+.settings-update-check > span small { margin-top: 5px; color: #8f9996; font-size: 10px; line-height: 1.5; }
+.settings-update-check .secondary-button { flex: 0 0 auto; }
+.is-spinning { animation: settings-update-spin 900ms linear infinite; }
+@keyframes settings-update-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .is-spinning { animation: none; } }
 .update-behavior-grid { display: grid; grid-template-columns: repeat(2, 1fr); background: #12161c; }
 .update-behavior-grid > div { min-height: 116px; padding: 20px 24px; }
 .update-behavior-grid > div + div { border-left: 1px solid var(--line); }
@@ -1137,6 +1146,7 @@ select:focus-visible {
   .recovery-confirmation, .recovery-guidance { grid-template-columns: 1fr; }
   .recovery-guidance > div + div { border-top: 1px solid var(--line); border-left: 0; }
   .settings-update-control { min-width: 590px; }
+  .settings-update-check { min-width: 590px; }
   .update-behavior-grid { min-width: 590px; grid-template-columns: 1fr; }
   .update-behavior-grid > div + div { border-top: 1px solid var(--line); border-left: 0; }
   .retention-table { min-width: 0; padding: 0 24px; }

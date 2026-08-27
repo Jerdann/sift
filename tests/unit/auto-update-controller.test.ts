@@ -4,13 +4,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const electron = vi.hoisted(() => {
-  const listeners = new Map<string, () => void>();
+  const listeners = new Map<string, (...args: unknown[]) => void>();
   return {
     listeners,
     app: { isPackaged: true, getVersion: () => "1.2.0" },
     autoUpdater: {
       setFeedURL: vi.fn(),
-      on: vi.fn((event: string, listener: () => void) => {
+      on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
         listeners.set(event, listener);
       }),
       checkForUpdates: vi.fn(() => Promise.resolve()),
@@ -104,5 +104,45 @@ describe("automatic update consent", () => {
     await Promise.resolve();
 
     expect(electron.autoUpdater.quitAndInstall).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks once on request even when automatic updates are off", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "sift-updater-"));
+    roots.push(root);
+    const repository = new AppSettingsRepository(root);
+    const controller = new SiftAutomaticUpdateController(repository);
+
+    const resultPromise = controller.checkForUpdatesNow();
+    expect(electron.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
+    electron.listeners.get("update-not-available")?.();
+
+    await expect(resultPromise).resolves.toEqual({
+      status: "up_to_date",
+      currentVersion: "1.2.0",
+    });
+  });
+
+  it("prompts before installing an update requested manually while automatic updates are off", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "sift-updater-"));
+    roots.push(root);
+    const repository = new AppSettingsRepository(root);
+    const controller = new SiftAutomaticUpdateController(repository);
+    electron.dialog.showMessageBox.mockResolvedValueOnce({ response: 1 });
+
+    const resultPromise = controller.checkForUpdatesNow();
+    electron.listeners.get("update-available")?.();
+    await expect(resultPromise).resolves.toEqual({
+      status: "update_available",
+      currentVersion: "1.2.0",
+    });
+
+    electron.listeners.get("update-downloaded")?.();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(electron.dialog.showMessageBox).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultId: 1, cancelId: 1 }),
+    );
+    expect(electron.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
   });
 });

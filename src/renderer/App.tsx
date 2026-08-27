@@ -73,6 +73,7 @@ import type {
 } from "../shared/contracts/recovery";
 import type {
   AppSettings,
+  ManualUpdateCheckResult,
   UpdateAppSettingsInput,
 } from "../shared/contracts/settings";
 
@@ -147,20 +148,23 @@ const BrandMark = () => (
 const SettingsPanel = ({
   settings,
   onUpdate,
+  onCheck,
   onOpenAccounts,
   onOpenRecovery,
 }: {
   settings: AppSettings;
   onUpdate(input: UpdateAppSettingsInput): Promise<void>;
+  onCheck(): Promise<ManualUpdateCheckResult>;
   onOpenAccounts?: () => void;
   onOpenRecovery?: () => void;
 }) => {
-  const [busy, setBusy] = useState(false);
+  const [preferenceBusy, setPreferenceBusy] = useState(false);
+  const [checkBusy, setCheckBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   const setAutomaticUpdates = async (enabled: boolean) => {
-    setBusy(true);
+    setPreferenceBusy(true);
     setError("");
     setNotice("");
     try {
@@ -175,7 +179,29 @@ const SettingsPanel = ({
         "Sift could not save the update preference. The previous setting is still in effect.",
       );
     } finally {
-      setBusy(false);
+      setPreferenceBusy(false);
+    }
+  };
+
+  const checkForUpdates = async () => {
+    setCheckBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await onCheck();
+      setNotice(
+        result.status === "update_available"
+          ? "A newer version is downloading. Sift will ask before restarting."
+          : result.status === "up_to_date"
+            ? `No newer release is available right now. This is Sift v${result.currentVersion}.`
+            : "Manual update checks work only in the installed Windows app.",
+      );
+    } catch {
+      setError(
+        "Sift could not check for updates. Check your internet connection and try again.",
+      );
+    } finally {
+      setCheckBusy(false);
     }
   };
 
@@ -217,7 +243,7 @@ const SettingsPanel = ({
               role="switch"
               aria-label="Download updates automatically"
               checked={settings.autoUpdateEnabled}
-              disabled={busy}
+              disabled={preferenceBusy}
               onChange={(event) =>
                 void setAutomaticUpdates(event.target.checked)
               }
@@ -225,6 +251,27 @@ const SettingsPanel = ({
             <span aria-hidden="true" />
             <b>{settings.autoUpdateEnabled ? "On" : "Off"}</b>
           </label>
+        </div>
+        <div className="settings-update-check">
+          <span>
+            <strong>Check for a new version now</strong>
+            <small>
+              This performs one update check even when automatic updates are off.
+            </small>
+          </span>
+          <button
+            className="secondary-button compact"
+            type="button"
+            disabled={checkBusy}
+            onClick={() => void checkForUpdates()}
+          >
+            <RefreshCw
+              aria-hidden="true"
+              className={checkBusy ? "is-spinning" : undefined}
+              size={14}
+            />
+            {checkBusy ? "Checking…" : "Check for updates"}
+          </button>
         </div>
         <div className="update-behavior-grid">
           <div>
@@ -409,6 +456,7 @@ interface ProfilePickerProps {
   loadError: string;
   settings: AppSettings;
   onUpdateSettings(input: UpdateAppSettingsInput): Promise<void>;
+  onCheckForUpdates(): Promise<ManualUpdateCheckResult>;
   onCreate(profileName: string): Promise<void>;
   onOpen(profile: ProfileSummary): Promise<void>;
 }
@@ -418,6 +466,7 @@ const ProfilePicker = ({
   loadError,
   settings,
   onUpdateSettings,
+  onCheckForUpdates,
   onCreate,
   onOpen,
 }: ProfilePickerProps) => {
@@ -458,7 +507,11 @@ const ProfilePicker = ({
           >
             <ChevronRight size={15} /> Back to local profiles
           </button>
-          <SettingsPanel settings={settings} onUpdate={onUpdateSettings} />
+          <SettingsPanel
+            settings={settings}
+            onUpdate={onUpdateSettings}
+            onCheck={onCheckForUpdates}
+          />
         </section>
         <div className="screen-corner-status">
           <CircleDot size={12} /> LOCAL ONLY
@@ -630,6 +683,7 @@ interface AppShellProps {
   onSwitchProfile(): void;
   settings: AppSettings;
   onUpdateSettings(input: UpdateAppSettingsInput): Promise<void>;
+  onCheckForUpdates(): Promise<ManualUpdateCheckResult>;
   accounts: MailAccountSummary[];
   identities: Record<string, AccountIdentitySummary[]>;
   onSelectAccount(account: MailAccountSummary): Promise<void>;
@@ -5048,6 +5102,7 @@ const AppShell = ({
   onSwitchProfile,
   settings,
   onUpdateSettings,
+  onCheckForUpdates,
   accounts,
   identities,
   onSelectAccount,
@@ -5902,6 +5957,7 @@ const AppShell = ({
             <SettingsPanel
               settings={settings}
               onUpdate={onUpdateSettings}
+              onCheck={onCheckForUpdates}
               onOpenAccounts={() => setActivePage("accounts")}
               onOpenRecovery={() => setActivePage("recovery")}
             />
@@ -6676,6 +6732,8 @@ export const App = () => {
   const updateAppSettings = async (input: UpdateAppSettingsInput) => {
     setAppSettings(await window.emailOrganizer.updateAppSettings(input));
   };
+  const checkForUpdatesNow = () =>
+    window.emailOrganizer.checkForUpdatesNow();
 
   if (loading || !appSettings) {
     return (
@@ -6692,6 +6750,7 @@ export const App = () => {
       onSwitchProfile={() => setActiveProfile(null)}
       settings={appSettings}
       onUpdateSettings={updateAppSettings}
+      onCheckForUpdates={checkForUpdatesNow}
       accounts={accounts}
       identities={identities}
       onSelectAccount={selectAccount}
@@ -6791,6 +6850,7 @@ export const App = () => {
       loadError={loadError}
       settings={appSettings}
       onUpdateSettings={updateAppSettings}
+      onCheckForUpdates={checkForUpdatesNow}
       onCreate={createProfile}
       onOpen={openProfile}
     />

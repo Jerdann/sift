@@ -123,6 +123,7 @@ describe("desktop security boundary", () => {
       "getVersion",
       "getAppSettings",
       "updateAppSettings",
+      "checkForUpdatesNow",
       "listMailAccounts",
       "selectMailAccount",
       "listAccountIdentities",

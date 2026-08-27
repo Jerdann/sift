@@ -48,6 +48,12 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
     await expect(
       page.getByText("Automatic update checks are disabled."),
     ).toBeVisible();
+    await page.getByRole("button", { name: "Check for updates" }).click();
+    await expect(
+      page.getByText(
+        "Manual update checks work only in the installed Windows app.",
+      ),
+    ).toBeVisible();
     await page
       .getByRole("button", { name: "Back to local profiles" })
       .click();
@@ -177,6 +183,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "approveGmailOrganizationPlan",
         "approveOutlookOrganizationPlan",
         "approveRulePlan",
+        "checkForUpdatesNow",
         "confirmProtonRuleImport",
         "connectGmail",
         "connectOutlook",

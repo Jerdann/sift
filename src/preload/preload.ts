@@ -142,6 +142,7 @@ import {
 import {
   type UpdateAppSettingsInput,
   appSettingsSchema,
+  manualUpdateCheckResultSchema,
   updateAppSettingsInputSchema,
 } from "../shared/contracts/settings";
 
@@ -158,6 +159,10 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
         IPC_CHANNELS.appSettingsUpdate,
         updateAppSettingsInputSchema.parse(input),
       ),
+    ),
+  checkForUpdatesNow: async () =>
+    manualUpdateCheckResultSchema.parse(
+      await ipcRenderer.invoke(IPC_CHANNELS.appUpdatesCheck),
     ),
   listMailAccounts: async () =>
     z

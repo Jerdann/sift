@@ -1,6 +1,7 @@
 import type { IpcMain } from "electron";
 import {
   appSettingsSchema,
+  manualUpdateCheckResultSchema,
   updateAppSettingsInputSchema,
 } from "../../shared/contracts/settings";
 import { IPC_CHANNELS } from "../../shared/ipc";
@@ -37,8 +38,16 @@ export const registerSettingsHandlers = ({
     );
   });
 
+  ipcMain.handle(IPC_CHANNELS.appUpdatesCheck, async (event) => {
+    trust(event);
+    return manualUpdateCheckResultSchema.parse(
+      await updates.checkForUpdatesNow(),
+    );
+  });
+
   return () => {
     ipcMain.removeHandler(IPC_CHANNELS.appSettingsGet);
     ipcMain.removeHandler(IPC_CHANNELS.appSettingsUpdate);
+    ipcMain.removeHandler(IPC_CHANNELS.appUpdatesCheck);
   };
 };

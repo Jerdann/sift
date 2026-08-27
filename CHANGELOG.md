@@ -4,6 +4,21 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-08-27
+
+### Added
+
+- Settings now includes a **Check for updates** button that performs one explicit update check even when automatic updates are off.
+- Manual checks report when no newer release is available, when an update is downloading, when checks require an installed Windows build, or when the request fails.
+
+### Changed
+
+- An update downloaded after a manual check still asks before restarting, regardless of the automatic-update preference.
+
+### Tests
+
+- Added controller coverage for opted-out manual checks and restart consent, plus an Electron interface check for the new Settings action.
+
 ## [1.4.4] - 2026-08-27
 
 ### Fixed
