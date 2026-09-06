@@ -4,6 +4,33 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-06
+
+### Fixed
+
+- An orphaned pending cleanup job could block saving handling choices indefinitely. Upgrades now stop unfinished mutation jobs only when their action plan no longer exists. Successful results and linked recovery work are retained; no provider mail is changed.
+- Saving choices and rebuilding folders have separate outcomes. A rebuild failure offers a retry without losing saved choices.
+- Groups with both clear and uncertain messages no longer lose all their clear matches because of an average confidence score.
+
+### Added
+
+- Local drafts saved as handling controls change and restored after reopening the app.
+- Bulk classification by exact sender and receiving address, largest groups first. Optional subject words narrow the rule; matching counts and excluded examples are shown before adding it.
+- Sender-specific choices flow through existing-mail reviews and future filters without turning into company-wide rules. Detected important records, account actions, security messages, and replies are protected. Unknown content can still be important: review examples before approving.
+
+### Changed
+
+- Fewer folders now also means fewer groups to edit. General settings are separate from the selected group's controls.
+- Keep, File, Spam, and Trash buttons, a read-status switch, and a per-group strictness slider replace the main dropdown-heavy form.
+- Examples update their action, destination, read status, and matching counts as choices change. The rule explanation is available on demand.
+- Disconnecting an account removes its saved handling preferences and drafts. Public tests use only invented mail and isolated profiles.
+
+### Upgrade notes
+
+- Updating does not move mail, create folders, or install filters. Review the rebuilt proposal before approving mailbox changes.
+- Choices lost by an earlier failed save cannot be recovered from a saved draft that did not yet exist. This version saves new drafts as you edit.
+- Proton future filters still require importing the reviewed Sieve file in Proton Mail.
+
 ## [1.6.1] - 2026-09-06
 
 Version 1.6.0 did not publish an installer because the hosted test runner timed out. This release includes the complete update below and serializes database-heavy tests on CI. No tests or assertions were removed.

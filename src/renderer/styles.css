@@ -380,10 +380,6 @@ select:focus-visible {
 .handling-content {
   padding: 24px;
 }
-.handling-content > p {
-  max-width: 78ch;
-  line-height: 1.65;
-}
 .handling-note {
   color: #aeb9b7;
   font-size: 13px;
@@ -391,7 +387,7 @@ select:focus-visible {
 }
 .handling-controls {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
   margin: 20px 0;
 }
@@ -413,9 +409,146 @@ select:focus-visible {
   padding: 9px;
 }
 .handling-category {
+  border: 0;
   border-top: 1px solid var(--line);
   padding-top: 24px;
   margin-top: 24px;
+}
+.handling-general {
+  border: 0;
+  padding: 0 0 20px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.mail-handling legend {
+  font-weight: 700;
+  padding: 0 0 16px;
+}
+.handling-control-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.handling-group-picker {
+  padding: 20px 0;
+  border-top: 1px solid var(--line);
+}
+.handling-group-picker label {
+  font-size: 19px;
+}
+.handling-group-picker select {
+  font-size: 17px;
+  min-height: 52px;
+}
+.handling-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.handling-segments button {
+  padding: 10px 20px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  background: #0e1116;
+  font: inherit;
+  cursor: pointer;
+}
+.handling-segments button[aria-pressed="true"] {
+  background: var(--green);
+  color: #0c1714;
+  border-color: var(--green);
+  font-weight: 700;
+}
+.handling-segments button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.mail-handling .handling-toggle {
+  flex-direction: row;
+  align-items: center;
+}
+.mail-handling input[type="range"],
+.mail-handling input[type="checkbox"] {
+  accent-color: var(--green);
+}
+.mail-handling input:not([type]) {
+  min-width: 0;
+  padding: 10px;
+  background: #0e1116;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.mail-handling details {
+  margin-top: 12px;
+}
+.mail-handling summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: #aeb9b7;
+}
+.handling-formula code {
+  display: block;
+  overflow-wrap: anywhere;
+  padding: 14px 0;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.handling-sender {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  padding: 14px 0;
+  text-align: left;
+  cursor: pointer;
+}
+.handling-sender:hover {
+  background: #1c2629;
+}
+.handling-sender > span {
+  min-width: 0;
+}
+.handling-sender strong,
+.handling-sender-editor h3 {
+  overflow-wrap: anywhere;
+}
+.handling-sender small {
+  display: block;
+  color: #aeb9b7;
+  margin-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.handling-example-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.handling-examples .handling-badge {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  color: var(--green);
+}
+.handling-examples .action-spam,
+.handling-examples .action-trash {
+  color: #ffae98;
+}
+.handling-examples .action-review {
+  color: #f4d58b;
 }
 .handling-warning {
   color: #f4d58b;
@@ -459,18 +592,12 @@ select:focus-visible {
   gap: 16px;
   margin-top: 20px;
 }
-.handling-pagination span {
-  color: #aeb9b7;
-  font-size: 13px;
-}
 @media (max-width: 1050px) {
   .handling-controls {
     grid-template-columns: 1fr;
   }
-}
-@media (prefers-reduced-motion: reduce) {
-  .mail-handling * {
-    scroll-behavior: auto;
+  .handling-general {
+    grid-template-columns: 1fr;
   }
 }
 

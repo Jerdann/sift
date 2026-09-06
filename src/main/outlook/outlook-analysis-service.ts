@@ -1,3 +1,5 @@
+import { MailHandlingRepository } from "../settings/mail-handling-repository";
+import { applySenderHandling } from "../../core/classification/sender-handling";
 import type BetterSqlite3 from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import {
@@ -98,6 +100,32 @@ export class OutlookAnalysisService {
           headers: JSON.parse(row.headers_json) as Record<string, string>,
         }),
       }));
+    const handling = new MailHandlingRepository(
+      this.#database,
+      this.#profileId,
+    );
+    const preferences = new Map(
+      [...owned].map((address) => [
+        address,
+        handling.resolve("outlook", connection.id, address),
+      ]),
+    );
+    for (const item of classified) {
+      const addresses = [
+        ...new Set(
+          item.result.receivingAddresses.filter((a) => preferences.has(a)),
+        ),
+      ];
+      const senders = strings(item.row.sender_json);
+      if (addresses.length === 1 && senders.length === 1)
+        item.result = applySenderHandling(
+          item.result,
+          preferences.get(addresses[0]!)!,
+          senders[0]!,
+          item.row.subject ?? "",
+          addresses[0]!,
+        );
+    }
     const streams = new Map<string, Stream>();
     for (const item of classified) {
       const matched = item.result.receivingAddresses.filter((address) =>

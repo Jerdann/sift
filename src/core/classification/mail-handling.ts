@@ -61,7 +61,12 @@ export const handlingEligible = (
   );
   return (
     confidence >=
-    (destructive || preferences.strictness === "clear" ? 0.82 : 0.7)
+    (destructive
+      ? 0.82
+      : [0.82, 0.75, 0.7][
+          handlingFor(preferences, category).matchLevel ??
+            (preferences.strictness === "clear" ? 0 : 2)
+        ]!)
   );
 };
 export const retentionEligible = (

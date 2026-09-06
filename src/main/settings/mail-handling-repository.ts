@@ -34,13 +34,14 @@ export class MailHandlingRepository {
     provider: AccountProvider,
     connectionId: string,
     address: string | null = null,
+    ruleId: string | null = null,
   ): HandlingPreferences {
     const base = this.read("*") ?? handlingPreferencesSchema.parse({});
     const account = this.read(`${provider}:${connectionId}:*`);
     const alias = address
       ? this.read(`${provider}:${connectionId}:${address.toLowerCase()}`)
       : null;
-    return [account, alias].reduce<HandlingPreferences>(
+    const resolved = [account, alias].reduce<HandlingPreferences>(
       (current, next) =>
         next
           ? {
@@ -51,6 +52,16 @@ export class MailHandlingRepository {
           : current,
       base,
     );
+    const rule = resolved.rules?.find((r) => r.id === ruleId);
+    return rule
+      ? {
+          ...resolved,
+          categories: {
+            ...resolved.categories,
+            [rule.category]: rule.handling,
+          },
+        }
+      : resolved;
   }
   resolveDraft(
     input: HandlingSave,
@@ -163,11 +174,63 @@ export class MailHandlingRepository {
       inherited: this.read(this.key(scope)) === null,
       revision: this.revision(scope.provider, scope.connectionId),
       aliases: this.aliases(scope),
+      draft: this.readDraft(scope),
     };
+  }
+  private readDraft(scope: HandlingScope): HandlingPreferences | null {
+    const row = this.db
+      .prepare(
+        "SELECT preferences_json FROM mail_handling_drafts WHERE profile_id=? AND scope_key=?",
+      )
+      .get(this.profileId, this.key(scope)) as
+      { preferences_json: string } | undefined;
+    return row
+      ? handlingPreferencesSchema.parse(JSON.parse(row.preferences_json))
+      : null;
+  }
+  saveDraft(raw: HandlingSave): void {
+    const input = handlingSaveSchema.parse(raw);
+    this.assertScope(input);
+    if (input.reset) {
+      this.db
+        .prepare(
+          "DELETE FROM mail_handling_drafts WHERE profile_id=? AND scope_key=?",
+        )
+        .run(this.profileId, this.key(input));
+      return;
+    }
+    this.validateRules(input);
+    this.db
+      .prepare(
+        "INSERT INTO mail_handling_drafts(profile_id,scope_key,preferences_json,updated_at) VALUES(?,?,?,?) ON CONFLICT(profile_id,scope_key) DO UPDATE SET preferences_json=excluded.preferences_json,updated_at=excluded.updated_at",
+      )
+      .run(
+        this.profileId,
+        this.key(input),
+        JSON.stringify(input.preferences),
+        new Date().toISOString(),
+      );
+  }
+  private validateRules(input: HandlingSave): void {
+    const aliases = this.aliases(input),
+      seen = new Set<string>();
+    for (const rule of input.preferences.rules ?? []) {
+      const key = rule.sender.toLowerCase() + "\0" + rule.address.toLowerCase();
+      if (
+        input.level === "profile" ||
+        !aliases.includes(rule.address.toLowerCase()) ||
+        seen.has(key) ||
+        ["other", "suspicious", "spam"].includes(rule.category) ||
+        /[\r\n*?]/.test(rule.subjectContains ?? "")
+      )
+        throw new Error("sender_rule_invalid");
+      seen.add(key);
+    }
   }
   save(raw: HandlingSave): HandlingState {
     const input = handlingSaveSchema.parse(raw);
     this.assertScope(input);
+    this.validateRules(input);
     const running = this.db
       .prepare(
         "SELECT 1 FROM jobs WHERE profile_id=? AND state IN ('pending','running') LIMIT 1",
@@ -180,6 +243,7 @@ export class MailHandlingRepository {
           "DELETE FROM mail_handling_preferences WHERE profile_id=? AND scope_key=?",
         )
         .run(this.profileId, this.key(input));
+      this.saveDraft({ ...input, reset: true });
       return this.get(input);
     }
     const json = JSON.stringify(input.preferences);
@@ -194,6 +258,7 @@ export class MailHandlingRepository {
         createHash("sha256").update(json).digest("hex"),
         new Date().toISOString(),
       );
+    this.saveDraft({ ...input, reset: true });
     return this.get(input);
   }
 }

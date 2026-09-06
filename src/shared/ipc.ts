@@ -111,6 +111,7 @@ export const IPC_CHANNELS = Object.freeze({
   mailHandlingGet: "mail-handling:get",
   mailHandlingSave: "mail-handling:save",
   mailHandlingPreview: "mail-handling:preview",
+  mailHandlingDraft: "mail-handling:draft",
   appGetVersion: "app:get-version",
   appSettingsGet: "app-settings:get",
   appSettingsUpdate: "app-settings:update",
@@ -229,6 +230,7 @@ export const IPC_CHANNELS = Object.freeze({
 export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   "getMailHandling",
   "saveMailHandling",
+  "saveMailHandlingDraft",
   "previewMailHandling",
   "getVersion",
   "getAppSettings",
@@ -349,6 +351,7 @@ export interface EmailOrganizerBridge {
   getMailHandling(input: HandlingScope): Promise<HandlingState>;
   saveMailHandling(input: HandlingSave): Promise<HandlingState>;
   previewMailHandling(input: HandlingPreviewInput): Promise<HandlingPreview>;
+  saveMailHandlingDraft(input: HandlingSave): Promise<void>;
   getVersion(): Promise<string>;
   getAppSettings(): Promise<AppSettings>;
   updateAppSettings(input: UpdateAppSettingsInput): Promise<AppSettings>;

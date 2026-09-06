@@ -103,6 +103,7 @@ export const desiredRule = (input: {
   confidence: number;
   categoryShare?: number;
   identityCategory?: MailCategory;
+  senderRuleId?: string;
   purposeConditions?: PurposeConditions;
   trash?: boolean;
   matchNote?: string;
@@ -148,7 +149,7 @@ export const desiredRule = (input: {
           input.connectionId,
           senderDomain,
           receivingAddress,
-          input.identityCategory ?? input.category,
+          input.senderRuleId ?? input.identityCategory ?? input.category,
         ])
       : managedRuleIdentity(
           input.provider,

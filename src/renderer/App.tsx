@@ -7770,16 +7770,7 @@ export const App = () => {
     else setCleanupPlan(null);
   };
   const generateProposal = async (account: MailAccountSummary) => {
-    if (account.provider === "gmail" && gmailAudit?.indexedMessages) {
-      setGmailAnalysis(await window.emailOrganizer.analyzeGmail());
-    } else if (
-      account.provider === "outlook" &&
-      outlookAudit?.indexedMessages
-    ) {
-      setOutlookAnalysis(await window.emailOrganizer.analyzeOutlook());
-    } else if (account.provider === "proton" && protonAudit?.indexedMessages) {
-      setAnalysis(await window.emailOrganizer.analyzeMailbox());
-    }
+    // The scoped backend rebuild checks active work before analyzing once.
     const proposal = await window.emailOrganizer.generateOrganizationProposal({
       provider: account.provider,
       connectionId: account.id,

@@ -1,7 +1,7 @@
 import type { MailCategory } from "../../shared/contracts/analysis";
 import { matchPurpose } from "./message-purpose";
 
-export const CLASSIFIER_VERSION = "purpose-2.0.0";
+export const CLASSIFIER_VERSION = "purpose-2.1.0";
 export const CATEGORY_PRESENTATION: Readonly<
   Record<MailCategory, { label: string; folder: string }>
 > = {
@@ -156,6 +156,19 @@ export const classifyMessage = (
       0.9,
       match.reason,
       "Subject evidence; score is a heuristic, not measured accuracy",
+    );
+  const looseMatch = matchPurpose(
+    subject
+      .normalize("NFKC")
+      .replace(/[–—_:]+/g, " ")
+      .replace(/\s+/g, " "),
+  );
+  if (looseMatch)
+    return result(
+      looseMatch.category,
+      0.78,
+      looseMatch.reason,
+      "Possible subject match after spacing and punctuation changes; not used for Spam, Trash or future filters",
     );
   if (input.bodyText) {
     const firstParagraph =

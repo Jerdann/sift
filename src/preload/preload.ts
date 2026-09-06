@@ -162,6 +162,14 @@ import {
 } from "../shared/contracts/spam-review";
 
 const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
+  saveMailHandlingDraft: async (
+    input: import("../shared/contracts/mail-handling").HandlingSave,
+  ) => {
+    await ipcRenderer.invoke(
+      IPC_CHANNELS.mailHandlingDraft,
+      handlingSaveSchema.parse(input),
+    );
+  },
   getMailHandling: async (
     input: import("../shared/contracts/mail-handling").HandlingScope,
   ) =>

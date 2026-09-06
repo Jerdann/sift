@@ -11,7 +11,7 @@ Each local profile has an isolated SQLite database and encrypted secret namespac
 - email addresses, sender domains, message identifiers, dates, subjects, selected headers, folder or label state, and classification results;
 - Proton plain-text body excerpts only when the user explicitly enables optional body extraction; Gmail and Outlook scans are metadata-only;
 - address-ownership decisions, containers, organization proposals, rule inventories, managed-rule ownership, unsubscribe history, cleanup plans, job checkpoints, verification receipts, and Undo receipts;
-- per-profile, account, and alias handling preferences, including read-status and optional age-review choices;
+- per-profile, account, and alias handling preferences and unsaved local drafts, including read-status, matching strictness, optional age-review choices, and user-created sender/address/subject rules;
 - OAuth refresh tokens and Proton Bridge credentials encrypted with the current Windows user's operating-system protection.
 
 Sift does not download attachments. Provider mail remains with Proton, Google, or Microsoft. Sift does not offer permanent provider-mail deletion; approved deletion jobs use the provider's recoverable Spam, Junk, Trash, or Deleted Items location.
@@ -20,7 +20,7 @@ Sift does not download attachments. Provider mail remains with Proton, Google, o
 
 Local data is retained until one of the following actions removes it:
 
-- **Disconnect an account:** removes that account's local connection, encrypted credential, provider-scoped index, and dependent analysis records.
+- **Disconnect an account:** removes that account's local connection, encrypted credential, provider-scoped index, dependent analysis records, handling preferences, and handling drafts. Profile-wide defaults remain.
 - **Rebuild local index:** removes downloaded message metadata, classifications, address evidence, proposals, rule inventories, scan checkpoints, and incomplete local action jobs. It preserves provider connections, encrypted credentials, managed-rule ownership, and unsubscribe history.
 - **Remove local profile files:** removes the remaining profile database, encrypted secrets, plans, ledgers, and receipts from that computer.
 
@@ -33,6 +33,8 @@ Provider-side messages, folders, labels, Spam, Junk, Trash, and Deleted Items fo
 ## Network connections
 
 Handling previews run locally against the saved scan. Age settings offer a separate review; they do not schedule background deletion or change local-index retention. Exported filter files contain addresses and sender conditions and should be treated as private data.
+
+Drafts and sender rules stay in the local profile database until replaced, removed, or the account/profile is removed. They are not uploaded with app releases. Clearing the saved scan does not discard these choices. Drafts may contain private sender and receiving addresses and chosen subject text; protect them like the mailbox index.
 
 Sift may connect to:
 

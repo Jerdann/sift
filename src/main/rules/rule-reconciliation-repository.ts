@@ -1,4 +1,8 @@
 import { assertCurrentClassification } from "../settings/handling-safety";
+import {
+  ruleIdFromEvidence,
+  senderRuleConditions,
+} from "../../core/classification/sender-handling";
 import type BetterSqlite3 from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import type { AccountProvider } from "../../shared/contracts/accounts";
@@ -24,10 +28,7 @@ import type { JobRepository } from "../jobs/job-repository";
 import { SpamReviewRepository } from "../spam/spam-review-repository";
 import { spamApplicationComplete } from "../spam/spam-application";
 import { MailHandlingRepository } from "../settings/mail-handling-repository";
-import {
-  handlingFor,
-  handlingEligible,
-} from "../../core/classification/mail-handling";
+import { handlingFor } from "../../core/classification/mail-handling";
 import { removableCategories } from "../../core/classification/message-purpose";
 import {
   purposeConditions,
@@ -44,6 +45,7 @@ interface StreamRow {
 }
 
 interface ProposalItemRow {
+  handling_rule_id: string | null;
   scope_address: string | null;
   source_category: MailCategory;
   category: MailCategory;
@@ -266,14 +268,16 @@ export class RuleReconciliationRepository {
     );
     const proposalItems = this.#database
       .prepare(
-        "SELECT scope_address,source_category,category,target_path,enabled FROM organization_proposal_items WHERE proposal_id=?",
+        "SELECT handling_rule_id,scope_address,source_category,category,target_path,enabled FROM organization_proposal_items WHERE proposal_id=?",
       )
       .all(proposal.id) as ProposalItemRow[];
     const itemBySource = new Map(
-      proposalItems.map((item) => [
-        `${item.scope_address ?? ""}\0${item.source_category}`,
-        item,
-      ]),
+      proposalItems
+        .filter((item) => !item.handling_rule_id)
+        .map((item) => [
+          `${item.scope_address ?? ""}\0${item.source_category}`,
+          item,
+        ]),
     );
     // A mailbox rescan replaces the prior analysis rows, while the approved
     // folder proposal remains the user's chosen structure. Always build future
@@ -318,16 +322,70 @@ export class RuleReconciliationRepository {
     const prefix = provider === "proton" ? "" : `${provider}_`;
     const sourceMessages = this.#database
       .prepare(
-        `SELECT mc.category,mc.sender_domain,mc.confidence,mc.receiving_addresses_json,im.subject,im.sender_json FROM ${prefix}message_classifications mc JOIN ${prefix}indexed_messages im ON im.id=mc.message_row_id JOIN ${prefix}mailbox_analyses ma ON ma.id=mc.analysis_id WHERE ma.connection_id=? AND ma.profile_id=?`,
+        `SELECT mc.evidence_json,mc.category,mc.sender_domain,mc.confidence,mc.receiving_addresses_json,im.subject,im.sender_json FROM ${prefix}message_classifications mc JOIN ${prefix}indexed_messages im ON im.id=mc.message_row_id JOIN ${prefix}mailbox_analyses ma ON ma.id=mc.analysis_id WHERE ma.connection_id=? AND ma.profile_id=?`,
       )
       .all(connectionId, this.#profileId) as Array<{
       category: MailCategory;
+      evidence_json: string;
       sender_domain: string;
       confidence: number;
       receiving_addresses_json: string;
       subject: string | null;
       sender_json: string;
     }>;
+    const aliases = handling.aliases({ provider, connectionId });
+    for (const address of aliases) {
+      const preferences = handling.resolve(provider, connectionId, address);
+      for (const rule of preferences.rules ?? []) {
+        if (rule.address !== address) continue;
+        const item = proposalItems.find(
+          (i) => i.handling_rule_id === rule.id && i.scope_address === address,
+        );
+        if (!item?.enabled) continue;
+        const policy = handlingFor(
+          handling.resolve(provider, connectionId, address, rule.id),
+          rule.category,
+        );
+        if (policy.destination === "inbox") continue;
+        const conditions = senderRuleConditions(rule, aliases, provider);
+        const matching = sourceMessages.filter(
+          (m) =>
+            ruleIdFromEvidence(m.evidence_json) === rule.id &&
+            matchesPurposeConditions(
+              conditions,
+              m.subject ?? "",
+              safeStringArray(m.sender_json)[0] ?? "",
+              safeStringArray(m.receiving_addresses_json),
+            ),
+        );
+        if (!matching.length) continue;
+        rules.push(
+          desiredRule({
+            provider,
+            connectionId,
+            senderDomain: rule.sender.split("@")[1]!,
+            receivingAddress: address,
+            category: rule.category,
+            senderRuleId: rule.id,
+            targetPath:
+              policy.destination === "spam"
+                ? "SPAM"
+                : policy.destination === "trash"
+                  ? "TRASH"
+                  : item.target_path,
+            markRead: policy.markRead,
+            archive: true,
+            spam: policy.destination === "spam",
+            trash: policy.destination === "trash",
+            observedMessages: matching.length,
+            confidence: 1,
+            purposeConditions: conditions,
+            matchNote:
+              "Your sender rule. Detected security, payments, account actions and replies are excluded. Review future matches before enabling.",
+          }),
+        );
+      }
+    }
     for (const group of groups.values()) {
       const ordered = [...group].sort(
         (left, right) =>
@@ -349,11 +407,7 @@ export class RuleReconciliationRepository {
         const item = itemBySource.get(
           `${stream.receiving_address}\0${stream.category}`,
         );
-        if (
-          !item?.enabled ||
-          !handlingEligible(preferences, stream.category, stream.confidence)
-        )
-          continue;
+        if (!item?.enabled) continue;
         const policy = handlingFor(preferences, item.category);
         if (
           ["spam", "trash"].includes(policy.destination) &&
@@ -366,6 +420,14 @@ export class RuleReconciliationRepository {
         if (policy.destination === "inbox" && !spam) continue;
         const examples = sourceMessages.filter(
           (message) =>
+            !ruleIdFromEvidence(message.evidence_json) &&
+            !preferences.rules?.some(
+              (r) =>
+                r.address === stream.receiving_address &&
+                safeStringArray(message.sender_json).some(
+                  (s) => s.toLowerCase() === r.sender.toLowerCase(),
+                ),
+            ) &&
             message.category === stream.category &&
             message.sender_domain === stream.sender_domain &&
             message.confidence >= 0.82 &&
@@ -423,7 +485,9 @@ export class RuleReconciliationRepository {
             spam,
             trash: !spam && policy.destination === "trash",
             observedMessages: matching.length,
-            confidence: stream.confidence,
+            confidence:
+              matching.reduce((sum, m) => sum + m.confidence, 0) /
+              matching.length,
             categoryShare: matching.length / total,
             purposeConditions: conditions,
             matchNote:

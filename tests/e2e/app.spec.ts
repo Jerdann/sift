@@ -274,6 +274,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "retryOutlookOrganizationPlan",
         "retryRulePlan",
         "saveMailHandling",
+        "saveMailHandlingDraft",
         "scanGmailSubscriptions",
         "scanOutlookSubscriptions",
         "scanSubscriptions",

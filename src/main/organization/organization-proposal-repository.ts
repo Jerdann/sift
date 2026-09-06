@@ -1,3 +1,4 @@
+import { ruleIdFromEvidence } from "../../core/classification/sender-handling";
 import type BetterSqlite3 from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -30,6 +31,8 @@ interface SourceRow {
 }
 
 interface Aggregate {
+  eligibleCount: number;
+  handlingRuleId: string | null;
   scopeAddress: string | null;
   containerName: string | null;
   category: MailCategory;
@@ -121,6 +124,18 @@ export class OrganizationProposalRepository {
       this.#database,
       this.#profileId,
     );
+    const preferences = new Map<
+      string,
+      ReturnType<MailHandlingRepository["resolve"]>
+    >();
+    const resolve = (address: string | null, ruleId: string | null) => {
+      const key = JSON.stringify([address, ruleId]);
+      const value =
+        preferences.get(key) ??
+        handling.resolve(provider, connectionId, address, ruleId);
+      preferences.set(key, value);
+      return value;
+    };
     for (const row of rows) {
       const matched = safeStrings(row.receiving_addresses_json).filter(
         (address) => owned.has(address),
@@ -132,23 +147,34 @@ export class OrganizationProposalRepository {
         const containerName = identity?.container_enabled
           ? identity.container_name
           : null;
-        const key = `${address ?? ""}\0${row.category}`;
+        const handlingRuleId = ruleIdFromEvidence(row.evidence_json);
+        const key = `${address ?? ""}\0${row.category}\0${handlingRuleId ?? ""}`;
         const current = aggregates.get(key) ?? {
           scopeAddress: address,
+          handlingRuleId,
           containerName,
           category: row.category,
           targetPath: handlingTarget(
-            handling.resolve(provider, connectionId, address),
+            resolve(address, handlingRuleId),
             row.category,
             containerName,
           ),
           messageCount: 0,
+          eligibleCount: 0,
           latestAt: null,
           confidenceTotal: 0,
           evidence: new Set<string>(),
           samples: new Set<string>(),
         };
         current.messageCount += 1;
+        if (
+          handlingEligible(
+            resolve(address, handlingRuleId),
+            row.category,
+            row.confidence,
+          )
+        )
+          current.eligibleCount++;
         current.confidenceTotal += row.confidence;
         if (
           row.received_at &&
@@ -169,6 +195,7 @@ export class OrganizationProposalRepository {
             JSON.stringify([
               aggregate.scopeAddress,
               aggregate.category,
+              aggregate.handlingRuleId,
               aggregate.messageCount,
               aggregate.latestAt,
             ]),
@@ -181,12 +208,7 @@ export class OrganizationProposalRepository {
           evidence: [...aggregate.evidence].sort().slice(0, 12),
           samples: [...aggregate.samples],
           enabled:
-            Boolean(aggregate.scopeAddress) &&
-            handlingEligible(
-              handling.resolve(provider, connectionId, aggregate.scopeAddress),
-              aggregate.category,
-              aggregate.confidenceTotal / aggregate.messageCount,
-            ),
+            Boolean(aggregate.scopeAddress) && aggregate.eligibleCount > 0,
           sourceCategory: aggregate.category,
           sourceFingerprint,
         };
@@ -200,7 +222,7 @@ export class OrganizationProposalRepository {
     // Preserve deliberate corrections, not the prior classifier's guesses.
     const priorEdits = this.#database
       .prepare(
-        `SELECT i.scope_address,i.source_category,i.category,i.target_path,i.enabled FROM organization_proposal_items i JOIN organization_proposals p ON p.id=i.proposal_id WHERE p.profile_id=? AND p.provider=? AND p.connection_id=? AND p.classifier_version=? AND EXISTS(SELECT 1 FROM organization_corrections c WHERE c.item_id=i.id) ORDER BY p.rowid DESC`,
+        `SELECT i.handling_rule_id,i.scope_address,i.source_category,i.category,i.target_path,i.enabled FROM organization_proposal_items i JOIN organization_proposals p ON p.id=i.proposal_id WHERE p.profile_id=? AND p.provider=? AND p.connection_id=? AND p.classifier_version=? AND EXISTS(SELECT 1 FROM organization_corrections c WHERE c.item_id=i.id) ORDER BY p.rowid DESC`,
       )
       .all(
         this.#profileId,
@@ -209,6 +231,7 @@ export class OrganizationProposalRepository {
         CLASSIFIER_VERSION,
       ) as Array<{
       scope_address: string | null;
+      handling_rule_id: string | null;
       source_category: MailCategory;
       category: MailCategory;
       target_path: string;
@@ -218,7 +241,8 @@ export class OrganizationProposalRepository {
       const prior = priorEdits.find(
         (row) =>
           row.scope_address === item.scopeAddress &&
-          row.source_category === item.sourceCategory,
+          row.source_category === item.sourceCategory &&
+          row.handling_rule_id === item.handlingRuleId,
       );
       if (prior) {
         item.category = prior.category;
@@ -250,7 +274,7 @@ export class OrganizationProposalRepository {
           now,
         );
       const insert = this.#database.prepare(
-        `INSERT INTO organization_proposal_items(id,proposal_id,scope_address,container_name,category,target_path,enabled,message_count,latest_at,confidence,evidence_json,samples_json,source_fingerprint,updated_at,source_category) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO organization_proposal_items(id,proposal_id,scope_address,container_name,category,target_path,enabled,message_count,latest_at,confidence,evidence_json,samples_json,source_fingerprint,updated_at,source_category,handling_rule_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       );
       for (const item of items)
         insert.run(
@@ -269,6 +293,7 @@ export class OrganizationProposalRepository {
           item.sourceFingerprint,
           now,
           item.sourceCategory,
+          item.handlingRuleId,
         );
     })();
     this.#database
@@ -317,6 +342,7 @@ export class OrganizationProposalRepository {
           ),
       items: items.map((item) => ({
         id: item.id,
+        handlingRuleId: item.handling_rule_id,
         scopeAddress: item.scope_address,
         containerName: item.container_name,
         category: item.category,

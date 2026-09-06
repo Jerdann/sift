@@ -1,3 +1,4 @@
+import { ruleIdFromEvidence } from "../../core/classification/sender-handling";
 import { assertCurrentClassification } from "../settings/handling-safety";
 import type BetterSqlite3 from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
@@ -24,6 +25,7 @@ import {
 import { removableCategories } from "../../core/classification/message-purpose";
 
 interface CandidateRow {
+  evidence_json: string;
   analysis_id: string;
   message_row_id: string;
   canonical_key: string;
@@ -41,6 +43,7 @@ interface CandidateRow {
 }
 
 interface ProposalItemRow {
+  handling_rule_id: string | null;
   scope_address: string | null;
   container_name: string | null;
   source_category: MailCategory;
@@ -126,12 +129,13 @@ export class CleanupPlanRepository {
         (
           JSON.parse(candidate.receiving_addresses_json) as string[]
         ).sort()[0] ?? null,
+        ruleIdFromEvidence(candidate.evidence_json),
       );
     const candidates = this.#database
       .prepare(
         `
       SELECT ma.id AS analysis_id, mc.message_row_id, mc.canonical_key,
-             mc.category, mc.sender_domain, mc.confidence, mc.receiving_addresses_json, im.uid_validity, im.uid, im.received_at,
+             mc.evidence_json, mc.category, mc.sender_domain, mc.confidence, mc.receiving_addresses_json, im.uid_validity, im.uid, im.received_at,
              containers.provider_container_id AS source_path, containers.special_use,
              containers.flags_json AS container_flags_json, im.flags_json AS message_flags_json
       FROM mailbox_analyses ma
@@ -176,7 +180,7 @@ export class CleanupPlanRepository {
     const proposalItems = proposal
       ? (this.#database
           .prepare(
-            "SELECT scope_address,container_name,source_category,category,target_path,enabled FROM organization_proposal_items WHERE proposal_id=?",
+            "SELECT handling_rule_id,scope_address,container_name,source_category,category,target_path,enabled FROM organization_proposal_items WHERE proposal_id=?",
           )
           .all(proposal.id) as ProposalItemRow[])
       : [];
@@ -195,6 +199,11 @@ export class CleanupPlanRepository {
       );
       return (
         (proposalBySource.get(candidate.category) ?? [])
+          .filter(
+            (item) =>
+              item.handling_rule_id ===
+              ruleIdFromEvidence(candidate.evidence_json),
+          )
           .filter(
             (item) =>
               !item.scope_address ||
@@ -301,6 +310,7 @@ export class CleanupPlanRepository {
               JSON.parse(candidate.receiving_addresses_json) as string[]
             ).sort()[0] ??
             null,
+          ruleIdFromEvidence(candidate.evidence_json),
         );
         const policy = handlingFor(preferences, effectiveCategory);
         const destination =
@@ -353,7 +363,12 @@ export class CleanupPlanRepository {
         (item) =>
           item.enabled &&
           handlingFor(
-            handling.resolve("proton", connectionId, item.scope_address),
+            handling.resolve(
+              "proton",
+              connectionId,
+              item.scope_address,
+              item.handling_rule_id,
+            ),
             item.category,
           ).destination === "file",
       )

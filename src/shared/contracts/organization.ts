@@ -5,6 +5,7 @@ import { mailCategorySchema } from "./analysis";
 export const organizationProposalItemSchema = z.object({
   id: z.uuid(),
   scopeAddress: z.email().nullable(),
+  handlingRuleId: z.uuid().nullable().optional(),
   containerName: z.string().nullable(),
   category: mailCategorySchema,
   targetPath: z.string().trim().min(1).max(192),

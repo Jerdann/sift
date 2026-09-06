@@ -17,6 +17,12 @@ import {
 } from "../../shared/contracts/mail-handling";
 import type { MailCategory } from "../../shared/contracts/analysis";
 import { MailHandlingRepository } from "./mail-handling-repository";
+import {
+  applySenderHandling,
+  preferencesForEvidence,
+  ruleFromEvidence,
+} from "../../core/classification/sender-handling";
+import type { HandlingPreferences } from "../../shared/contracts/mail-handling";
 
 export const previewMailHandling = (
   db: BetterSqlite3.Database,
@@ -126,6 +132,9 @@ export const previewMailHandling = (
         : (names[raw] ?? "Folder name unavailable — scan folders");
   const groups = new Map<MailCategory, HandlingPreview["groups"][number]>();
   const examples: HandlingPreview["examples"] = [];
+  const senders = new Map<string, HandlingPreview["senders"][number]>();
+  const ruleMatches: Record<string, number> = {};
+  const preferenceCache = new Map<string | null, HandlingPreferences>();
   let total = 0,
     matched = 0,
     held = 0,
@@ -143,14 +152,27 @@ export const previewMailHandling = (
       continue;
     const address = new Set(addresses).size === 1 ? addresses[0]! : null;
     const identity = address ? owned.get(address) : null;
-    const prefs = repo.resolveDraft(input, address);
-    const c = classifyMessage({
+    const basePrefs =
+      preferenceCache.get(address) ?? repo.resolveDraft(input, address);
+    preferenceCache.set(address, basePrefs);
+    const senderList = JSON.parse(row.sender_json) as string[];
+    const sender = senderList.length === 1 ? senderList[0]!.toLowerCase() : "";
+    const base = classifyMessage({
       subject: row.subject,
       bodyText: row.body_text,
       senders: JSON.parse(row.sender_json),
       recipients: JSON.parse(row.recipients_json),
       headers: JSON.parse(row.headers_json),
     });
+    const c = applySenderHandling(
+      base,
+      basePrefs,
+      sender,
+      row.subject ?? "",
+      address,
+    );
+    const prefs = preferencesForEvidence(basePrefs, c.evidence);
+    const rule = ruleFromEvidence(basePrefs, c.evidence);
     const excluded =
       input.provider === "proton"
         ? /\\(?:all|sent|drafts|trash|junk)/i.test(row.roles)
@@ -159,6 +181,19 @@ export const previewMailHandling = (
               ["SENT", "DRAFT", "SPAM", "TRASH"].includes(label),
             )
           : Object.values(outlookFolders ?? {}).includes(row.roles);
+    if (!excluded && address && sender && c.category === "other") {
+      const key = sender + "\0" + address;
+      const group = senders.get(key) ?? {
+        sender,
+        address,
+        count: 0,
+        subject: row.subject ?? "(No subject)",
+      };
+      group.count++;
+      senders.set(key, group);
+    }
+    if (rule && !excluded && address)
+      ruleMatches[rule.id] = (ruleMatches[rule.id] ?? 0) + 1;
     const eligible =
       !excluded &&
       Boolean(address) &&
@@ -206,7 +241,15 @@ export const previewMailHandling = (
     if (group.action !== action)
       group.action = "Uses each address’s saved handling";
     groups.set(c.category, group);
-    if (!input.category || input.category === c.category)
+    if (
+      input.sender
+        ? sender === input.sender.toLowerCase() &&
+          (!input.receivingAddress ||
+            address === input.receivingAddress.toLowerCase())
+        : input.categories
+          ? input.categories.includes(c.category)
+          : !input.category || input.category === c.category
+    )
       examples.push({
         subject: row.subject ?? "(No subject)",
         sender: (JSON.parse(row.sender_json) as string[])[0] ?? "",
@@ -217,8 +260,33 @@ export const previewMailHandling = (
         target,
         action,
         held: !eligible,
+        ruleId: rule?.id ?? null,
+        actionCode: !eligible
+          ? "REVIEW"
+          : (
+              {
+                inbox: "KEEP",
+                file: "FILE",
+                spam: "SPAM",
+                trash: "TRASH",
+              } as const
+            )[handlingFor(prefs, c.category).destination],
         reasons: c.evidence,
       });
+  }
+  // Put both matches and exclusions on the first page of a sender preview.
+  // Otherwise hundreds of identical matches can hide a protected receipt.
+  if (input.sender && input.preferences.rules?.length) {
+    const matches = examples.filter((e) => e.ruleId),
+      others = examples.filter((e) => !e.ruleId);
+    examples.splice(
+      0,
+      examples.length,
+      ...matches.slice(0, 3),
+      ...others.slice(0, 2),
+      ...matches.slice(3),
+      ...others.slice(2),
+    );
   }
   return handlingPreviewSchema.parse({
     total,
@@ -228,6 +296,16 @@ export const previewMailHandling = (
     retention,
     withBody,
     classifierVersion: CLASSIFIER_VERSION,
+    senders: [...senders.values()]
+      .sort(
+        (a, b) =>
+          b.count - a.count ||
+          a.sender.localeCompare(b.sender) ||
+          a.address.localeCompare(b.address),
+      )
+      .slice((input.senderPage ?? 0) * 8, (input.senderPage ?? 0) * 8 + 8),
+    senderPages: Math.max(1, Math.ceil(senders.size / 8)),
+    ruleMatches,
     groups: [...groups.values()].sort((a, b) => b.count - a.count),
     examples: examples.slice(input.page * 5, input.page * 5 + 5),
     page: input.page,

@@ -74,7 +74,9 @@ const quote = (value: string): string => `"${value.replace(/["\\]/g, " ")}"`;
 export const gmailPurposeCriteria = (conditions: PurposeConditions) => ({
   from: `{${conditions.senderAddresses.map(quote).join(" ")}}`,
   to: conditions.receivingAddress,
-  query: `{${conditions.subjectPatterns.map((pattern) => `subject:${quote(phrase(pattern))}`).join(" ")}}`,
+  query: conditions.subjectPatterns.includes("*")
+    ? ""
+    : `{${conditions.subjectPatterns.map((pattern) => `subject:${quote(phrase(pattern))}`).join(" ")}}`,
   negatedQuery: `{${conditions.excludeSubjectPatterns
     .map((pattern) => `subject:${quote(phrase(pattern))}`)
     .concat(
@@ -94,7 +96,9 @@ export const outlookPurposePredicates = (conditions: PurposeConditions) => ({
     sentToAddresses: [
       { emailAddress: { address: conditions.receivingAddress } },
     ],
-    subjectContains: conditions.subjectPatterns.map(phrase),
+    ...(conditions.subjectPatterns.includes("*")
+      ? {}
+      : { subjectContains: conditions.subjectPatterns.map(phrase) }),
   },
   exceptions: {
     ...(conditions.excludedReceivingAddresses?.length

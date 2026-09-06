@@ -1203,6 +1203,43 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
         );
     `,
   },
+  {
+    version: 33,
+    statements: `
+      CREATE TABLE mail_handling_drafts (
+        profile_id TEXT NOT NULL, scope_key TEXT NOT NULL, preferences_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL, PRIMARY KEY(profile_id,scope_key)
+      );
+      ALTER TABLE organization_proposal_items ADD COLUMN handling_rule_id TEXT;
+      CREATE TRIGGER remove_proton_handling AFTER DELETE ON provider_connections BEGIN
+        DELETE FROM mail_handling_drafts WHERE profile_id=old.profile_id AND scope_key LIKE 'proton:'||old.id||':%';
+        DELETE FROM mail_handling_preferences WHERE profile_id=old.profile_id AND scope_key LIKE 'proton:'||old.id||':%';
+      END;
+      CREATE TRIGGER remove_gmail_handling AFTER DELETE ON gmail_connections BEGIN
+        DELETE FROM mail_handling_drafts WHERE profile_id=old.profile_id AND scope_key LIKE 'gmail:'||old.id||':%';
+        DELETE FROM mail_handling_preferences WHERE profile_id=old.profile_id AND scope_key LIKE 'gmail:'||old.id||':%';
+      END;
+      CREATE TRIGGER remove_outlook_handling AFTER DELETE ON outlook_connections BEGIN
+        DELETE FROM mail_handling_drafts WHERE profile_id=old.profile_id AND scope_key LIKE 'outlook:'||old.id||':%';
+        DELETE FROM mail_handling_preferences WHERE profile_id=old.profile_id AND scope_key LIKE 'outlook:'||old.id||':%';
+      END;
+      UPDATE job_items SET state='skipped',error_code='orphaned_plan_not_resumed'
+        WHERE state IN ('pending','running') AND job_id IN (
+          SELECT j.id FROM jobs j WHERE j.kind IN ('proton-cleanup','gmail-history','outlook-history','provider-rules')
+          AND j.state IN ('pending','running')
+          AND NOT EXISTS(SELECT 1 FROM cleanup_plans p WHERE p.job_id=j.id OR p.undo_job_id=j.id)
+          AND NOT EXISTS(SELECT 1 FROM gmail_organization_plans p WHERE p.job_id=j.id OR p.undo_job_id=j.id)
+          AND NOT EXISTS(SELECT 1 FROM outlook_history_plans p WHERE p.job_id=j.id OR p.undo_job_id=j.id)
+          AND NOT EXISTS(SELECT 1 FROM rule_reconciliation_plans p WHERE p.job_id=j.id OR p.undo_job_id=j.id)
+        );
+      UPDATE jobs SET state='failed',error_code='orphaned_plan_not_resumed',finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        WHERE state IN ('pending','running') AND kind IN ('proton-cleanup','gmail-history','outlook-history','provider-rules')
+          AND NOT EXISTS(SELECT 1 FROM cleanup_plans p WHERE p.job_id=jobs.id OR p.undo_job_id=jobs.id)
+          AND NOT EXISTS(SELECT 1 FROM gmail_organization_plans p WHERE p.job_id=jobs.id OR p.undo_job_id=jobs.id)
+          AND NOT EXISTS(SELECT 1 FROM outlook_history_plans p WHERE p.job_id=jobs.id OR p.undo_job_id=jobs.id)
+          AND NOT EXISTS(SELECT 1 FROM rule_reconciliation_plans p WHERE p.job_id=jobs.id OR p.undo_job_id=jobs.id);
+    `,
+  },
 ]);
 
 export const applyMigrations = (

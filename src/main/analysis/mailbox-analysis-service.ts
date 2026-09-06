@@ -10,6 +10,8 @@ import {
 } from './mailbox-analysis-repository';
 import { AccountIdentityRepository } from '../identity/account-identity-repository';
 import { protonIdentityEvidence } from '../identity/ownership-evidence';
+import { MailHandlingRepository } from '../settings/mail-handling-repository';
+import { applySenderHandling } from '../../core/classification/sender-handling';
 
 interface IndexedRow {
   id: string;
@@ -56,13 +58,15 @@ export const analyzeMailbox = (
   const sendingAddresses = new Set(activeOwnership.filter((identity) => identity.sentFromCount > 0).map((identity) => identity.address));
   const seen = new Set<string>();
   const classifications = [];
+  const handling = new MailHandlingRepository(database, profileId);
+  const preferences = new Map([...ownedAddresses].map(address => [address, handling.resolve('proton',connectionId,address)]));
   for (const row of rows) {
     const key = canonicalKey(row);
     if (seen.has(key)) continue;
     seen.add(key);
     const senders = JSON.parse(row.sender_json) as string[];
     if (senders.some((sender) => sendingAddresses.has(sender.trim().toLowerCase()))) continue;
-    const classified = classifyMessage({
+    let classified = classifyMessage({
       subject: row.subject,
       bodyText: row.body_text,
       senders,
@@ -70,6 +74,8 @@ export const analyzeMailbox = (
       headers: JSON.parse(row.headers_json) as Record<string, string>,
     });
     const matchedAddresses = classified.receivingAddresses.filter((address) => ownedAddresses.has(address));
+    const address = new Set(matchedAddresses).size === 1 ? matchedAddresses[0]! : null;
+    if(address && senders.length === 1) classified = applySenderHandling(classified,preferences.get(address)!,senders[0]!,row.subject??'',address);
     classifications.push({
       messageRowId: row.id,
       canonicalKey: key,

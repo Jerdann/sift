@@ -122,6 +122,7 @@ describe("desktop security boundary", () => {
     expect(EMAIL_ORGANIZER_BRIDGE_METHODS).toEqual([
       "getMailHandling",
       "saveMailHandling",
+      "saveMailHandlingDraft",
       "previewMailHandling",
       "getVersion",
       "getAppSettings",

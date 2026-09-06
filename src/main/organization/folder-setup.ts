@@ -40,6 +40,7 @@ export class FolderSetup {
                   input.provider,
                   input.connectionId,
                   item.scopeAddress,
+                  item.handlingRuleId,
                 ),
                 item.category,
               ).destination === "file",

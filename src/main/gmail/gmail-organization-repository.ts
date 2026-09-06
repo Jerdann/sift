@@ -1,3 +1,4 @@
+import { ruleIdFromEvidence } from "../../core/classification/sender-handling";
 import { assertCurrentClassification } from "../settings/handling-safety";
 import type BetterSqlite3 from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
@@ -21,6 +22,7 @@ import {
 } from "../spam/spam-application";
 
 interface ProposalItemRow {
+  handling_rule_id?: string | null;
   id: string;
   scope_address: string | null;
   source_category: MailCategory;
@@ -31,6 +33,7 @@ interface ProposalItemRow {
 }
 
 interface MessageRow {
+  evidence_json: string;
   gmail_message_id: string;
   sender_domain: string;
   received_at: string | null;
@@ -173,7 +176,7 @@ export class GmailOrganizationRepository {
     const messages = this.#database
       .prepare(
         `
-      SELECT gim.gmail_message_id,gmc.sender_domain,gim.received_at,gmc.category source_category,gmc.confidence,
+      SELECT gim.gmail_message_id,gmc.sender_domain,gim.received_at,gmc.evidence_json,gmc.category source_category,gmc.confidence,
         gmc.receiving_addresses_json,gim.label_ids_json
       FROM gmail_message_classifications gmc
       JOIN gmail_indexed_messages gim ON gim.id=gmc.message_row_id
@@ -218,8 +221,14 @@ export class GmailOrganizationRepository {
         "gmail",
         connection.id,
         [...addresses][0] ?? null,
+        ruleIdFromEvidence(message.evidence_json),
       );
       const candidates = (bySource.get(message.source_category) ?? [])
+        .filter(
+          (item) =>
+            (item.handling_rule_id ?? null) ===
+            ruleIdFromEvidence(message.evidence_json),
+        )
         .filter(
           (item) =>
             !item.scope_address ||
@@ -388,7 +397,12 @@ export class GmailOrganizationRepository {
       for (const group of normalized) {
         const impactId = this.#createId();
         const policy = handlingFor(
-          handling.resolve("gmail", connection.id, group.item.scope_address),
+          handling.resolve(
+            "gmail",
+            connection.id,
+            group.item.scope_address,
+            group.item.handling_rule_id,
+          ),
           group.item.category,
         );
         const spam =

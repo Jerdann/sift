@@ -4,15 +4,29 @@ Sift proposes actions using the message's purpose, not just the company that sen
 
 ## Controls
 
-In Organize, choose a message type and review examples from the saved scan. Choices apply to the current account unless you select profile defaults or a specific confirmed alias. Account choices override profile defaults; alias choices override the account. Resetting a scope restores its inherited choices.
+In Organize, choose a group and review examples from the saved scan. Choices apply to the current account unless you select profile defaults or a specific confirmed alias. Account choices override profile defaults; alias choices override the account. General settings are separate from group actions.
 
-- **Folder detail:** separate specific message types, or group them into fewer folders. Only selected destinations are created. Split aliases get their own folders.
-- **Evidence:** clear subject matches only, or also tentative matches from locally saved text. Tentative matches are not exported as future filters or used for Spam/Trash.
-- **Destination:** file the message, leave it in place, or send eligible low-value types to Spam or Trash.
+- **Folders and groups:** Fewer combines related types into fewer folders and fewer groups to edit. More detail separates specific types. Only needed, selected destinations are created. Split aliases get their own folders.
+- **Match strictness:** Strict uses clear subject matches. Normal also tries similar wording after punctuation and spacing changes. Broad also uses locally saved message text, if available. Tentative matches never become future filters or Spam/Trash actions.
+- **Keep / File / Spam / Trash:** leave the message in place, file it, or send eligible low-value types to Spam or Trash.
 - **Read status:** preserve the current status or mark read. Login codes, account security changes, payment problems, refunds, shipping updates, and active travel preserve status by default.
 - **Age:** keep indefinitely or offer a separate Trash review after the chosen number of days. This is not a background expiration task.
 
-Moving unread mail out of Inbox can affect mobile notifications. Choose **Leave in place** for mail that needs to remain in Inbox. Sift cannot guarantee how a phone or provider handles notifications.
+Moving unread mail out of Inbox can affect mobile notifications. Choose **Keep** for mail that needs to remain in Inbox. Sift cannot guarantee how a phone or provider handles notifications.
+
+Examples update while you edit. Each has a KEEP, FILE, SPAM, TRASH, or REVIEW label and shows the destination and read-status action. **Show the rule** explains the conditions. A mixed group retains different read-status defaults until you explicitly change them.
+
+## Sort unknown mail in groups
+
+**Needs sorting** lists exact sender/address pairs, largest first, with eight groups per page. Select a sender, choose a category and action, and optionally require words in the subject. The preview shows the matching count and both included and excluded examples. **Use this rule** adds the group choice to your draft. You can edit or remove sender rules before saving.
+
+Rules match exact sender addresses, not an entire company or domain. They only override unclassified or low-value mail; detected payments, security, account actions, personal replies and other protected records remain under their own group choices. This is not proof that every unknown message is disposable. Vague subjects and unavailable bodies can conceal important content.
+
+After saving, existing-message actions still require approval in Rules. Future sender filters use the exact sender, alias and optional subject words, with protected-purpose exclusions. They replace Sift's ordinary future rules for that sender/address pair to avoid conflicting actions. Other mail from that sender can therefore stay in Inbox. External provider filters still need separate review.
+
+## Saving and retrying
+
+Control changes are saved as local drafts, without changing mail. Drafts survive navigation and restarting. **Use this rule** must be clicked to add a sender rule to the draft. **Save choices and rebuild proposal** saves the choices first, then rebuilds the local folder plan. If rebuilding fails, retry without entering choices again. Real unfinished mail jobs still block applying new choices, but not saving a draft. Old orphaned mutation jobs with no action plan are stopped on upgrade while successful results are retained.
 
 ## Matching logic
 

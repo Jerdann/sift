@@ -1,3 +1,4 @@
+import { ruleIdFromEvidence } from "../../core/classification/sender-handling";
 import { assertCurrentClassification } from "../settings/handling-safety";
 import type BetterSqlite3 from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
@@ -19,6 +20,7 @@ import {
 } from "../spam/spam-application";
 
 interface Item {
+  handling_rule_id?: string | null;
   id: string;
   scope_address: string | null;
   source_category: MailCategory;
@@ -28,6 +30,7 @@ interface Item {
   confidence: number;
 }
 interface Message {
+  evidence_json: string;
   graph_message_id: string;
   sender_domain: string;
   received_at: string | null;
@@ -147,7 +150,7 @@ export class OutlookHistoryRepository {
       ]);
     const messages = this.#database
       .prepare(
-        `SELECT oim.graph_message_id,omc.sender_domain,oim.received_at,omc.category source_category,omc.confidence,omc.receiving_addresses_json,oim.parent_folder_id,oim.is_read FROM outlook_message_classifications omc JOIN outlook_indexed_messages oim ON oim.id=omc.message_row_id WHERE omc.analysis_id=? ORDER BY oim.graph_message_id`,
+        `SELECT oim.graph_message_id,omc.sender_domain,oim.received_at,omc.evidence_json,omc.category source_category,omc.confidence,omc.receiving_addresses_json,oim.parent_folder_id,oim.is_read FROM outlook_message_classifications omc JOIN outlook_indexed_messages oim ON oim.id=omc.message_row_id WHERE omc.analysis_id=? ORDER BY oim.graph_message_id`,
       )
       .all(analysis.analysis_id) as Message[];
     const providerFolders = this.#database
@@ -196,6 +199,11 @@ export class OutlookHistoryRepository {
       const candidates = (bySource.get(message.source_category) ?? [])
         .filter(
           (item) =>
+            (item.handling_rule_id ?? null) ===
+            ruleIdFromEvidence(message.evidence_json),
+        )
+        .filter(
+          (item) =>
             !item.scope_address ||
             addresses.has(item.scope_address.toLowerCase()),
         )
@@ -208,6 +216,7 @@ export class OutlookHistoryRepository {
         "outlook",
         connection.id,
         [...addresses].sort()[0] ?? null,
+        ruleIdFromEvidence(message.evidence_json),
       );
       const spamAddress =
         kind === "spam"
@@ -350,7 +359,12 @@ export class OutlookHistoryRepository {
       for (const group of normalized) {
         const impactId = this.#createId();
         const policy = handlingFor(
-          handling.resolve("outlook", connection.id, group.item.scope_address),
+          handling.resolve(
+            "outlook",
+            connection.id,
+            group.item.scope_address,
+            group.item.handling_rule_id,
+          ),
           group.item.category,
         );
         const spam =

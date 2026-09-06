@@ -72,6 +72,13 @@ export const registerAccountHandlers = ({
 }): (() => void) => {
   const trust = (event: IpcMainInvokeEvent) =>
     assertTrustedIpcSender(event.senderFrame?.url, developmentServerUrl);
+  ipcMain.handle(IPC_CHANNELS.mailHandlingDraft, (event, raw) => {
+    trust(event);
+    const c = profileSession.requireActiveContext();
+    new MailHandlingRepository(c.database, c.profile.id).saveDraft(
+      handlingSaveSchema.parse(raw),
+    );
+  });
   ipcMain.handle(IPC_CHANNELS.mailHandlingGet, (event, raw) => {
     trust(event);
     const c = profileSession.requireActiveContext();
@@ -651,6 +658,7 @@ export const registerAccountHandlers = ({
       IPC_CHANNELS.organizationProposalGet,
       IPC_CHANNELS.mailHandlingGet,
       IPC_CHANNELS.mailHandlingSave,
+      IPC_CHANNELS.mailHandlingDraft,
       IPC_CHANNELS.mailHandlingPreview,
       IPC_CHANNELS.organizationProposalGenerate,
       IPC_CHANNELS.organizationProposalEdit,
