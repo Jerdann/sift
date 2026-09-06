@@ -1,6 +1,15 @@
 import type BetterSqlite3 from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
-import { CATEGORY_PRESENTATION } from "../../core/classification/mail-classifier";
+import {
+  CATEGORY_PRESENTATION,
+  CLASSIFIER_VERSION,
+} from "../../core/classification/mail-classifier";
+import { MailHandlingRepository } from "../settings/mail-handling-repository";
+import {
+  handlingTarget,
+  handlingFor,
+  handlingEligible,
+} from "../../core/classification/mail-handling";
 import type { AccountProvider } from "../../shared/contracts/accounts";
 import type { MailCategory } from "../../shared/contracts/analysis";
 import {
@@ -108,11 +117,16 @@ export class OrganizationProposalRepository {
       identities.map((identity) => [identity.normalized_address, identity]),
     );
     const aggregates = new Map<string, Aggregate>();
+    const handling = new MailHandlingRepository(
+      this.#database,
+      this.#profileId,
+    );
     for (const row of rows) {
       const matched = safeStrings(row.receiving_addresses_json).filter(
         (address) => owned.has(address),
       );
-      const scopes: Array<string | null> = matched.length ? matched : [null];
+      const scopes: Array<string | null> =
+        new Set(matched).size === 1 ? [matched[0]!] : [null];
       for (const address of scopes) {
         const identity = address ? owned.get(address) : undefined;
         const containerName = identity?.container_enabled
@@ -123,9 +137,11 @@ export class OrganizationProposalRepository {
           scopeAddress: address,
           containerName,
           category: row.category,
-          targetPath: containerName
-            ? `${containerName}/${CATEGORY_PRESENTATION[row.category].folder}`
-            : CATEGORY_PRESENTATION[row.category].folder,
+          targetPath: handlingTarget(
+            handling.resolve(provider, connectionId, address),
+            row.category,
+            containerName,
+          ),
           messageCount: 0,
           latestAt: null,
           confidenceTotal: 0,
@@ -164,7 +180,13 @@ export class OrganizationProposalRepository {
           confidence: aggregate.confidenceTotal / aggregate.messageCount,
           evidence: [...aggregate.evidence].sort().slice(0, 12),
           samples: [...aggregate.samples],
-          enabled: true,
+          enabled:
+            Boolean(aggregate.scopeAddress) &&
+            handlingEligible(
+              handling.resolve(provider, connectionId, aggregate.scopeAddress),
+              aggregate.category,
+              aggregate.confidenceTotal / aggregate.messageCount,
+            ),
           sourceCategory: aggregate.category,
           sourceFingerprint,
         };
@@ -175,6 +197,35 @@ export class OrganizationProposalRepository {
           right.messageCount - left.messageCount ||
           left.category.localeCompare(right.category),
       );
+    // Preserve deliberate corrections, not the prior classifier's guesses.
+    const priorEdits = this.#database
+      .prepare(
+        `SELECT i.scope_address,i.source_category,i.category,i.target_path,i.enabled FROM organization_proposal_items i JOIN organization_proposals p ON p.id=i.proposal_id WHERE p.profile_id=? AND p.provider=? AND p.connection_id=? AND p.classifier_version=? AND EXISTS(SELECT 1 FROM organization_corrections c WHERE c.item_id=i.id) ORDER BY p.rowid DESC`,
+      )
+      .all(
+        this.#profileId,
+        provider,
+        connectionId,
+        CLASSIFIER_VERSION,
+      ) as Array<{
+      scope_address: string | null;
+      source_category: MailCategory;
+      category: MailCategory;
+      target_path: string;
+      enabled: number;
+    }>;
+    for (const item of items) {
+      const prior = priorEdits.find(
+        (row) =>
+          row.scope_address === item.scopeAddress &&
+          row.source_category === item.sourceCategory,
+      );
+      if (prior) {
+        item.category = prior.category;
+        item.targetPath = prior.target_path;
+        item.enabled = Boolean(prior.enabled);
+      }
+    }
     const revision = revisionFor(items);
     const proposalId = this.#createId();
     const now = this.#now();
@@ -209,7 +260,7 @@ export class OrganizationProposalRepository {
           item.containerName,
           item.category,
           item.targetPath,
-          1,
+          item.enabled ? 1 : 0,
           item.messageCount,
           item.latestAt,
           item.confidence,
@@ -220,6 +271,15 @@ export class OrganizationProposalRepository {
           item.sourceCategory,
         );
     })();
+    this.#database
+      .prepare(
+        "UPDATE organization_proposals SET classifier_version=?,handling_revision=? WHERE id=?",
+      )
+      .run(
+        CLASSIFIER_VERSION,
+        handling.revision(provider, connectionId),
+        proposalId,
+      );
     return this.get(provider, connectionId)!;
   }
 
@@ -233,8 +293,7 @@ export class OrganizationProposalRepository {
         `SELECT * FROM organization_proposals WHERE profile_id=? AND provider=? AND connection_id=? ORDER BY updated_at DESC,rowid DESC LIMIT 1`,
       )
       .get(this.#profileId, provider, connectionId) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     if (!proposal) return null;
     const items = this.#database
       .prepare(
@@ -249,6 +308,13 @@ export class OrganizationProposalRepository {
       state: proposal.state,
       createdAt: proposal.created_at,
       updatedAt: proposal.updated_at,
+      requiresRebuild:
+        proposal.classifier_version !== CLASSIFIER_VERSION ||
+        proposal.handling_revision !==
+          new MailHandlingRepository(this.#database, this.#profileId).revision(
+            provider,
+            connectionId,
+          ),
       items: items.map((item) => ({
         id: item.id,
         scopeAddress: item.scope_address,
@@ -272,8 +338,7 @@ export class OrganizationProposalRepository {
         "SELECT * FROM organization_proposals WHERE id=? AND profile_id=?",
       )
       .get(input.proposalId, this.#profileId) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     if (
       !proposal ||
       proposal.state !== "draft" ||
@@ -285,8 +350,7 @@ export class OrganizationProposalRepository {
         "SELECT * FROM organization_proposal_items WHERE id=? AND proposal_id=?",
       )
       .get(input.itemId, input.proposalId) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     if (!item) throw new Error("organization_proposal_item_not_found");
     const now = this.#now();
     this.#database.transaction(() => {

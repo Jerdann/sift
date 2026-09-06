@@ -1,4 +1,6 @@
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
+import { FolderSetup } from "../organization/folder-setup";
+import { createProtonMutationClient } from "../proton/proton-mutation-client";
 import { z } from "zod";
 import {
   accountIdentityListInputSchema,
@@ -21,6 +23,7 @@ import {
   editOrganizationProposalSchema,
   organizationProposalSchema,
   organizationProposalScopeSchema,
+  createOrganizationFoldersSchema,
 } from "../../shared/contracts/organization";
 import {
   approveRulePlanSchema,
@@ -45,6 +48,16 @@ import {
   spamReviewScopeSchema,
 } from "../../shared/contracts/spam-review";
 import { SpamReviewRepository } from "../spam/spam-review-repository";
+import { MailHandlingRepository } from "../settings/mail-handling-repository";
+import { analyzeMailbox } from "../analysis/mailbox-analysis-service";
+import { GmailAnalysisService } from "../gmail/gmail-analysis-service";
+import { OutlookAnalysisService } from "../outlook/outlook-analysis-service";
+import { previewMailHandling } from "../settings/mail-handling-preview";
+import {
+  handlingScopeSchema,
+  handlingSaveSchema,
+  handlingPreviewInputSchema,
+} from "../../shared/contracts/mail-handling";
 
 export const registerAccountHandlers = ({
   ipcMain,
@@ -59,6 +72,29 @@ export const registerAccountHandlers = ({
 }): (() => void) => {
   const trust = (event: IpcMainInvokeEvent) =>
     assertTrustedIpcSender(event.senderFrame?.url, developmentServerUrl);
+  ipcMain.handle(IPC_CHANNELS.mailHandlingGet, (event, raw) => {
+    trust(event);
+    const c = profileSession.requireActiveContext();
+    return new MailHandlingRepository(c.database, c.profile.id).get(
+      handlingScopeSchema.parse(raw),
+    );
+  });
+  ipcMain.handle(IPC_CHANNELS.mailHandlingSave, (event, raw) => {
+    trust(event);
+    const c = profileSession.requireActiveContext();
+    return new MailHandlingRepository(c.database, c.profile.id).save(
+      handlingSaveSchema.parse(raw),
+    );
+  });
+  ipcMain.handle(IPC_CHANNELS.mailHandlingPreview, (event, raw) => {
+    trust(event);
+    const c = profileSession.requireActiveContext();
+    return previewMailHandling(
+      c.database,
+      c.profile.id,
+      handlingPreviewInputSchema.parse(raw),
+    );
+  });
   const repositories = () => {
     const context = profileSession.requireActiveContext();
     const vault = profileSession.requireSecretVault();
@@ -101,6 +137,55 @@ export const registerAccountHandlers = ({
     };
   };
 
+  ipcMain.handle(IPC_CHANNELS.organizationFoldersGet, (event, raw) => {
+    trust(event);
+    const c = profileSession.requireActiveContext();
+    return new FolderSetup(c.database, c.profile.id).get(
+      createOrganizationFoldersSchema.parse(raw),
+    );
+  });
+  ipcMain.handle(IPC_CHANNELS.organizationFoldersCreate, (event, raw) => {
+    trust(event);
+    const input = createOrganizationFoldersSchema.parse(raw),
+      current = repositories();
+    return new FolderSetup(
+      current.context.database,
+      current.context.profile.id,
+    ).start(input, async () => {
+      if (input.provider === "proton") {
+        const credentials = current.proton.getCredentials(input.connectionId);
+        if (!credentials) throw new Error("proton_not_connected");
+        const client = await createProtonMutationClient(credentials);
+        try {
+          await client.connect();
+        } catch (error) {
+          await client.close().catch(() => undefined);
+          throw error;
+        }
+        return {
+          ensure: async (path: string) => {
+            await client.prepareTarget(path, false);
+          },
+          close: () => client.close(),
+        };
+      }
+      const ensure =
+        input.provider === "gmail"
+          ? await new GmailRuleReconciliationRunner(
+              current.gmail,
+              current.rules,
+              current.jobs,
+              fetchPort,
+            ).folderPreparer(input.connectionId)
+          : await new OutlookRuleReconciliationRunner(
+              current.outlook,
+              current.rules,
+              current.jobs,
+              fetchPort,
+            ).folderPreparer(input.connectionId);
+      return { ensure, close: async () => {} };
+    });
+  });
   ipcMain.handle(IPC_CHANNELS.accountsList, (event) => {
     trust(event);
     const current = repositories();
@@ -325,8 +410,29 @@ export const registerAccountHandlers = ({
     (event, rawInput: unknown) => {
       trust(event);
       const input = organizationProposalScopeSchema.parse(rawInput);
+      const current = repositories();
+      const { database, profile } = current.context;
+      if (
+        database
+          .prepare(
+            "SELECT 1 FROM jobs WHERE profile_id=? AND state IN ('pending','running') LIMIT 1",
+          )
+          .get(profile.id)
+      )
+        throw new Error("mail_job_running");
+      if (input.provider === "proton")
+        analyzeMailbox(database, profile.id, input.connectionId);
+      else if (input.provider === "gmail") {
+        const connection = current.gmail.getById(input.connectionId);
+        if (!connection) throw new Error("account_not_found");
+        new GmailAnalysisService(database, profile.id).analyze(connection);
+      } else {
+        const connection = current.outlook.getById(input.connectionId);
+        if (!connection) throw new Error("account_not_found");
+        new OutlookAnalysisService(database, profile.id).analyze(connection);
+      }
       return organizationProposalSchema.parse(
-        repositories().proposals.generate(input.provider, input.connectionId),
+        current.proposals.generate(input.provider, input.connectionId),
       );
     },
   );
@@ -362,10 +468,7 @@ export const registerAccountHandlers = ({
       trust(event);
       const input = spamReviewScopeSchema.parse(rawInput);
       return spamReviewSchema.parse(
-        repositories().spamReviews.generate(
-          input.provider,
-          input.connectionId,
-        ),
+        repositories().spamReviews.generate(input.provider, input.connectionId),
       );
     },
   );
@@ -546,6 +649,9 @@ export const registerAccountHandlers = ({
       IPC_CHANNELS.identitiesRefresh,
       IPC_CHANNELS.identitiesUpdate,
       IPC_CHANNELS.organizationProposalGet,
+      IPC_CHANNELS.mailHandlingGet,
+      IPC_CHANNELS.mailHandlingSave,
+      IPC_CHANNELS.mailHandlingPreview,
       IPC_CHANNELS.organizationProposalGenerate,
       IPC_CHANNELS.organizationProposalEdit,
       IPC_CHANNELS.spamReviewGet,
@@ -553,6 +659,8 @@ export const registerAccountHandlers = ({
       IPC_CHANNELS.spamReviewComplete,
       IPC_CHANNELS.ruleInventoryGet,
       IPC_CHANNELS.ruleInventoryRefresh,
+      IPC_CHANNELS.organizationFoldersGet,
+      IPC_CHANNELS.organizationFoldersCreate,
       IPC_CHANNELS.rulePlanGet,
       IPC_CHANNELS.rulePlanGenerate,
       IPC_CHANNELS.rulePlanApprove,

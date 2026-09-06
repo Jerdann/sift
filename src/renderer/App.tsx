@@ -22,6 +22,9 @@ import {
   X,
 } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
+import { MailHandlingPanel } from "./MailHandlingPanel";
+import { FolderSetupPanel } from "./FolderSetupPanel";
+import { CATEGORY_PRESENTATION } from "../core/classification/mail-classifier";
 import type { ProfileSummary } from "../shared/contracts/profiles";
 import type {
   BridgeConnectResult,
@@ -41,7 +44,6 @@ import type {
   UnsubscribeProgress,
 } from "../shared/contracts/unsubscribe";
 import { unsubscribeAllowsDelete } from "../core/unsubscribe/unsubscribe-readiness";
-import { buildPortableRulePack } from "../core/rules/rule-pack";
 import { providerHasDestinations } from "../core/rules/folder-readiness";
 import type {
   GmailAuditSummary,
@@ -85,39 +87,15 @@ import type {
 
 type SpamApplicationPlan = CleanupPlan | GmailOrganizationPlan;
 
-const mailCategoryOptions: MailCategory[] = [
-  "personal",
-  "security",
-  "accounts",
-  "transactions",
-  "finance",
-  "shopping",
-  "travel",
-  "games",
-  "subscriptions",
-  "promotions",
-  "social",
-  "suspicious",
-  "spam",
-  "other",
-];
-
-const mailCategoryLabels: Record<MailCategory, string> = {
-  personal: "Personal",
-  security: "Security",
-  accounts: "Accounts",
-  transactions: "Transactions",
-  finance: "Finance",
-  shopping: "Shopping",
-  travel: "Travel",
-  games: "Games",
-  subscriptions: "Subscriptions",
-  promotions: "Promotions",
-  social: "Social",
-  suspicious: "Suspicious review",
-  spam: "Spam",
-  other: "Unsorted review",
-};
+const mailCategoryOptions = Object.keys(
+  CATEGORY_PRESENTATION,
+) as MailCategory[];
+const mailCategoryLabels = Object.fromEntries(
+  mailCategoryOptions.map((category) => [
+    category,
+    CATEGORY_PRESENTATION[category].label,
+  ]),
+) as Record<MailCategory, string>;
 
 type PageId =
   | "overview"
@@ -220,14 +198,23 @@ const SettingsPanel = ({
       <div className="page-heading task-heading settings-heading">
         <h1>Settings</h1>
         <p>
-          <strong>Goal:</strong> Control software updates and understand what Sift stores on this computer.
+          <strong>Goal:</strong> Control software updates and understand what
+          Sift stores on this computer.
         </p>
         <div className="page-method" role="note">
           <strong>How this page works</strong>
           <ul>
-            <li>The automatic-update setting applies to every local profile.</li>
-            <li>Privacy information lists what is stored, why it is stored, and how to remove it.</li>
-            <li>Each profile keeps its own email connections, scan data, plans, and action history.</li>
+            <li>
+              The automatic-update setting applies to every local profile.
+            </li>
+            <li>
+              Privacy information lists what is stored, why it is stored, and
+              how to remove it.
+            </li>
+            <li>
+              Each profile keeps its own email connections, scan data, plans,
+              and action history.
+            </li>
           </ul>
         </div>
       </div>
@@ -251,7 +238,8 @@ const SettingsPanel = ({
             <strong>Download updates automatically</strong>
             <small>
               When enabled, installed Windows builds check Sift’s public GitHub
-              releases page hourly and download newer versions in the background.
+              releases page hourly and download newer versions in the
+              background.
             </small>
           </span>
           <label className="settings-switch">
@@ -273,7 +261,8 @@ const SettingsPanel = ({
           <span>
             <strong>Check for a new version now</strong>
             <small>
-              This performs one update check even when automatic updates are off.
+              This performs one update check even when automatic updates are
+              off.
             </small>
           </span>
           <button
@@ -365,8 +354,8 @@ const SettingsPanel = ({
             <p role="cell">
               Sender and recipient addresses, dates, subjects, selected message
               headers, message IDs, and folder or label information. Proton
-              message text is stored only when you enable that option. Gmail
-              and Outlook scans do not save message text.
+              message text is stored only when you enable that option. Gmail and
+              Outlook scans do not save message text.
             </p>
             <p role="cell">
               Disconnect an account to remove its saved scan, or use Recovery →
@@ -396,15 +385,16 @@ const SettingsPanel = ({
               <strong>Saved work and Undo records</strong>
             </span>
             <p role="cell">
-              Confirmed email addresses, folder plans, records of filters created
-              by Sift, unsubscribe results, unfinished work, and Undo records remain
-              in the local profile so interrupted work can resume.
+              Confirmed email addresses, folder plans, records of filters
+              created by Sift, unsubscribe results, unfinished work, and Undo
+              records remain in the local profile so interrupted work can
+              resume.
             </p>
             <p role="cell">
-              Delete saved scan clears folder choices and unfinished work but preserves
-              records of filters created by Sift and completed unsubscribe
-              requests. Removing the local profile files removes the remaining
-              local records.
+              Delete saved scan clears folder choices and unfinished work but
+              preserves records of filters created by Sift and completed
+              unsubscribe requests. Removing the local profile files removes the
+              remaining local records.
             </p>
           </div>
           <div role="row">
@@ -548,7 +538,8 @@ const ProfilePicker = ({
         <h1 id="product-name">Organize email accounts on this computer.</h1>
         <p className="profile-intro">
           Connect an email account, scan it, review every suggested change, and
-          approve which messages, folders, filters, and subscriptions Sift changes.
+          approve which messages, folders, filters, and subscriptions Sift
+          changes.
         </p>
 
         <div className="trust-line" aria-label="Local privacy protections">
@@ -565,7 +556,10 @@ const ProfilePicker = ({
         <div className="picker-heading">
           <div>
             <h2>Local profiles</h2>
-              <p>Each profile has separate email connections, scans, and saved choices.</p>
+            <p>
+              Each profile has separate email connections, scans, and saved
+              choices.
+            </p>
           </div>
           <span className="count-label">
             {profiles.length} {profiles.length === 1 ? "PROFILE" : "PROFILES"}
@@ -629,7 +623,8 @@ const ProfilePicker = ({
                 <div>
                   <Dialog.Title>Create local profile</Dialog.Title>
                   <Dialog.Description id="profile-help">
-                    This stores the profile separately from other profiles on this computer.
+                    This stores the profile separately from other profiles on
+                    this computer.
                   </Dialog.Description>
                 </div>
                 <Dialog.Close className="icon-button" aria-label="Close dialog">
@@ -717,9 +712,18 @@ interface AppShellProps {
     review: SpamReview,
     decisions: Array<{ candidateId: string; decision: SpamReviewDecision }>,
   ): Promise<void>;
-  onApplySpam(account: MailAccountSummary, plan: SpamApplicationPlan): Promise<void>;
-  onRetrySpam(account: MailAccountSummary, plan: SpamApplicationPlan): Promise<void>;
-  onUndoSpam(account: MailAccountSummary, plan: SpamApplicationPlan): Promise<void>;
+  onApplySpam(
+    account: MailAccountSummary,
+    plan: SpamApplicationPlan,
+  ): Promise<void>;
+  onRetrySpam(
+    account: MailAccountSummary,
+    plan: SpamApplicationPlan,
+  ): Promise<void>;
+  onUndoSpam(
+    account: MailAccountSummary,
+    plan: SpamApplicationPlan,
+  ): Promise<void>;
   ruleInventories: Record<string, RuleInventory | null>;
   rulePlans: Record<string, RuleReconciliationPlan | null>;
   onRefreshRuleInventory(account: MailAccountSummary): Promise<void>;
@@ -760,7 +764,10 @@ interface AppShellProps {
   onRetryCleanup(planId: string, actionIds: string[]): Promise<void>;
   onUndoCleanup(planId: string): Promise<void>;
   deletionPlan: CleanupPlan | null;
-  onGenerateDeletion(senderDomains: string[]): Promise<void>;
+  onGenerateDeletion(
+    senderDomains: string[],
+    retention?: boolean,
+  ): Promise<void>;
   onApproveDeletion(planId: string, revision: string): Promise<void>;
   onResumeDeletion(planId: string, revision: string): Promise<void>;
   onRetryDeletion(planId: string, actionIds: string[]): Promise<void>;
@@ -783,7 +790,10 @@ interface AppShellProps {
   onRetryGmailOrganization(planId: string, batchIds: string[]): Promise<void>;
   onUndoGmailOrganization(planId: string): Promise<void>;
   gmailDeletion: GmailOrganizationPlan | null;
-  onGenerateGmailDeletion(senderDomains: string[]): Promise<void>;
+  onGenerateGmailDeletion(
+    senderDomains: string[],
+    retention?: boolean,
+  ): Promise<void>;
   gmailSubscriptions: SubscriptionDashboard | null;
   onScanGmailSubscriptions(): Promise<void>;
   onStartGmailUnsubscribe(candidateIds: string[]): Promise<void>;
@@ -802,7 +812,10 @@ interface AppShellProps {
   outlookOrganization: GmailOrganizationPlan | null;
   outlookDeletion: GmailOrganizationPlan | null;
   onGenerateOutlookOrganization(): Promise<void>;
-  onGenerateOutlookDeletion(domains: string[]): Promise<void>;
+  onGenerateOutlookDeletion(
+    domains: string[],
+    retention?: boolean,
+  ): Promise<void>;
   onApproveOutlookOrganization(planId: string, revision: string): Promise<void>;
   onRetryOutlookOrganization(
     planId: string,
@@ -906,7 +919,9 @@ const ProtonConnectionPanel = ({
       await onDisconnect(connection.id);
       setDiagnostic(null);
     } catch {
-      setError("The saved Proton Bridge sign-in information could not be removed. Try again.");
+      setError(
+        "The saved Proton Bridge sign-in information could not be removed. Try again.",
+      );
     } finally {
       setBusy(null);
     }
@@ -935,9 +950,7 @@ const ProtonConnectionPanel = ({
       >
         <div className="panel-header">
           <div>
-            <p className="eyebrow">
-              PROTON BRIDGE
-            </p>
+            <p className="eyebrow">PROTON BRIDGE</p>
             <h2 id="proton-title">
               {mode === "audit"
                 ? "Scan Proton folders and messages"
@@ -956,7 +969,8 @@ const ProtonConnectionPanel = ({
             <strong>{connection.username}</strong>
             <small>
               {connection.host}:{connection.port} ·{" "}
-              {connection.security.toUpperCase()} · Ready to scan all Proton addresses
+              {connection.security.toUpperCase()} · Ready to scan all Proton
+              addresses
             </small>
           </span>
           <b>{connection.state === "connected" ? "READY" : "ATTENTION"}</b>
@@ -1013,8 +1027,8 @@ const ProtonConnectionPanel = ({
               <div>
                 <strong>Proton folders found</strong>
                 <small>
-                  {new Date(discovery.discoveredAt).toLocaleString()} · no
-                  email changed
+                  {new Date(discovery.discoveredAt).toLocaleString()} · no email
+                  changed
                 </small>
               </div>
             </div>
@@ -1045,9 +1059,7 @@ const ProtonConnectionPanel = ({
                     ))}
                   </ul>
                 ) : (
-                  <p>
-                    No addresses were found in the scanned message headers.
-                  </p>
+                  <p>No addresses were found in the scanned message headers.</p>
                 )}
               </div>
               <div>
@@ -1071,8 +1083,9 @@ const ProtonConnectionPanel = ({
             </p>
             <p className="scope-footnote">
               These addresses come from message headers, not Proton's account
-              settings. Forwarders, mailing lists, old aliases, To, and Cc fields
-              can appear here. Sift does not treat them as addresses you own.
+              settings. Forwarders, mailing lists, old aliases, To, and Cc
+              fields can appear here. Sift does not treat them as addresses you
+              own.
             </p>
             <p className="scope-footnote">
               Proton Bridge does not show filters created in Proton Mail. Sift
@@ -1180,9 +1193,7 @@ const ProtonConnectionPanel = ({
           {diagnostic.ok ? <Check size={16} /> : <CircleDot size={16} />}
           <span>
             <strong>
-              {diagnostic.ok
-                ? "Connection works"
-                : "Connection failed"}
+              {diagnostic.ok ? "Connection works" : "Connection failed"}
             </strong>
             <small>{diagnostic.message}</small>
           </span>
@@ -1337,14 +1348,16 @@ const ProtonAuditPanel = ({
                   {folder.messageEstimate.toLocaleString()}
                 </small>
                 <b>
-                  {{
-                    pending: "WAITING",
-                    running: "SCANNING",
-                    succeeded: "COMPLETE",
-                    failed: "FAILED",
-                    skipped: "SKIPPED",
-                    verification_mismatch: "NEEDS ANOTHER SCAN",
-                  }[folder.state]}
+                  {
+                    {
+                      pending: "WAITING",
+                      running: "SCANNING",
+                      succeeded: "COMPLETE",
+                      failed: "FAILED",
+                      skipped: "SKIPPED",
+                      verification_mismatch: "NEEDS ANOTHER SCAN",
+                    }[folder.state]
+                  }
                 </b>
               </div>
             ))}
@@ -1353,9 +1366,9 @@ const ProtonAuditPanel = ({
       ) : (
         <div className="audit-consent">
           <p>
-            The scan stores message headers, dates, senders, recipients, folders,
-            and message IDs on this computer. It never marks email read, moves
-            messages, or downloads attachments.
+            The scan stores message headers, dates, senders, recipients,
+            folders, and message IDs on this computer. It never marks email
+            read, moves messages, or downloads attachments.
           </p>
           <label>
             <input
@@ -1431,7 +1444,6 @@ const AnalysisPanel = ({
 }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [exportStatus, setExportStatus] = useState("");
   const recommendationLabels: Record<
     MailboxAnalysisSummary["addresses"][number]["recommendation"],
     string
@@ -1442,7 +1454,6 @@ const AnalysisPanel = ({
     consider_deactivation: "CONSIDER CLOSING",
   };
   if (!audit?.indexedMessages) return null;
-  const rulePack = analysis ? buildPortableRulePack(analysis) : null;
   const analyze = async () => {
     setBusy(true);
     setError("");
@@ -1463,9 +1474,7 @@ const AnalysisPanel = ({
     >
       <div className="panel-header">
         <div>
-          <p className="eyebrow">
-            {provider.toUpperCase()} FOLDER SUGGESTIONS
-          </p>
+          <p className="eyebrow">{provider.toUpperCase()} FOLDER SUGGESTIONS</p>
           <h2 id={`${provider}-analysis-title`}>
             Suggested folders and categories
           </h2>
@@ -1477,8 +1486,8 @@ const AnalysisPanel = ({
       {!analysis ? (
         <div className="analysis-empty">
           <p>
-            Sort the scanned messages into categories by receiving address.
-            This does not change any messages or folders.
+            Sort the scanned messages into categories by receiving address. This
+            does not change any messages or folders.
           </p>
           <button
             className="primary-button compact"
@@ -1486,7 +1495,9 @@ const AnalysisPanel = ({
             disabled={busy}
             onClick={() => void analyze()}
           >
-            {busy ? "Sorting messages into categories…" : "Suggest folders and categories"}
+            {busy
+              ? "Sorting messages into categories…"
+              : "Suggest folders and categories"}
           </button>
           {error ? (
             <p className="field-error" role="alert">
@@ -1499,7 +1510,8 @@ const AnalysisPanel = ({
           <div className="analysis-summary-line">
             <span>
               <strong>
-                {analysis.uniqueMessages.toLocaleString()} messages sorted into categories
+                {analysis.uniqueMessages.toLocaleString()} messages sorted into
+                categories
               </strong>
               <small>
                 {analysis.categories.length} categories ·{" "}
@@ -1578,91 +1590,22 @@ const AnalysisPanel = ({
               ) : (
                 <p className="analysis-empty-note">
                   No address has been confirmed as yours. Sift needs to find the
-                  address in the From field of a message in Proton's Sent folder.
+                  address in the From field of a message in Proton's Sent
+                  folder.
                 </p>
               )}
             </div>
           </div>
-          {rulePack ? (
-            <div className="rule-pack-panel">
-              <div>
-                <span>
-                  <strong>
-                    {rulePack.rules.length} suggested filters
-                  </strong>
-                  <small>
-                      {rulePack.skippedAmbiguousStreams} senders excluded because
-                    their messages do not have one clear category
-                  </small>
-                </span>
-                <div>
-                  {provider === "proton" ? (
-                    <button
-                      className="secondary-button"
-                      type="button"
-                      onClick={() =>
-                        void window.emailOrganizer
-                          .exportRulePack({
-                            format: "proton-sieve",
-                            source: provider,
-                          })
-                          .then((result) =>
-                            setExportStatus(
-                              result.canceled
-                                ? ""
-                                : `Saved ${result.ruleCount} Proton rules to ${result.path}`,
-                            ),
-                          )
-                          .catch(() =>
-                            setExportStatus(
-                              "Rule export failed; your mailbox was not changed.",
-                            ),
-                          )
-                      }
-                    >
-                      Save Proton filter file
-                    </button>
-                  ) : null}
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() =>
-                      void window.emailOrganizer
-                        .exportRulePack({
-                          format: "portable-json",
-                          source: provider,
-                        })
-                        .then((result) =>
-                          setExportStatus(
-                            result.canceled
-                              ? ""
-                                : `Saved filters as JSON to ${result.path}`,
-                          ),
-                        )
-                        .catch(() =>
-                          setExportStatus(
-                            "The filter file could not be saved. Your email was not changed.",
-                          ),
-                        )
-                    }
-                  >
-                    Save filters as JSON
-                  </button>
-                </div>
-              </div>
-              {exportStatus ? <p>{exportStatus}</p> : null}
-              <small>
-                Each filter matches a sender domain and receiving address.
-                Personal, suspicious, uncertain, and mixed-category senders are
-                excluded. Security alerts are never marked read.
-              </small>
-            </div>
-          ) : null}
           <p className="analysis-disclosure">
-            Sift lists an address as yours only when the email service identifies
-            it as an alias or Sift finds it in the From field of a message in
-            Sent. Recipients, forwarded addresses, and copied addresses are not
-            treated as yours.
+            Create and review message-specific filters in Rules after choosing
+            your folders and handling settings. This scan does not create
+            filters.
+          </p>
+          <p className="analysis-disclosure">
+            Sift lists an address as yours only when the email service
+            identifies it as an alias or Sift finds it in the From field of a
+            message in Sent. Recipients, forwarded addresses, and copied
+            addresses are not treated as yours.
           </p>
         </div>
       )}
@@ -1787,8 +1730,10 @@ const ProtonOrganizationFlow = ({
             <div>
               <h3>Choose one folder option</h3>
               <p>
-                Sift found {customFolders.length} custom folders and {customLabels.length} labels.
-                The next screen lists every folder, label, message move, and deletion before anything changes.
+                Sift found {customFolders.length} custom folders and{" "}
+                {customLabels.length} labels. The next screen lists every
+                folder, label, message move, and deletion before anything
+                changes.
               </p>
             </div>
           </div>
@@ -1800,7 +1745,10 @@ const ProtonOrganizationFlow = ({
             >
               <span>OPTION 1</span>
               <strong>Create new folders</strong>
-              <small>Keep your existing folders and labels. Create the new folders in this list and move matching mail into them.</small>
+              <small>
+                Keep your existing folders and labels. Create the new folders in
+                this list and move matching mail into them.
+              </small>
             </button>
             <button
               type="button"
@@ -1809,7 +1757,10 @@ const ProtonOrganizationFlow = ({
             >
               <span>OPTION 2</span>
               <strong>Use existing folders</strong>
-              <small>Move matching mail into existing folders. Create a folder only when no existing folder matches the new folder list.</small>
+              <small>
+                Move matching mail into existing folders. Create a folder only
+                when no existing folder matches the new folder list.
+              </small>
             </button>
             <button
               type="button"
@@ -1818,28 +1769,49 @@ const ProtonOrganizationFlow = ({
             >
               <span>OPTION 3</span>
               <strong>Replace existing folders</strong>
-              <small>Move matching mail into the new folders. Then remove old labels and delete old custom folders after they are empty.</small>
+              <small>
+                Move matching mail into the new folders. Then remove old labels
+                and delete old custom folders after they are empty.
+              </small>
             </button>
           </div>
           <div className="organization-reset-plan">
             <div>
               <span>Existing folders and labels</span>
-              <strong>{customFolders.length} folders · {customLabels.length} labels</strong>
-              <small>{populatedLegacyContainers} contain messages. Sift never deletes Proton system folders.</small>
+              <strong>
+                {customFolders.length} folders · {customLabels.length} labels
+              </strong>
+              <small>
+                {populatedLegacyContainers} contain messages. Sift never deletes
+                Proton system folders.
+              </small>
             </div>
             <ol>
               <li>Review every folder Sift will create or use.</li>
               <li>Review the separate folder for each split alias.</li>
-              <li>Approve which existing messages will move and be marked read.</li>
-              <li>{transitionMode === "replace" ? "After moving the messages, remove old labels and delete only old custom folders that are empty." : "Keep every existing folder and label."}</li>
+              <li>
+                Approve which existing messages will move and whether their read
+                status changes.
+              </li>
+              <li>
+                {transitionMode === "replace"
+                  ? "After moving the messages, remove old labels and delete only old custom folders that are empty."
+                  : "Keep every existing folder and label."}
+              </li>
             </ol>
           </div>
         </div>
 
         <div className="organization-flow-actions">
           <span>
-            <strong>{Object.keys(containers).length} alias{Object.keys(containers).length === 1 ? " has" : "es have"} a separate folder</strong>
-            <small>Mail sent to each selected alias will move into its own folder.</small>
+            <strong>
+              {Object.keys(containers).length} alias
+              {Object.keys(containers).length === 1 ? " has" : "es have"} a
+              separate folder
+            </strong>
+            <small>
+              Mail sent to each selected alias will move into its own folder.
+            </small>
           </span>
           <button
             className="primary-button compact"
@@ -1847,10 +1819,18 @@ const ProtonOrganizationFlow = ({
             disabled={busy}
             onClick={() => void buildReview()}
           >
-            {busy ? "Preparing folder and message changes…" : reviewStarted ? "Refresh folder and message changes" : "Review folder and message changes"}
+            {busy
+              ? "Preparing folder and message changes…"
+              : reviewStarted
+                ? "Refresh folder and message changes"
+                : "Review folder and message changes"}
           </button>
         </div>
-        {error ? <p className="connection-error" role="alert">{error}</p> : null}
+        {error ? (
+          <p className="connection-error" role="alert">
+            {error}
+          </p>
+        ) : null}
       </section>
       {reviewStarted ? (
         <CleanupPanel
@@ -1867,9 +1847,16 @@ const ProtonOrganizationFlow = ({
         <div className="organization-next-step">
           <div>
             <strong>Existing messages have been filed.</strong>
-            <small>The approved folders now exist. Decide which sender streams are spam before creating normal filters.</small>
+            <small>
+              The approved folders now exist. Decide which sender streams are
+              spam before creating normal filters.
+            </small>
           </div>
-          <button className="primary-button compact" type="button" onClick={onContinue}>
+          <button
+            className="primary-button compact"
+            type="button"
+            onClick={onContinue}
+          >
             Continue to Spam
           </button>
         </div>
@@ -1914,25 +1901,32 @@ const CleanupPanel = ({
         message.includes("cleanup_plan_virtual_source_rebuild_required")
           ? "This list came from an older scan that treated Proton All Mail as a folder that could be moved. Scan Proton again and review a new list. The 19 completed changes remain recorded."
           : message.includes("proton_target_rejected")
-          ? "Proton rejected a folder in this list. No messages moved. Check the folder names and nesting, then review the changes again."
-          : message.includes("proton_bridge_unavailable")
-            ? "Sift lost its Proton Bridge connection and stopped. Reopen Bridge, then resume from the saved progress."
-            : "The message changes stopped. Completed changes remain saved. Retry the failed changes.",
+            ? "Proton rejected a folder in this list. No messages moved. Check the folder names and nesting, then review the changes again."
+            : message.includes("proton_bridge_unavailable")
+              ? "Sift lost its Proton Bridge connection and stopped. Reopen Bridge, then resume from the saved progress."
+              : "The message changes stopped. Completed changes remain saved. Retry the failed changes.",
       );
     } finally {
       setBusy(false);
     }
   };
   const running = plan?.job?.state === "running";
-  const jobTargetBlocked = plan?.job?.errorCode?.startsWith("proton_target_") ?? false;
-  const resumable = plan?.job?.state === "pending" && plan.state !== "draft" && !jobTargetBlocked && !plan.requiresRebuild;
+  const jobTargetBlocked =
+    plan?.job?.errorCode?.startsWith("proton_target_") ?? false;
+  const resumable =
+    plan?.job?.state === "pending" &&
+    plan.state !== "draft" &&
+    !jobTargetBlocked &&
+    !plan.requiresRebuild;
   const blockedFailures = (plan?.failedActions ?? []).filter((action) =>
     action.errorCode?.startsWith("proton_target_"),
   );
   const retryable = plan?.requiresRebuild
     ? []
-    : (plan?.failedActions ?? []).filter((action) =>
-        action.state === "failed" && !action.errorCode?.startsWith("proton_target_"),
+    : (plan?.failedActions ?? []).filter(
+        (action) =>
+          action.state === "failed" &&
+          !action.errorCode?.startsWith("proton_target_"),
       );
   const changedSourceCount = (plan?.failedActions ?? []).filter(
     (action) => action.state === "verification_mismatch",
@@ -1942,13 +1936,15 @@ const CleanupPanel = ({
   const impactGroups = (() => {
     if (!plan) return [];
     if (trash) {
-      return [{
-        key: "trash",
-        eyebrow: "SELECTED OLD MESSAGES",
-        title: "Proton Trash",
-        detail: "The listed messages will move to Proton Trash.",
-        impacts: plan.impacts,
-      }];
+      return [
+        {
+          key: "trash",
+          eyebrow: "SELECTED OLD MESSAGES",
+          title: "Proton Trash",
+          detail: "The listed messages will move to Proton Trash.",
+          impacts: plan.impacts,
+        },
+      ];
     }
     const groups: Array<{
       key: string;
@@ -1963,12 +1959,15 @@ const CleanupPanel = ({
         key: "shared",
         eyebrow: "SHARED FOLDERS",
         title: "Folders used by unsplit aliases",
-        detail: "Mail for aliases without a separate folder will move into these folders.",
+        detail:
+          "Mail for aliases without a separate folder will move into these folders.",
         impacts: shared,
       });
     }
     const byContainer = new Map<string, CleanupPlan["impacts"]>();
-    for (const impact of plan.impacts.filter((candidate) => candidate.containerName)) {
+    for (const impact of plan.impacts.filter(
+      (candidate) => candidate.containerName,
+    )) {
       const key = `${impact.scopeAddress ?? "unknown"}:${impact.containerName}`;
       byContainer.set(key, [...(byContainer.get(key) ?? []), impact]);
     }
@@ -2008,7 +2007,7 @@ const CleanupPanel = ({
           <p>
             {trash
               ? "List every message that will move to Trash. Security, account, transaction, finance, personal, and suspicious messages will not be included."
-              : "List every folder Sift will create or use and every existing message it will move and mark read. Nothing changes until you approve the list."}
+              : "Review the destinations and read-status changes for existing messages. Nothing changes until you approve the list."}
           </p>
           <button
             className="primary-button compact"
@@ -2060,8 +2059,10 @@ const CleanupPanel = ({
                       <small>{group.detail}</small>
                     </div>
                     <b>
-                      {group.impacts.length.toLocaleString()} {group.impacts.length === 1 ? "folder" : "folders"}
-                      {" · "}{messageCount.toLocaleString()} messages
+                      {group.impacts.length.toLocaleString()}{" "}
+                      {group.impacts.length === 1 ? "folder" : "folders"}
+                      {" · "}
+                      {messageCount.toLocaleString()} messages
                     </b>
                   </header>
                   <div
@@ -2087,7 +2088,7 @@ const CleanupPanel = ({
                             ? "Report / move to Spam"
                             : impact.action === "native_trash"
                               ? "Move to Trash"
-                              : "Mark read · move to folder · remove from Inbox"}
+                              : `${impact.markRead ? "Mark read" : "Keep read status"} · move to folder · remove from Inbox`}
                         </small>
                         <b>{impact.messageCount.toLocaleString()}</b>
                       </div>
@@ -2098,22 +2099,42 @@ const CleanupPanel = ({
             })}
           </div>
           {!trash && plan.existingSetup === "replace" ? (
-            <details className="legacy-retirement-review" open={plan.legacyContainers.length <= 12}>
+            <details
+              className="legacy-retirement-review"
+              open={plan.legacyContainers.length <= 12}
+            >
               <summary>
                 <span>
                   <strong>Old folders and labels to remove</strong>
-                  <small>Sift files the listed messages before removing anything here.</small>
+                  <small>
+                    Sift files the listed messages before removing anything
+                    here.
+                  </small>
                 </span>
-                <b>{plan.legacyContainers.length.toLocaleString()} folders or labels</b>
+                <b>
+                  {plan.legacyContainers.length.toLocaleString()} folders or
+                  labels
+                </b>
               </summary>
               <div>
                 {plan.legacyContainers.map((container) => (
                   <div key={container.id}>
                     <span>
                       <strong>{container.providerPath}</strong>
-                      <small>{container.kind} · {container.observedMessages.toLocaleString()} messages at scan time</small>
+                      <small>
+                        {container.kind} ·{" "}
+                        {container.observedMessages.toLocaleString()} messages
+                        at scan time
+                      </small>
                     </span>
-                    <b className={container.state === "failed" || container.state === "retained_nonempty" ? "stale" : ""}>
+                    <b
+                      className={
+                        container.state === "failed" ||
+                        container.state === "retained_nonempty"
+                          ? "stale"
+                          : ""
+                      }
+                    >
                       {container.state === "pending"
                         ? container.kind === "label"
                           ? "Remove label after moving messages"
@@ -2127,7 +2148,11 @@ const CleanupPanel = ({
                   </div>
                 ))}
               </div>
-              <p>Sift deletes a custom folder only after checking that it is empty. Removing a Proton label does not delete its messages. Proton system folders are never removed.</p>
+              <p>
+                Sift deletes a custom folder only after checking that it is
+                empty. Removing a Proton label does not delete its messages.
+                Proton system folders are never removed.
+              </p>
             </details>
           ) : null}
           {plan.state === "draft" ? (
@@ -2143,14 +2168,18 @@ const CleanupPanel = ({
                   <small>
                     {trash
                       ? "Move only the listed messages to Proton Trash. Security, account, transaction, finance, personal, and suspicious messages are excluded. Nothing is permanently erased."
-                      : `Create or use the folders listed above, then mark read and move only the messages shown.${plan.existingSetup === "replace" ? " After those messages are filed, remove the listed old labels and delete only the listed old folders that are empty." : ""}`}
+                      : `Create or use the folders listed above, then move only the messages shown. Each row states whether read status changes.${plan.existingSetup === "replace" ? " After those messages are filed, remove the listed old labels and delete only the listed old folders that are empty." : ""}`}
                   </small>
                 </span>
               </label>
               <button
                 className="primary-button"
                 type="button"
-                disabled={!approved || busy || (plan.actionCount === 0 && plan.legacyContainers.length === 0)}
+                disabled={
+                  !approved ||
+                  busy ||
+                  (plan.actionCount === 0 && plan.legacyContainers.length === 0)
+                }
                 onClick={() =>
                   void act(() => onApprove(plan.id, plan.revision))
                 }
@@ -2221,9 +2250,9 @@ const CleanupPanel = ({
                 <div className="cleanup-structural-error" role="status">
                   <strong>Messages changed after this list was created</strong>
                   <small>
-                    {changedSourceCount.toLocaleString()} changes no longer match
-                    the scanned messages. Run Scan again and build a new list
-                    instead of retrying them.
+                    {changedSourceCount.toLocaleString()} changes no longer
+                    match the scanned messages. Run Scan again and build a new
+                    list instead of retrying them.
                   </small>
                 </div>
               ) : null}
@@ -2274,7 +2303,7 @@ const CleanupPanel = ({
             No permanent deletion is used.{" "}
             {trash
               ? "The selected messages move to Proton Trash and remain there until Proton automatically removes them."
-              : "Uncertain messages move to Review/Unsorted and are marked read. Personal and suspicious messages remain where they are. Messages already in the correct folder are not moved again."}
+              : "Uncertain, personal, and suspicious messages remain where they are. Messages already in the correct folder are not moved again; their read status changes only if you chose to mark read."}
           </p>
         </div>
       )}
@@ -2298,13 +2327,14 @@ const TrashReviewPanel = ({
 }: {
   analysis: MailboxAnalysisSummary | null;
   plan: CleanupPlan | null;
-  onGenerate(senderDomains: string[]): Promise<void>;
+  onGenerate(senderDomains: string[], retention?: boolean): Promise<void>;
   onApprove(planId: string, revision: string): Promise<void>;
   onResume(planId: string, revision: string): Promise<void>;
   onRetry(planId: string, actionIds: string[]): Promise<void>;
   onUndo(planId: string): Promise<void>;
 }) => {
   const [selected, setSelected] = useState<string[]>([]);
+  const [retention, setRetention] = useState(false);
   if (!analysis) return null;
   const candidates = rankStaleStreams(analysis.topStreams).map((candidate) => ({
     ...candidate,
@@ -2323,9 +2353,23 @@ const TrashReviewPanel = ({
           </span>
         </div>
         <div className="trash-review-copy">
+          <label>
+            <input
+              type="checkbox"
+              checked={retention}
+              onChange={(event) => setRetention(event.target.checked)}
+            />{" "}
+            Use my saved age limits instead of selecting old senders
+          </label>
           <p>
-            This list includes only senders whose newest message is at least six months old.
-            Security, account, transaction, finance, personal, and suspicious messages are excluded.
+            Age limits are set per message type in Organize. This only builds a
+            review; the messages move to Trash after separate approval. When
+            this is selected, sender selections below are ignored.
+          </p>
+          <p>
+            This list includes only senders whose newest message is at least six
+            months old. Security, account, transaction, finance, personal, and
+            suspicious messages are excluded.
           </p>
           <span>
             <b>
@@ -2372,7 +2416,8 @@ const TrashReviewPanel = ({
         </div>
         {!candidates.length ? (
           <p className="analysis-empty-note">
-            No sender has messages old enough to move to Trash under these rules.
+            No sender has messages old enough to move to Trash under these
+            rules.
           </p>
         ) : null}
         {candidates.length ? (
@@ -2402,13 +2447,13 @@ const TrashReviewPanel = ({
       <CleanupPanel
         analysis={analysis}
         plan={plan}
-        onGenerate={() => onGenerate(selected)}
+        onGenerate={() => onGenerate(retention ? [] : selected, retention)}
         onApprove={onApprove}
         onResume={onResume}
         onRetry={onRetry}
         onUndo={onUndo}
         mode="trash"
-        canGenerate={selected.length > 0}
+        canGenerate={retention || selected.length > 0}
       />
     </>
   );
@@ -2491,8 +2536,9 @@ const UnsubscribePanel = ({
       {!dashboard ? (
         <div className="analysis-empty">
           <p>
-            List mailing lists that support one-click unsubscribe.
-            Spam senders and senders of security, account, transaction, or finance messages are excluded.
+            List mailing lists that support one-click unsubscribe. Spam senders
+            and senders of security, account, transaction, or finance messages
+            are excluded.
           </p>
           <button
             className="primary-button compact"
@@ -2565,7 +2611,9 @@ const UnsubscribePanel = ({
               </label>
             ))}
             {!eligible.length ? (
-              <p>No mailing lists with a supported one-click unsubscribe remain.</p>
+              <p>
+                No mailing lists with a supported one-click unsubscribe remain.
+              </p>
             ) : null}
           </div>
           {eligible.length ? (
@@ -2598,7 +2646,8 @@ const UnsubscribePanel = ({
                 />
                 <span>
                   <strong>
-                    I approve sending {selected.length} one-click unsubscribe request
+                    I approve sending {selected.length} one-click unsubscribe
+                    request
                     {selected.length === 1 ? "" : "s"}
                   </strong>
                   <small>
@@ -2812,7 +2861,8 @@ const GmailConnectionPanel = ({
                       : "Ready to scan Gmail messages"}
               </strong>
               <small>
-                {(audit?.indexedMessages ?? 0).toLocaleString()} messages scanned
+                {(audit?.indexedMessages ?? 0).toLocaleString()} messages
+                scanned
                 {audit?.totalEstimate
                   ? ` of about ${audit.totalEstimate.toLocaleString()}`
                   : ""}{" "}
@@ -2996,9 +3046,7 @@ const GmailOrganizationPanel = ({
           <div className="cleanup-totals">
             <div>
               <b>{plan.impactCount}</b>
-              <span>
-                {trash ? "senders" : "address and category groups"}
-              </span>
+              <span>{trash ? "senders" : "address and category groups"}</span>
             </div>
             <div>
               <b>{plan.existingMessageCount.toLocaleString()}</b>
@@ -3040,7 +3088,9 @@ const GmailOrganizationPanel = ({
                   onChange={(event) => setConsent(event.target.checked)}
                 />
                 <span>
-                  <strong>I approve the Gmail message changes listed above</strong>
+                  <strong>
+                    I approve the Gmail message changes listed above
+                  </strong>
                   <small>
                     {trash
                       ? "Only the listed messages move to Gmail Trash. Security, account, transaction, finance, personal, and suspicious messages are excluded. Original labels are recorded for Undo."
@@ -3081,7 +3131,8 @@ const GmailOrganizationPanel = ({
                   </strong>
                   <small>
                     {progress?.completedItems ?? 0} /{" "}
-                    {progress?.totalItems ?? plan.batchCount} message groups completed
+                    {progress?.totalItems ?? plan.batchCount} message groups
+                    completed
                   </small>
                 </span>
                 <b>{progress?.percent ?? 0}%</b>
@@ -3144,12 +3195,13 @@ const GmailTrashReviewPanel = ({
 }: {
   analysis: MailboxAnalysisSummary;
   plan: GmailOrganizationPlan | null;
-  onGenerate(senderDomains: string[]): Promise<void>;
+  onGenerate(senderDomains: string[], retention?: boolean): Promise<void>;
   onApprove(id: string, revision: string): Promise<void>;
   onRetry(id: string, batchIds: string[]): Promise<void>;
   onUndo(id: string): Promise<void>;
 }) => {
   const [selected, setSelected] = useState<string[]>([]);
+  const [retention, setRetention] = useState(false);
   const candidates = rankStaleStreams(analysis.topStreams).map((candidate) => ({
     ...candidate,
     age: recency(candidate.latestAt),
@@ -3167,6 +3219,19 @@ const GmailTrashReviewPanel = ({
           </span>
         </div>
         <div className="trash-review-copy">
+          <label>
+            <input
+              type="checkbox"
+              checked={retention}
+              onChange={(event) => setRetention(event.target.checked)}
+            />{" "}
+            Use my saved age limits instead of selecting old senders
+          </label>
+          <p>
+            Age limits are set per message type in Organize. This only builds a
+            review; the messages move to Trash after separate approval. When
+            this is selected, sender selections below are ignored.
+          </p>
           <p>
             Only mail older than six months is included. Security, account,
             transaction, finance, personal, suspicious, Spam, and Trash messages
@@ -3217,7 +3282,8 @@ const GmailTrashReviewPanel = ({
         </div>
         {!candidates.length ? (
           <p className="analysis-empty-note">
-            No Gmail sender has messages old enough to move to Trash under these rules.
+            No Gmail sender has messages old enough to move to Trash under these
+            rules.
           </p>
         ) : null}
         {candidates.length ? (
@@ -3244,11 +3310,11 @@ const GmailTrashReviewPanel = ({
           </div>
         ) : null}
       </section>
-      {selected.length || plan ? (
+      {retention || selected.length || plan ? (
         <GmailOrganizationPanel
           analysis={analysis}
           plan={plan}
-          onGenerate={() => onGenerate(selected)}
+          onGenerate={() => onGenerate(retention ? [] : selected, retention)}
           onApprove={onApprove}
           onRetry={onRetry}
           onUndo={onUndo}
@@ -3338,7 +3404,8 @@ const OutlookConnectionPanel = ({
                       : "Ready to scan Microsoft messages"}
                 </strong>
                 <small>
-                  {(audit?.indexedMessages ?? 0).toLocaleString()} messages scanned
+                  {(audit?.indexedMessages ?? 0).toLocaleString()} messages
+                  scanned
                   {audit?.totalEstimate
                     ? ` of about ${audit.totalEstimate.toLocaleString()}`
                     : ""}
@@ -3351,7 +3418,9 @@ const OutlookConnectionPanel = ({
                   setBusy(true);
                   void onAudit()
                     .catch(() =>
-                      setError("The Microsoft scan stopped. Check the connection, then resume where it stopped."),
+                      setError(
+                        "The Microsoft scan stopped. Check the connection, then resume where it stopped.",
+                      ),
                     )
                     .finally(() => setBusy(false));
                 }}
@@ -3384,7 +3453,8 @@ const OutlookConnectionPanel = ({
           <p>
             Create a Microsoft <strong>Mobile and desktop application</strong>{" "}
             registration with <code>http://localhost</code> as a redirect.
-            Microsoft handles sign-in in the browser. No client secret is required.
+            Microsoft handles sign-in in the browser. No client secret is
+            required.
           </p>
           <label>
             <span>Application (client) ID</span>
@@ -3628,12 +3698,13 @@ const OutlookTrashReviewPanel = ({
 }: {
   analysis: MailboxAnalysisSummary;
   plan: GmailOrganizationPlan | null;
-  onGenerate(domains: string[]): Promise<void>;
+  onGenerate(domains: string[], retention?: boolean): Promise<void>;
   onApprove(id: string, revision: string): Promise<void>;
   onRetry(id: string, actionIds: string[]): Promise<void>;
   onUndo(id: string): Promise<void>;
 }) => {
   const [selected, setSelected] = useState<string[]>([]);
+  const [retention, setRetention] = useState(false);
   const candidates = rankStaleStreams(analysis.topStreams).map((candidate) => ({
     ...candidate,
     age: recency(candidate.latestAt),
@@ -3644,16 +3715,33 @@ const OutlookTrashReviewPanel = ({
         <div className="panel-header">
           <div>
             <p className="eyebrow">OLD MICROSOFT MESSAGES</p>
-            <h2>Choose senders whose old Microsoft messages can move to Deleted Items</h2>
+            <h2>
+              Choose senders whose old Microsoft messages can move to Deleted
+              Items
+            </h2>
           </div>
           <span className="secured-label">
             <Archive size={14} /> Can be restored from Deleted Items
           </span>
         </div>
         <div className="trash-review-copy">
+          <label>
+            <input
+              type="checkbox"
+              checked={retention}
+              onChange={(event) => setRetention(event.target.checked)}
+            />{" "}
+            Use my saved age limits instead of selecting old senders
+          </label>
+          <p>
+            Age limits are set per message type in Organize. This only builds a
+            review; the messages move to Trash after separate approval. When
+            this is selected, sender selections below are ignored.
+          </p>
           <p>
             Only mail older than six months is included. Security, account,
-            transaction, finance, personal, and suspicious messages are excluded.
+            transaction, finance, personal, and suspicious messages are
+            excluded.
           </p>
           <span>
             <b>
@@ -3661,7 +3749,8 @@ const OutlookTrashReviewPanel = ({
                 .reduce((sum, item) => sum + item.messages, 0)
                 .toLocaleString()}
             </b>{" "}
-            messages can move to Deleted Items from <b>{candidates.length}</b> senders
+            messages can move to Deleted Items from <b>{candidates.length}</b>{" "}
+            senders
           </span>
         </div>
         <div className="trash-candidates">
@@ -3718,11 +3807,11 @@ const OutlookTrashReviewPanel = ({
           </div>
         ) : null}
       </section>
-      {selected.length || plan ? (
+      {retention || selected.length || plan ? (
         <OutlookHistoryPanel
           analysis={analysis}
           plan={plan}
-          onGenerate={() => onGenerate(selected)}
+          onGenerate={() => onGenerate(retention ? [] : selected, retention)}
           onApprove={onApprove}
           onRetry={onRetry}
           onUndo={onUndo}
@@ -4151,7 +4240,7 @@ const OrganizationProposalEditor = ({
       Pick<EditOrganizationProposal, "category" | "targetPath" | "enabled">
     >,
   ) => {
-    if (!proposal) return;
+    if (!proposal || proposal.requiresRebuild) return;
     setBusyKey(item.id);
     setError("");
     try {
@@ -4182,7 +4271,9 @@ const OrganizationProposalEditor = ({
           <p className="eyebrow">
             {account.provider.toUpperCase()} · {account.label}
           </p>
-          <h2 id={`proposal-${account.id}`}>Choose folders for each category</h2>
+          <h2 id={`proposal-${account.id}`}>
+            Choose folders for each category
+          </h2>
         </div>
         <button
           className="secondary-button"
@@ -4200,14 +4291,25 @@ const OrganizationProposalEditor = ({
               .finally(() => setBusyKey(""));
           }}
         >
-            {busyKey === "generate" ? "Building from mailbox…" : "Build from mailbox"}
+          {busyKey === "generate"
+            ? "Building from mailbox…"
+            : "Build from mailbox"}
         </button>
       </div>
+      {proposal?.requiresRebuild ? (
+        <p className="connection-error" role="status">
+          Classification or handling choices changed. Choose “Build from
+          mailbox” to rebuild and review the proposed folders. Existing folders,
+          messages, and completed recovery records will not change until you
+          approve a new plan.
+        </p>
+      ) : null}
       {!proposal ? (
         <div className="analysis-empty">
           <p>
-            Build a folder list from the scanned messages and confirmed addresses.
-            You can change every category and folder before approving any message changes.
+            Build a folder list from the scanned messages and confirmed
+            addresses. You can change every category and folder before approving
+            any message changes.
           </p>
         </div>
       ) : (
@@ -4249,7 +4351,7 @@ const OrganizationProposalEditor = ({
                   <strong>{scope || "Shared mail"}</strong>
                   <small>
                     {container
-                  ? `${container} folder`
+                      ? `${container} folder`
                       : scope
                         ? "Uses shared folders"
                         : "No confirmed address match"}{" "}
@@ -4313,8 +4415,8 @@ const OrganizationProposalEditor = ({
                     </small>
                     {item.category === "other" ? (
                       <small>
-                        Messages in this category will move to Review/Unsorted,
-                        be marked read, and skip the Inbox.
+                        Sift could not identify the purpose. These messages are
+                        left unchanged, not marked read or deleted.
                       </small>
                     ) : null}
                     {item.samples.length ? (
@@ -4391,11 +4493,19 @@ const SpamReviewPanel = ({
     review: SpamReview,
     decisions: Array<{ candidateId: string; decision: SpamReviewDecision }>,
   ): Promise<void>;
-  onApply(account: MailAccountSummary, plan: SpamApplicationPlan): Promise<void>;
-  onRetry(account: MailAccountSummary, plan: SpamApplicationPlan): Promise<void>;
+  onApply(
+    account: MailAccountSummary,
+    plan: SpamApplicationPlan,
+  ): Promise<void>;
+  onRetry(
+    account: MailAccountSummary,
+    plan: SpamApplicationPlan,
+  ): Promise<void>;
   onUndo(account: MailAccountSummary, plan: SpamApplicationPlan): Promise<void>;
 }) => {
-  const [decisions, setDecisions] = useState<Record<string, SpamReviewDecision>>({});
+  const [decisions, setDecisions] = useState<
+    Record<string, SpamReviewDecision>
+  >({});
   const [showAll, setShowAll] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -4423,13 +4533,13 @@ const SpamReviewPanel = ({
           ? "Sift could not finish preparing the Spam action. Your saved decisions remain saved; no email or filters were changed. Use Build existing-message action to retry."
           : key === "prepare"
             ? "Sift could not build the existing-message Spam action. No email or filters were changed. Run Scan again if retrying still fails."
-          : key === "apply"
-            ? "Sift could not finish moving the selected messages to Spam. Completed moves remain saved; retry the failed items."
-            : key === "retry"
-              ? "Some messages still could not be moved to Spam. The completed moves remain saved."
-              : key === "undo"
-                ? "Sift could not restore every message. Check the failed items and retry."
-                : "Sift could not build the spam review from the saved scan. Run Scan again, then retry.",
+            : key === "apply"
+              ? "Sift could not finish moving the selected messages to Spam. Completed moves remain saved; retry the failed items."
+              : key === "retry"
+                ? "Some messages still could not be moved to Spam. The completed moves remain saved."
+                : key === "undo"
+                  ? "Sift could not restore every message. Check the failed items and retry."
+                  : "Sift could not build the spam review from the saved scan. Run Scan again, then retry.",
       );
     } finally {
       setBusy("");
@@ -4438,16 +4548,23 @@ const SpamReviewPanel = ({
 
   if (!review) {
     return (
-      <section className="readiness-panel spam-review" aria-label={`${account.label} spam review`}>
+      <section
+        className="readiness-panel spam-review"
+        aria-label={`${account.label} spam review`}
+      >
         <div className="panel-header">
           <div>
-            <p className="eyebrow">{account.provider.toUpperCase()} · {account.label}</p>
+            <p className="eyebrow">
+              {account.provider.toUpperCase()} · {account.label}
+            </p>
             <h2>Find possible spam senders</h2>
           </div>
         </div>
         <div className="analysis-empty">
           <p>
-            Sift will group likely spam, suspicious mail, and high-volume marketing by sender and receiving address. It will not mark anything as Spam automatically.
+            Sift will group likely spam, suspicious mail, and high-volume
+            marketing by sender and receiving address. It will not mark anything
+            as Spam automatically.
           </p>
           <button
             className="primary-button compact"
@@ -4455,16 +4572,26 @@ const SpamReviewPanel = ({
             disabled={Boolean(busy)}
             onClick={() => void run("generate", () => onGenerate(account))}
           >
-            {busy === "generate" ? "Building spam review…" : "Build spam review"}
+            {busy === "generate"
+              ? "Building spam review…"
+              : "Build spam review"}
           </button>
         </div>
-        {error ? <p className="connection-error" role="alert">{error}</p> : null}
+        {error ? (
+          <p className="connection-error" role="alert">
+            {error}
+          </p>
+        ) : null}
       </section>
     );
   }
 
-  const selectedSpam = Object.values(decisions).filter((value) => value === "spam").length;
-  const selectedNotSpam = Object.values(decisions).filter((value) => value === "not_spam").length;
+  const selectedSpam = Object.values(decisions).filter(
+    (value) => value === "spam",
+  ).length;
+  const selectedNotSpam = Object.values(decisions).filter(
+    (value) => value === "not_spam",
+  ).length;
   const visible = showAll ? review.candidates : review.candidates.slice(0, 25);
   const reasonLabel = {
     likely_spam: "Likely spam",
@@ -4473,43 +4600,78 @@ const SpamReviewPanel = ({
     filter_candidate: "Could become a filing filter",
   } as const;
   const applicationMatches = Boolean(
-    application && review.state === "completed" && application.spamReviewId === review.id,
+    application &&
+    review.state === "completed" &&
+    application.spamReviewId === review.id,
   );
-  const applicationCount = applicationMatches && application
-    ? "actionCount" in application
-      ? application.actionCount
-      : application.existingMessageCount
-    : 0;
-  const failedApplicationIds = applicationMatches && application
-    ? "failedActions" in application
-      ? application.failedActions.map((item) => item.id)
-      : application.failedBatches.map((item) => item.id)
-    : [];
+  const applicationCount =
+    applicationMatches && application
+      ? "actionCount" in application
+        ? application.actionCount
+        : application.existingMessageCount
+      : 0;
+  const failedApplicationIds =
+    applicationMatches && application
+      ? "failedActions" in application
+        ? application.failedActions.map((item) => item.id)
+        : application.failedBatches.map((item) => item.id)
+      : [];
   const applicationJob = applicationMatches ? application?.job : null;
 
   return (
-    <section className="readiness-panel spam-review" aria-labelledby={`spam-${account.id}`}>
+    <section
+      className="readiness-panel spam-review"
+      aria-labelledby={`spam-${account.id}`}
+    >
       <div className="panel-header">
         <div>
-          <p className="eyebrow">{account.provider.toUpperCase()} · {account.label}</p>
+          <p className="eyebrow">
+            {account.provider.toUpperCase()} · {account.label}
+          </p>
           <h2 id={`spam-${account.id}`}>Review possible spam</h2>
         </div>
         <span className="secured-label">
-          {review.state === "completed" ? "Decisions saved" : "No automatic changes"}
+          {review.state === "completed"
+            ? "Decisions saved"
+            : "No automatic changes"}
         </span>
       </div>
       <div className="spam-review-summary">
-        <span><b>{review.candidates.length}</b><small>senders to review</small></span>
-        <span><b>{selectedSpam}</b><small>selected as Spam</small></span>
-        <span><b>{selectedNotSpam}</b><small>not spam</small></span>
+        <span>
+          <b>{review.candidates.length}</b>
+          <small>senders to review</small>
+        </span>
+        <span>
+          <b>{selectedSpam}</b>
+          <small>selected as Spam</small>
+        </span>
+        <span>
+          <b>{selectedNotSpam}</b>
+          <small>not spam</small>
+        </span>
       </div>
       <div className="plain-logic" role="note">
         <strong>How this list is built</strong>
         <ul>
-          <li>One row represents one sender domain sending to one of your addresses.</li>
-          <li>Sift includes likely spam, suspicious mail, marketing streams with at least 25 messages, and every sender that could otherwise appear in Rules.</li>
-          <li>Choosing Spam marks matching existing messages read, removes them from Inbox, and moves them to the provider’s Spam or Junk folder after you approve the exact count below.</li>
-          <li>The Rules step then proposes a future Spam rule for that sender and address. Choosing Not spam prevents that Spam rule. Review makes no decision.</li>
+          <li>
+            One row represents one sender domain sending to one of your
+            addresses.
+          </li>
+          <li>
+            Sift includes likely spam, suspicious mail, marketing streams with
+            at least 25 messages, and every sender that could otherwise appear
+            in Rules.
+          </li>
+          <li>
+            Choosing Spam marks matching existing messages read, removes them
+            from Inbox, and moves them to the provider’s Spam or Junk folder
+            after you approve the exact count below.
+          </li>
+          <li>
+            The Rules step then proposes a future Spam rule for that sender and
+            address. Choosing Not spam prevents that Spam rule. Review makes no
+            decision.
+          </li>
         </ul>
       </div>
       {review.candidates.length ? (
@@ -4524,7 +4686,9 @@ const SpamReviewPanel = ({
                     ...current,
                     ...Object.fromEntries(
                       review.candidates
-                        .filter((candidate) => candidate.reason === "likely_spam")
+                        .filter(
+                          (candidate) => candidate.reason === "likely_spam",
+                        )
                         .map((candidate) => [candidate.id, "spam" as const]),
                     ),
                   }))
@@ -4538,7 +4702,10 @@ const SpamReviewPanel = ({
                 onClick={() =>
                   setDecisions(
                     Object.fromEntries(
-                      review.candidates.map((candidate) => [candidate.id, "review" as const]),
+                      review.candidates.map((candidate) => [
+                        candidate.id,
+                        "review" as const,
+                      ]),
                     ),
                   )
                 }
@@ -4564,27 +4731,39 @@ const SpamReviewPanel = ({
                   </span>
                   <span>
                     <strong>{reasonLabel[candidate.reason]}</strong>
-                    <small>{mailCategoryLabels[candidate.category]} · {Math.round(candidate.confidence * 100)}% confidence · {Math.round(candidate.categoryShare * 100)}% of this sender’s mail</small>
+                    <small>
+                      {mailCategoryLabels[candidate.category]} ·{" "}
+                      {Math.round(candidate.confidence * 100)}% confidence ·{" "}
+                      {Math.round(candidate.categoryShare * 100)}% of this
+                      sender’s mail
+                    </small>
                   </span>
                   <span>
-                    <strong>{candidate.messageCount.toLocaleString()} messages</strong>
+                    <strong>
+                      {candidate.messageCount.toLocaleString()} messages
+                    </strong>
                     <small>{age.label}</small>
                   </span>
                   <label>
-                    <span className="sr-only">Decision for {candidate.senderDomain}</span>
+                    <span className="sr-only">
+                      Decision for {candidate.senderDomain}
+                    </span>
                     <select
                       value={decisions[candidate.id] ?? "review"}
                       disabled={review.state === "completed"}
                       onChange={(event) =>
                         setDecisions((current) => ({
                           ...current,
-                          [candidate.id]: event.target.value as SpamReviewDecision,
+                          [candidate.id]: event.target
+                            .value as SpamReviewDecision,
                         }))
                       }
                     >
                       <option value="review">Review — no change</option>
                       <option value="not_spam">Not spam</option>
-                      <option value="spam">Spam — existing mail and future rule</option>
+                      <option value="spam">
+                        Spam — existing mail and future rule
+                      </option>
                     </select>
                   </label>
                 </div>
@@ -4592,14 +4771,23 @@ const SpamReviewPanel = ({
             })}
           </div>
           {review.candidates.length > 25 ? (
-            <button className="sender-expand" type="button" onClick={() => setShowAll((value) => !value)}>
-              {showAll ? "Show first 25 senders" : `Show all ${review.candidates.length} senders`}
+            <button
+              className="sender-expand"
+              type="button"
+              onClick={() => setShowAll((value) => !value)}
+            >
+              {showAll
+                ? "Show first 25 senders"
+                : `Show all ${review.candidates.length} senders`}
             </button>
           ) : null}
         </>
       ) : (
         <div className="analysis-empty">
-          <p>No likely spam, suspicious, or high-volume marketing streams were found. Save the empty review to continue.</p>
+          <p>
+            No likely spam, suspicious, or high-volume marketing streams were
+            found. Save the empty review to continue.
+          </p>
         </div>
       )}
       <div className="next-action spam-review-action">
@@ -4621,30 +4809,72 @@ const SpamReviewPanel = ({
         </span>
         {review.state === "completed" && applicationMatches && application ? (
           applicationCount === 0 ? (
-            <button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => void run("generate", () => onGenerate(account))}>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={Boolean(busy)}
+              onClick={() => void run("generate", () => onGenerate(account))}
+            >
               {busy === "generate" ? "Rebuilding…" : "Change spam choices"}
             </button>
           ) : application.state === "draft" ? (
-            <button className="primary-button compact" type="button" disabled={Boolean(busy)} onClick={() => void run("apply", () => onApply(account, application))}>
-              {busy === "apply" ? "Moving messages to Spam…" : `Mark ${applicationCount.toLocaleString()} messages as Spam`}
+            <button
+              className="primary-button compact"
+              type="button"
+              disabled={Boolean(busy)}
+              onClick={() =>
+                void run("apply", () => onApply(account, application))
+              }
+            >
+              {busy === "apply"
+                ? "Moving messages to Spam…"
+                : `Mark ${applicationCount.toLocaleString()} messages as Spam`}
             </button>
           ) : application.state === "failed" ? (
-            <button className="primary-button compact" type="button" disabled={Boolean(busy) || failedApplicationIds.length === 0} onClick={() => void run("retry", () => onRetry(account, application))}>
-              {busy === "retry" ? "Retrying failed messages…" : `Retry ${failedApplicationIds.length.toLocaleString()} failed items`}
+            <button
+              className="primary-button compact"
+              type="button"
+              disabled={Boolean(busy) || failedApplicationIds.length === 0}
+              onClick={() =>
+                void run("retry", () => onRetry(account, application))
+              }
+            >
+              {busy === "retry"
+                ? "Retrying failed messages…"
+                : `Retry ${failedApplicationIds.length.toLocaleString()} failed items`}
             </button>
           ) : application.state === "completed" ? (
             <div className="spam-complete-actions">
-              <button className="secondary-button" type="button" disabled={Boolean(busy)} onClick={() => void run("generate", () => onGenerate(account))}>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={Boolean(busy)}
+                onClick={() => void run("generate", () => onGenerate(account))}
+              >
                 {busy === "generate" ? "Rebuilding…" : "Change spam choices"}
               </button>
-              <button className="secondary-button" type="button" disabled={Boolean(busy) || !applicationJob} onClick={() => void run("undo", () => onUndo(account, application))}>
-                {busy === "undo" ? "Restoring messages…" : "Undo existing-message changes"}
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={Boolean(busy) || !applicationJob}
+                onClick={() =>
+                  void run("undo", () => onUndo(account, application))
+                }
+              >
+                {busy === "undo"
+                  ? "Restoring messages…"
+                  : "Undo existing-message changes"}
               </button>
             </div>
           ) : (
             <span className="application-progress" role="status">
-              Moving messages to Spam… {applicationJob ? `${applicationJob.completedItems.toLocaleString()} of ${applicationJob.totalItems.toLocaleString()}` : ""}
-              <small>The count updates after each group is confirmed in Spam.</small>
+              Moving messages to Spam…{" "}
+              {applicationJob
+                ? `${applicationJob.completedItems.toLocaleString()} of ${applicationJob.totalItems.toLocaleString()}`
+                : ""}
+              <small>
+                The count updates after each group is confirmed in Spam.
+              </small>
             </span>
           )
         ) : review.state === "completed" ? (
@@ -4654,7 +4884,9 @@ const SpamReviewPanel = ({
             disabled={Boolean(busy)}
             onClick={() => void run("prepare", () => onPrepare(account))}
           >
-            {busy === "prepare" ? "Building action…" : "Build existing-message action"}
+            {busy === "prepare"
+              ? "Building action…"
+              : "Build existing-message action"}
           </button>
         ) : (
           <button
@@ -4679,10 +4911,17 @@ const SpamReviewPanel = ({
       </div>
       {review.state === "completed" ? (
         <p className="spam-provider-note">
-          Sift uses the provider’s native Spam or Junk folder and creates a future rule in Rules. Email providers do not expose one consistent API for editing their private spam-training model or blocked-sender list, so Sift does not claim to change either one.
+          Sift uses the provider’s native Spam or Junk folder and creates a
+          future rule in Rules. Email providers do not expose one consistent API
+          for editing their private spam-training model or blocked-sender list,
+          so Sift does not claim to change either one.
         </p>
       ) : null}
-      {error ? <p className="connection-error" role="alert">{error}</p> : null}
+      {error ? (
+        <p className="connection-error" role="alert">
+          {error}
+        </p>
+      ) : null}
     </section>
   );
 };
@@ -4730,13 +4969,17 @@ const RuleReconciliationPanel = ({
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [showAllOperations, setShowAllOperations] = useState(false);
-  const [existingRuleMode, setExistingRuleMode] = useState<"retain" | "replace">("retain");
+  const [existingRuleMode, setExistingRuleMode] = useState<
+    "retain" | "replace"
+  >("retain");
   const [protonOldFiltersCleared, setProtonOldFiltersCleared] = useState(false);
   const [enabledOperationIds, setEnabledOperationIds] = useState<string[]>([]);
   useEffect(() => {
     setEnabledOperationIds(
       plan?.operations
-        .filter((operation) => operation.enabled && operation.kind !== "unchanged")
+        .filter(
+          (operation) => operation.enabled && operation.kind !== "unchanged",
+        )
         .map((operation) => operation.id) ?? [],
     );
     setConsent(false);
@@ -4781,8 +5024,7 @@ const RuleReconciliationPanel = ({
   const completed =
     plan?.operations.filter(
       (operation) => operation.enabled && operation.state === "succeeded",
-    )
-      .length ?? 0;
+    ).length ?? 0;
   const protonImportPending =
     account.provider === "proton" &&
     plan?.state === "approved" &&
@@ -4820,14 +5062,12 @@ const RuleReconciliationPanel = ({
     }
     if (!desired) return "This filter has no change to show.";
     const consequences = [
-      desired.spam
-        ? "send it to Spam"
-        : `file it in “${desired.targetPath}”`,
-      desired.markRead ? "mark it read" : null,
+      desired.spam ? "send it to Spam" : `file it in “${desired.targetPath}”`,
+      desired.markRead ? "mark it read" : "keep its read status",
       desired.archive ? "remove it from the inbox" : null,
     ].filter((value): value is string => Boolean(value));
     const behavior = consequences.join(", ");
-    const basis = `${desired.observedMessages.toLocaleString()} previous messages · ${Math.round((desired.categoryShare ?? 1) * 100)}% one category · ${Math.round(desired.confidence * 100)}% confidence.`;
+    const basis = `${desired.observedMessages.toLocaleString()} saved messages match these sender, address, and subject conditions. ${desired.matchNote ?? "Rebuild this old rule before using it."}`;
     if (operation.kind === "adopt") {
       return `Use this existing filter without changing it. Future matches will ${behavior}. ${basis}`;
     }
@@ -4894,16 +5134,26 @@ const RuleReconciliationPanel = ({
         </button>
       </div>
       {account.provider === "proton" && freshSlate ? (
-        <div className="cleanup-structural-error proton-filter-boundary" role="note">
-          <strong>Remove old Proton filters before importing the new filter</strong>
+        <div
+          className="cleanup-structural-error proton-filter-boundary"
+          role="note"
+        >
+          <strong>
+            Remove old Proton filters before importing the new filter
+          </strong>
           <small>
-            Proton Bridge cannot read or delete filters created in Proton Mail. Disable or remove the old filters in Proton Mail → Settings → All settings → Filters before importing Sift’s new filter file; otherwise both filters can act on the same message.
+            Proton Bridge cannot read or delete filters created in Proton Mail.
+            Disable or remove the old filters in Proton Mail → Settings → All
+            settings → Filters before importing Sift’s new filter file;
+            otherwise both filters can act on the same message.
           </small>
           <label>
             <input
               type="checkbox"
               checked={protonOldFiltersCleared}
-              onChange={(event) => setProtonOldFiltersCleared(event.target.checked)}
+              onChange={(event) =>
+                setProtonOldFiltersCleared(event.target.checked)
+              }
             />
             <span>I disabled the old Proton filters</span>
           </label>
@@ -4941,11 +5191,36 @@ const RuleReconciliationPanel = ({
       <div className="plain-logic rule-logic" role="note">
         <strong>How Sift proposes filing filters</strong>
         <ul>
-          <li>One filter matches one sender domain sending to one of your addresses.</li>
-          <li>The sender must have at least 3 matching messages, at least 90% in one category, and at least 82% classification confidence.</li>
-          <li>Personal, Security, Suspicious, Spam, and Unsorted mail never become ordinary filing filters.</li>
-          <li>Approved Spam decisions are carried over as Spam rules. Every other proposed filter files the message, marks it read, and removes it from Inbox when the provider supports that action.</li>
-          <li>You can uncheck any change below. Unchecked changes are not created, replaced, adopted, or deleted.</li>
+          <li>
+            Each filter matches observed sender addresses, one confirmed address
+            of yours, and the purpose indicated by the subject. A company’s
+            sales, receipts, and login codes get different handling.
+          </li>
+          <li>
+            Only clear subject matches become future filters. Mailing-list
+            headers, company names, and tentative content matches are not
+            enough.
+          </li>
+          <li>
+            Security and urgent actions take priority over sales. Replies,
+            uncertain mail, and messages addressed to multiple owned aliases are
+            excluded.
+          </li>
+          <li>
+            Your handling choices set the destination and whether to mark read.
+            Spam choices apply to recognized unwanted message types—not every
+            message from a company. Protected mail is not sent to Spam or Trash
+            by these rules.
+          </li>
+          <li>
+            Gmail and Outlook support fewer subject conditions than Proton. Sift
+            exports a narrower match, not a broader company-wide fallback.
+            Age-based cleanup is a separate review in Delete.
+          </li>
+          <li>
+            You can uncheck any change below. Unchecked changes are not created,
+            replaced, adopted, or deleted.
+          </li>
         </ul>
       </div>
       {inventory ? (
@@ -4986,7 +5261,8 @@ const RuleReconciliationPanel = ({
         <div className="analysis-empty">
           <p>
             Choose whether to keep unrelated existing filters or delete them.
-            The next screen lists every filter Sift will create, keep, replace, or delete.
+            The next screen lists every filter Sift will create, keep, replace,
+            or delete.
           </p>
           <div className="rule-strategy-grid">
             <button
@@ -4995,7 +5271,10 @@ const RuleReconciliationPanel = ({
               onClick={() => setExistingRuleMode("retain")}
             >
               <strong>Keep unrelated existing filters</strong>
-              <small>Use identical existing filters, replace outdated filters created by Sift, and leave every other filter unchanged.</small>
+              <small>
+                Use identical existing filters, replace outdated filters created
+                by Sift, and leave every other filter unchanged.
+              </small>
             </button>
             <button
               type="button"
@@ -5033,7 +5312,8 @@ const RuleReconciliationPanel = ({
               <b>{selectedActionable.length}</b> selected filter changes
             </span>
             <span>
-              <b>{actionable.length - selectedActionable.length}</b> unchecked · <b>{plan.operations.length - actionable.length}</b> already
+              <b>{actionable.length - selectedActionable.length}</b> unchecked ·{" "}
+              <b>{plan.operations.length - actionable.length}</b> already
               correct · no change
             </span>
           </div>
@@ -5064,8 +5344,13 @@ const RuleReconciliationPanel = ({
                   <input
                     type="checkbox"
                     aria-label={`${enabledOperationIds.includes(operation.id) ? "Exclude" : "Include"} filter for ${operation.desired?.senderDomain ?? operation.prior?.criteria.from ?? "existing rule"}`}
-                    checked={operation.kind === "unchanged" || enabledOperationIds.includes(operation.id)}
-                    disabled={operation.kind === "unchanged" || plan.state !== "draft"}
+                    checked={
+                      operation.kind === "unchanged" ||
+                      enabledOperationIds.includes(operation.id)
+                    }
+                    disabled={
+                      operation.kind === "unchanged" || plan.state !== "draft"
+                    }
                     onChange={(event) =>
                       setEnabledOperationIds((current) =>
                         event.target.checked
@@ -5090,6 +5375,37 @@ const RuleReconciliationPanel = ({
                 </span>
                 <span className="rule-operation-effect">
                   {operationEffect(operation)}
+                  {operation.desired?.purposeConditions ? (
+                    <details>
+                      <summary>Show matching conditions</summary>
+                      <p>{mailCategoryLabels[operation.desired.category]}</p>
+                      <p>
+                        From:{" "}
+                        {operation.desired.purposeConditions.senderAddresses.join(
+                          ", ",
+                        )}
+                      </p>
+                      <p>
+                        Subject matches:{" "}
+                        {operation.desired.purposeConditions.subjectPatterns.join(
+                          " · ",
+                        )}
+                      </p>
+                      <p>
+                        “*” means any text. Earlier protected purposes and reply
+                        messages are excluded. This does not match all messages
+                        from these senders.
+                      </p>
+                      <details>
+                        <summary>Show excluded subject patterns</summary>
+                        <p>
+                          {operation.desired.purposeConditions.excludeSubjectPatterns.join(
+                            " · ",
+                          )}
+                        </p>
+                      </details>
+                    </details>
+                  ) : null}
                 </span>
                 <em>{operationStateLabels[operation.state]}</em>
               </div>
@@ -5112,7 +5428,12 @@ const RuleReconciliationPanel = ({
                 <input
                   type="checkbox"
                   checked={consent}
-                  disabled={!organizationReady || (account.provider === "proton" && freshSlate && !protonOldFiltersCleared)}
+                  disabled={
+                    !organizationReady ||
+                    (account.provider === "proton" &&
+                      freshSlate &&
+                      !protonOldFiltersCleared)
+                  }
                   onChange={(event) => setConsent(event.target.checked)}
                 />
                 <span>
@@ -5125,21 +5446,30 @@ const RuleReconciliationPanel = ({
                     {!organizationReady
                       ? "Return to Organize and create the folders, then come back to review these filters again."
                       : account.provider !== "proton"
-                      ? externalRemovals
-                        ? `${externalRemovals} selected existing ${account.provider === "gmail" ? "filters" : "inbox rules"} will be deleted. Identical rules are kept. Sift cannot automatically undo those deletions.`
-                        : `${externalCount} unrelated existing ${account.provider === "gmail" ? "filters" : "inbox rules"} remain unchanged. Sift checks each filter after applying it.`
-                      : "This saves a Proton filter file for you to review and import in Proton Mail."}
+                        ? externalRemovals
+                          ? `${externalRemovals} selected existing ${account.provider === "gmail" ? "filters" : "inbox rules"} will be deleted. Identical rules are kept. Sift cannot automatically undo those deletions.`
+                          : `${externalCount} unrelated existing ${account.provider === "gmail" ? "filters" : "inbox rules"} remain unchanged. Sift checks each filter after applying it.`
+                        : "This saves a Proton filter file for you to review and import in Proton Mail."}
                   </small>
                 </span>
               </label>
               <button
                 className="primary-button"
                 type="button"
-                disabled={!organizationReady || !consent || Boolean(busy) || (account.provider === "proton" && freshSlate && !protonOldFiltersCleared)}
+                disabled={
+                  !organizationReady ||
+                  !consent ||
+                  Boolean(busy) ||
+                  (account.provider === "proton" &&
+                    freshSlate &&
+                    !protonOldFiltersCleared)
+                }
                 onClick={() =>
                   void act("apply", async () => {
                     if (account.provider === "proton")
-                      setStatus(await onExportProton(plan, enabledOperationIds));
+                      setStatus(
+                        await onExportProton(plan, enabledOperationIds),
+                      );
                     else await onApprove(plan, enabledOperationIds);
                   })
                 }
@@ -5161,9 +5491,9 @@ const RuleReconciliationPanel = ({
                     ? "Filter changes completed"
                     : protonImportPending
                       ? "Proton filter file saved — not yet imported"
-                    : plan.state === "undone"
+                      : plan.state === "undone"
                         ? "Completed filter changes undone"
-                      : plan.state === "failed"
+                        : plan.state === "failed"
                           ? "Some filter changes failed"
                           : "Filter changes in progress"}
                 </strong>
@@ -5179,9 +5509,15 @@ const RuleReconciliationPanel = ({
                     className="primary-button compact"
                     type="button"
                     disabled={Boolean(busy)}
-                    onClick={() => void act("confirm-import", () => onConfirmProtonImport(plan))}
+                    onClick={() =>
+                      void act("confirm-import", () =>
+                        onConfirmProtonImport(plan),
+                      )
+                    }
                   >
-                    {busy === "confirm-import" ? "Confirming…" : "I imported and enabled the Sieve filter"}
+                    {busy === "confirm-import"
+                      ? "Confirming…"
+                      : "I imported and enabled the Sieve filter"}
                   </button>
                 ) : null}
                 {failed.length ? (
@@ -5206,7 +5542,9 @@ const RuleReconciliationPanel = ({
                     disabled={Boolean(busy)}
                     onClick={() => void act("undo", () => onUndo(plan))}
                   >
-                    {busy === "undo" ? "Restoring…" : "Undo filter changes Sift can reverse"}
+                    {busy === "undo"
+                      ? "Restoring…"
+                      : "Undo filter changes Sift can reverse"}
                   </button>
                 ) : null}
               </div>
@@ -5284,7 +5622,9 @@ const RecoveryPanel = ({
         {diagnostics ? (
           <div className="recovery-metrics">
             <div>
-              <b>{diagnostics.integrity === "ok" ? "NO ERRORS" : "ERROR FOUND"}</b>
+              <b>
+                {diagnostics.integrity === "ok" ? "NO ERRORS" : "ERROR FOUND"}
+              </b>
               <span>saved Sift data</span>
             </div>
             <div>
@@ -5303,8 +5643,9 @@ const RecoveryPanel = ({
         ) : (
           <p className="recovery-copy">
             Check the local database before changing many messages. The exported
-            report contains the app version, platform, counts, and error results.
-            It does not contain email addresses, subjects, senders, folder paths, or credentials.
+            report contains the app version, platform, counts, and error
+            results. It does not contain email addresses, subjects, senders,
+            folder paths, or credentials.
           </p>
         )}
         <div className="panel-action connection-actions">
@@ -5336,7 +5677,9 @@ const RecoveryPanel = ({
               })
             }
           >
-            {busy === "export" ? "Exporting…" : "Export report without email content"}
+            {busy === "export"
+              ? "Exporting…"
+              : "Export report without email content"}
           </button>
         </div>
       </section>
@@ -5348,9 +5691,7 @@ const RecoveryPanel = ({
         <div className="panel-header">
           <div>
             <p className="eyebrow">ENCRYPTED BACKUP</p>
-            <h2 id="backup-title">
-              Back up this local profile
-            </h2>
+            <h2 id="backup-title">Back up this local profile</h2>
           </div>
           <span className="secured-label">
             <ShieldCheck size={14} /> Encrypted for this Windows user
@@ -5418,16 +5759,15 @@ const RecoveryPanel = ({
         <div className="panel-header">
           <div>
             <p className="eyebrow">DELETE SAVED SCAN</p>
-            <h2 id="rebuild-title">
-              Delete the local scan and start again
-            </h2>
+            <h2 id="rebuild-title">Delete the local scan and start again</h2>
           </div>
         </div>
         <p className="recovery-copy">
           This deletes saved message information, categories, folder lists, and
           unfinished changes. It keeps email connections, encrypted credentials,
-          records of filters created by Sift, completed unsubscribe requests, and
-          all email held by Proton, Google, or Microsoft. You will need to scan again.
+          records of filters created by Sift, completed unsubscribe requests,
+          and all email held by Proton, Google, or Microsoft. You will need to
+          scan again.
         </p>
         <div className="recovery-confirmation">
           <label>
@@ -5603,6 +5943,9 @@ const AppShell = ({
 }: AppShellProps) => {
   const [activePage, setActivePage] = useState<PageId>("overview");
   const [scanInventoryBusy, setScanInventoryBusy] = useState(false);
+  const [createdFolders, setCreatedFolders] = useState<Record<string, string>>(
+    {},
+  );
   const [scanInventoryError, setScanInventoryError] = useState("");
   const connectedCount = accounts.length;
   const scannedCount =
@@ -5624,7 +5967,8 @@ const AppShell = ({
   const scanInventoryReady =
     selectedAccounts.length > 0 &&
     selectedAccounts.every(
-      (account) => accountIsScanned(account) && Boolean(ruleInventories[account.id]),
+      (account) =>
+        accountIsScanned(account) && Boolean(ruleInventories[account.id]),
     );
   const addressReviewCount = selectedAccounts.reduce((sum, account) => {
     const accountIdentities = identities[account.id] ?? [];
@@ -5638,20 +5982,22 @@ const AppShell = ({
   }, 0);
   const foldersReadyFor = (account: MailAccountSummary): boolean => {
     const proposal = proposals[account.id];
-    if (!proposal) return false;
+    if (!proposal || proposal.requiresRebuild) return false;
+    if (createdFolders[account.id] === `${proposal.id}:${proposal.revision}`)
+      return true;
     if (account.provider === "proton") {
       const completedPlanMatches = Boolean(
         cleanupPlan?.kind === "organize" &&
-          cleanupPlan.state === "completed" &&
-          cleanupPlan.proposalId === proposal.id &&
-          cleanupPlan.proposalRevision === proposal.revision,
+        cleanupPlan.state === "completed" &&
+        cleanupPlan.proposalId === proposal.id &&
+        cleanupPlan.proposalRevision === proposal.revision,
       );
       if (completedPlanMatches) return true;
       const requiredTargets = proposal.items
         .filter(
           (item) =>
             item.enabled &&
-            !["personal", "suspicious", "spam"].includes(item.category),
+            !["INBOX", "SPAM", "TRASH"].includes(item.targetPath.toUpperCase()),
         )
         .map((item) => item.targetPath);
       const discoveredContainers =
@@ -5670,14 +6016,30 @@ const AppShell = ({
       ]);
     }
     const historyPlan =
-      account.provider === "gmail"
-        ? gmailOrganization
-        : outlookOrganization;
+      account.provider === "gmail" ? gmailOrganization : outlookOrganization;
+    if (
+      providerHasDestinations(
+        account.provider,
+        proposal.items
+          .filter(
+            (item) =>
+              item.enabled &&
+              !["INBOX", "SPAM", "TRASH"].includes(
+                item.targetPath.toUpperCase(),
+              ),
+          )
+          .map((item) => item.targetPath),
+        (ruleInventories[account.id]?.containers ?? []).map((path) => ({
+          path,
+        })),
+      )
+    )
+      return true;
     return Boolean(
       historyPlan?.kind === "organize" &&
-        historyPlan.state === "completed" &&
-        historyPlan.proposalId === proposal.id &&
-        historyPlan.proposalRevision === proposal.revision,
+      historyPlan.state === "completed" &&
+      historyPlan.proposalId === proposal.id &&
+      historyPlan.proposalRevision === proposal.revision,
     );
   };
   const spamReadyFor = (account: MailAccountSummary): boolean => {
@@ -5742,7 +6104,9 @@ const AppShell = ({
     setScanInventoryBusy(true);
     setScanInventoryError("");
     try {
-      await Promise.all(scannedAccounts.map((account) => onRefreshRuleInventory(account)));
+      await Promise.all(
+        scannedAccounts.map((account) => onRefreshRuleInventory(account)),
+      );
     } catch {
       setScanInventoryError(
         "Sift could not scan every selected account's folders and filters. The message scans remain saved.",
@@ -5759,11 +6123,17 @@ const AppShell = ({
   ) => (
     <div className="page-heading task-heading">
       <h1>{title}</h1>
-      <p><strong>Goal:</strong> {goal}</p>
+      <p>
+        <strong>Goal:</strong> {goal}
+      </p>
       {method.length ? (
         <div className="page-method" role="note">
           <strong>How this page works</strong>
-          <ul>{method.map((item) => <li key={item}>{item}</li>)}</ul>
+          <ul>
+            {method.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
         </div>
       ) : null}
     </div>
@@ -5854,7 +6224,9 @@ const AppShell = ({
               <section className="product-hero">
                 <div>
                   <p className="eyebrow">EMAIL ORGANIZATION</p>
-                  <h1>Scan, organize, block spam, filter, unsubscribe, and delete.</h1>
+                  <h1>
+                    Scan, organize, block spam, filter, unsubscribe, and delete.
+                  </h1>
                   <p>
                     Each step shows the messages, folders, filters, or
                     subscriptions it will change before you approve anything.
@@ -5882,10 +6254,7 @@ const AppShell = ({
                     </button>
                   </div>
                 </div>
-                <div
-                  className="workspace-pulse"
-                  aria-label="Setup progress"
-                >
+                <div className="workspace-pulse" aria-label="Setup progress">
                   <div>
                     <b>{connectedCount}</b>
                     <span>accounts connected</span>
@@ -5905,9 +6274,7 @@ const AppShell = ({
                 aria-labelledby="workflow-title"
               >
                 <div className="section-heading">
-                  <h2 id="workflow-title">
-                    Complete these steps in order
-                  </h2>
+                  <h2 id="workflow-title">Complete these steps in order</h2>
                   <p>
                     Each page has one job. Later steps remain locked until the
                     required folders and filters from earlier steps exist.
@@ -5918,42 +6285,62 @@ const AppShell = ({
                     <span>1</span>
                     <div>
                       <strong>Scan</strong>
-                      <p>Read messages, aliases, folders, labels, and existing filters without changing them.</p>
+                      <p>
+                        Read messages, aliases, folders, labels, and existing
+                        filters without changing them.
+                      </p>
                     </div>
                   </li>
                   <li>
                     <span>2</span>
                     <div>
                       <strong>Organize</strong>
-                      <p>Confirm aliases, create or use folders, then move and mark existing messages read.</p>
+                      <p>
+                        Confirm aliases, choose how each message type is
+                        handled, and create or reuse folders. No messages move
+                        yet.
+                      </p>
                     </div>
                   </li>
                   <li>
                     <span>3</span>
                     <div>
                       <strong>Spam</strong>
-                      <p>Decide which suspicious or high-volume senders should be treated as Spam before normal filters are proposed.</p>
+                      <p>
+                        Decide which suspicious or high-volume senders should be
+                        treated as Spam before normal filters are proposed.
+                      </p>
                     </div>
                   </li>
                   <li>
                     <span>4</span>
                     <div>
                       <strong>Rules</strong>
-                      <p>Create or keep filters for recurring, non-spam mail that move messages into folders and mark them read.</p>
+                      <p>
+                        Review existing-message changes, then future filters.
+                        Your choices control destinations and read status.
+                      </p>
                     </div>
                   </li>
                   <li>
                     <span>5</span>
                     <div>
                       <strong>Unsubscribe</strong>
-                      <p>Unsubscribe from legitimate mailing lists with supported one-click links. Suspected spam is never contacted.</p>
+                      <p>
+                        Unsubscribe from legitimate mailing lists with supported
+                        one-click links. Suspected spam is never contacted.
+                      </p>
                     </div>
                   </li>
                   <li>
                     <span>6</span>
                     <div>
                       <strong>Delete</strong>
-                      <p>Move approved old messages to Trash or Deleted Items. Security, account, transaction, finance, personal, and suspicious messages are excluded.</p>
+                      <p>
+                        Move approved old messages to Trash or Deleted Items.
+                        Records and actionable mail are protected. Old codes and
+                        registration messages require an optional age review.
+                      </p>
                     </div>
                   </li>
                 </ol>
@@ -5976,7 +6363,7 @@ const AppShell = ({
                         ? "Scan messages, addresses, folders, labels, and existing filters first."
                         : addressReviewCount
                           ? `${addressReviewCount} address${addressReviewCount === 1 ? " needs" : "es need"} confirmation in Organize.`
-                          : "Open Organize to review suggested folders and existing-message changes."}
+                          : "Open Organize to choose handling settings and review suggested folders."}
                   </small>
                 </span>
                 <button
@@ -6115,13 +6502,15 @@ const AppShell = ({
                       </div>
                       <div className="scan-inventory-list">
                         {selectedAccounts.map((account) => {
-                          const accountIdentities = identities[account.id] ?? [];
+                          const accountIdentities =
+                            identities[account.id] ?? [];
                           const inventory = ruleInventories[account.id] ?? null;
-                          const messageCount = account.provider === "proton"
-                            ? (protonAudit?.indexedMessages ?? 0)
-                            : account.provider === "gmail"
-                              ? (gmailAudit?.indexedMessages ?? 0)
-                              : (outlookAudit?.indexedMessages ?? 0);
+                          const messageCount =
+                            account.provider === "proton"
+                              ? (protonAudit?.indexedMessages ?? 0)
+                              : account.provider === "gmail"
+                                ? (gmailAudit?.indexedMessages ?? 0)
+                                : (outlookAudit?.indexedMessages ?? 0);
                           return (
                             <div key={account.id}>
                               <span>
@@ -6129,7 +6518,10 @@ const AppShell = ({
                                 <small>{account.provider.toUpperCase()}</small>
                               </span>
                               <b>{messageCount.toLocaleString()} messages</b>
-                              <b>{accountIdentities.length.toLocaleString()} addresses to confirm</b>
+                              <b>
+                                {accountIdentities.length.toLocaleString()}{" "}
+                                addresses to confirm
+                              </b>
                               <b>
                                 {inventory
                                   ? `${inventory.containers.length.toLocaleString()} folders / labels`
@@ -6150,20 +6542,45 @@ const AppShell = ({
                       </div>
                       <div className="scan-inventory-actions">
                         <span>
-                          <strong>{scanInventoryReady ? "Scan complete." : "Folders and filters still need to be scanned."}</strong>
-                          <small>Nothing is created, moved, marked read, filtered, or deleted during Scan.</small>
+                          <strong>
+                            {scanInventoryReady
+                              ? "Scan complete."
+                              : "Folders and filters still need to be scanned."}
+                          </strong>
+                          <small>
+                            Nothing is created, moved, marked read, filtered, or
+                            deleted during Scan.
+                          </small>
                         </span>
                         {scanInventoryReady ? (
-                          <button className="primary-button compact" type="button" onClick={() => setActivePage("organize")}>
+                          <button
+                            className="primary-button compact"
+                            type="button"
+                            onClick={() => setActivePage("organize")}
+                          >
                             Continue to Organize
                           </button>
                         ) : (
-                          <button className="primary-button compact" type="button" disabled={scanInventoryBusy || scannedAccounts.length !== selectedAccounts.length} onClick={() => void completeScanInventory()}>
-                            {scanInventoryBusy ? "Reading folders and filters…" : "Scan folders and filters"}
+                          <button
+                            className="primary-button compact"
+                            type="button"
+                            disabled={
+                              scanInventoryBusy ||
+                              scannedAccounts.length !== selectedAccounts.length
+                            }
+                            onClick={() => void completeScanInventory()}
+                          >
+                            {scanInventoryBusy
+                              ? "Reading folders and filters…"
+                              : "Scan folders and filters"}
                           </button>
                         )}
                       </div>
-                      {scanInventoryError ? <p className="connection-error" role="alert">{scanInventoryError}</p> : null}
+                      {scanInventoryError ? (
+                        <p className="connection-error" role="alert">
+                          {scanInventoryError}
+                        </p>
+                      ) : null}
                     </section>
                   ) : null}
                 </>
@@ -6174,13 +6591,13 @@ const AppShell = ({
           {activePage === "organize" ? (
             <>
               {taskIntro(
-                "Choose folders and file existing messages",
-                "Create the folder structure and apply it to existing non-spam messages.",
+                "Choose how to handle mail and create folders",
+                "Set destinations and read status, then create or reuse the approved folders. No messages move in this step.",
                 [
                   "Confirm which addresses are yours and which need separate folder trees.",
-                  "Choose whether to add folders, use matching folders, or replace custom folders.",
-                  "Sift groups existing messages by your chosen categories, shows the exact moves, then waits for approval.",
-                  "Likely spam and suspicious mail are left for the Spam step.",
+                  "Choose destinations, read status, folder detail, and age reviews for each kind of message. Check the local examples before saving.",
+                  "Review and edit the shared folders and any split alias folders. Matching folders are reused; missing folders are created only after approval.",
+                  "Next review Spam. Existing-message moves and removal of obsolete folders are reviewed in Rules afterward.",
                 ],
               )}
               {!scanInventoryReady ? (
@@ -6195,9 +6612,13 @@ const AppShell = ({
                   <section className="workflow-inline-intro">
                     <span>1</span>
                     <div>
-                      <strong>Confirm aliases and choose separate folders</strong>
+                      <strong>
+                        Confirm aliases and choose separate folders
+                      </strong>
                       <small>
-                        Choose which confirmed addresses need their own folder. Recipients and copied addresses are not treated as aliases you own.
+                        Choose which confirmed addresses need their own folder.
+                        Recipients and copied addresses are not treated as
+                        aliases you own.
                       </small>
                     </div>
                   </section>
@@ -6218,12 +6639,154 @@ const AppShell = ({
                       className="account-organization-sequence"
                       key={account.id}
                     >
-                      <OrganizationProposalEditor
+                      <MailHandlingPanel
                         account={account}
-                        proposal={proposals[account.id] ?? null}
-                        onGenerate={onGenerateProposal}
-                        onEdit={onEditProposal}
+                        onSaved={() => onGenerateProposal(account)}
                       />
+                      <details
+                        className="folder-editor-details"
+                        open={
+                          !proposals[account.id] ||
+                          proposals[account.id]?.requiresRebuild
+                            ? true
+                            : undefined
+                        }
+                      >
+                        <summary>Review or edit the proposed folders</summary>
+                        <OrganizationProposalEditor
+                          account={account}
+                          proposal={proposals[account.id] ?? null}
+                          onGenerate={onGenerateProposal}
+                          onEdit={onEditProposal}
+                        />
+                      </details>
+                      {proposals[account.id] ? (
+                        <FolderSetupPanel
+                          account={account}
+                          proposal={proposals[account.id]!}
+                          onReady={() =>
+                            setCreatedFolders((current) =>
+                              current[account.id] ===
+                              `${proposals[account.id]!.id}:${proposals[account.id]!.revision}`
+                                ? current
+                                : {
+                                    ...current,
+                                    [account.id]: `${proposals[account.id]!.id}:${proposals[account.id]!.revision}`,
+                                  },
+                            )
+                          }
+                          onContinue={() => setActivePage("spam")}
+                        />
+                      ) : null}
+                    </div>
+                  ))}
+                </>
+              )}
+            </>
+          ) : null}
+
+          {activePage === "spam" ? (
+            <>
+              {taskIntro(
+                "Decide what should be treated as spam",
+                "Remove spam candidates from the normal-mail pool before Sift proposes filing filters.",
+                [
+                  "Sift groups mail by sender domain and the address that received it.",
+                  "It shows likely spam, suspicious mail, high-volume marketing, and every sender that could otherwise receive an ordinary filing filter.",
+                  "Nothing is marked as Spam automatically. You choose Spam, Not spam, or Review for each sender and address.",
+                  "After approval, recognized unwanted messages from the selected sender and address are marked read and moved to Spam or Junk. Protected and uncertain messages are excluded.",
+                  "Rules proposes subject-specific Spam filters where supported. Security alerts and receipts are protected even when the company also sends marketing.",
+                ],
+              )}
+              {!organizationReady ? (
+                prerequisite(
+                  "Finish Organize first",
+                  "Spam review starts after the folders exist. Existing messages are filed in Rules after Spam review.",
+                  scannedCount ? "organize" : "audit",
+                  scannedCount ? "Open organize" : "Open scan",
+                )
+              ) : (
+                <>
+                  {selectedAccounts.map((account) => (
+                    <SpamReviewPanel
+                      key={account.id}
+                      account={account}
+                      review={spamReviews[account.id] ?? null}
+                      application={spamApplications[account.id] ?? null}
+                      onGenerate={onGenerateSpamReview}
+                      onPrepare={onPrepareSpamApplication}
+                      onComplete={onCompleteSpamReview}
+                      onApply={onApplySpam}
+                      onRetry={onRetrySpam}
+                      onUndo={onUndoSpam}
+                    />
+                  ))}
+                  <section className="next-action">
+                    <span>
+                      <strong>
+                        {spamReady
+                          ? "Create normal filing filters"
+                          : "Finish every Spam action"}
+                      </strong>
+                      <small>
+                        {spamReady
+                          ? "Rules separates approved Spam handling from ordinary filing. Urgent mail keeps its read status by default."
+                          : "Save each review and apply its existing-message changes. If no existing messages match, Sift records that nothing needs to move."}
+                      </small>
+                    </span>
+                    <button
+                      className="primary-button compact"
+                      type="button"
+                      disabled={!spamReady}
+                      onClick={() => setActivePage("rules")}
+                    >
+                      {spamReady ? "Continue to Rules" : "Finish spam review"}
+                    </button>
+                  </section>
+                </>
+              )}
+            </>
+          ) : null}
+
+          {activePage === "rules" ? (
+            <>
+              {taskIntro(
+                "File existing mail and create future filters",
+                "Review two separate plans: changes to messages already scanned, and filters for new messages.",
+                [
+                  "First review existing-message destinations and read status, including any requested removal of obsolete folders.",
+                  "Sift matches sender addresses, your receiving address, and clear subject evidence. It does not file every message from a company the same way.",
+                  "Your handling choices decide the destination and read status. Urgent messages keep their read status by default.",
+                  "Spam decisions from the previous step are included as separate Spam rules. You can uncheck any proposed change.",
+                ],
+              )}
+              {spamReady ? (
+                <>
+                  <section className="workflow-inline-intro">
+                    <div>
+                      <strong>File existing messages</strong>
+                      <small>
+                        Review the corrected categories and read-status choices.
+                        If you choose to remove old folders, Sift first moves
+                        approved messages and deletes only folders verified
+                        empty. Future filters are reviewed below.
+                      </small>
+                    </div>
+                  </section>
+                  <ProtonOrganizationFlow
+                    audit={protonAudit}
+                    discovery={protonDiscovery}
+                    analysis={analysis}
+                    cleanupPlan={cleanupPlan}
+                    onGenerateCleanup={onGenerateCleanup}
+                    onApproveCleanup={onApproveCleanup}
+                    onResumeCleanup={onResumeCleanup}
+                    onRetryCleanup={onRetryCleanup}
+                    onUndoCleanup={onUndoCleanup}
+                    onContinue={() => setActivePage("rules")}
+                  />
+                  {selectedAccounts.map((account) => (
+                    <div key={account.id}>
                       {account.provider === "gmail" && proposals[account.id] ? (
                         <GmailOrganizationPanel
                           analysis={gmailAnalysis}
@@ -6247,91 +6810,6 @@ const AppShell = ({
                       ) : null}
                     </div>
                   ))}
-                  <ProtonOrganizationFlow
-                    audit={protonAudit}
-                    discovery={protonDiscovery}
-                    analysis={analysis}
-                    cleanupPlan={cleanupPlan}
-                    onGenerateCleanup={onGenerateCleanup}
-                    onApproveCleanup={onApproveCleanup}
-                    onResumeCleanup={onResumeCleanup}
-                    onRetryCleanup={onRetryCleanup}
-                    onUndoCleanup={onUndoCleanup}
-                    onContinue={() => setActivePage("spam")}
-                  />
-                </>
-              )}
-            </>
-          ) : null}
-
-          {activePage === "spam" ? (
-            <>
-              {taskIntro(
-                "Decide what should be treated as spam",
-                "Remove spam candidates from the normal-mail pool before Sift proposes filing filters.",
-                [
-                  "Sift groups mail by sender domain and the address that received it.",
-                  "It shows likely spam, suspicious mail, high-volume marketing, and every sender that could otherwise receive an ordinary filing filter.",
-                  "Nothing is marked as Spam automatically. You choose Spam, Not spam, or Review for each sender and address.",
-                  "After approval, matching existing messages are marked read, removed from Inbox, and moved to Spam or Junk.",
-                  "Rules then proposes a future Spam rule for each Spam choice. Not spam prevents that Spam rule.",
-                ],
-              )}
-              {!organizationReady ? (
-                prerequisite(
-                  "Finish Organize first",
-                  "Spam review starts after the folder structure exists and existing non-spam mail has been filed.",
-                  scannedCount ? "organize" : "audit",
-                  scannedCount ? "Open organize" : "Open scan",
-                )
-              ) : (
-                <>
-                  {selectedAccounts.map((account) => (
-                    <SpamReviewPanel
-                      key={account.id}
-                      account={account}
-                      review={spamReviews[account.id] ?? null}
-                      application={spamApplications[account.id] ?? null}
-                      onGenerate={onGenerateSpamReview}
-                      onPrepare={onPrepareSpamApplication}
-                      onComplete={onCompleteSpamReview}
-                      onApply={onApplySpam}
-                      onRetry={onRetrySpam}
-                      onUndo={onUndoSpam}
-                    />
-                  ))}
-                  <section className="next-action">
-                    <span>
-                      <strong>{spamReady ? "Create normal filing filters" : "Finish every Spam action"}</strong>
-                      <small>
-                        {spamReady
-                          ? "Rules will exclude Spam, Suspicious, Personal, Security, and Unsorted mail from ordinary filing proposals."
-                          : "Save each review and apply its existing-message changes. If no existing messages match, Sift records that nothing needs to move."}
-                      </small>
-                    </span>
-                    <button className="primary-button compact" type="button" disabled={!spamReady} onClick={() => setActivePage("rules")}>
-                      {spamReady ? "Continue to Rules" : "Finish spam review"}
-                    </button>
-                  </section>
-                </>
-              )}
-            </>
-          ) : null}
-
-          {activePage === "rules" ? (
-            <>
-              {taskIntro(
-                "Create filters for future non-spam mail",
-                "Keep recurring low-priority mail out of Inbox while leaving personal, security, suspicious, and unclear mail alone.",
-                [
-                  "One proposal matches one sender domain sending to one of your addresses.",
-                  "Sift requires at least 3 messages, 90% of the sender’s history in one category, and 82% classification confidence.",
-                  "Every selected ordinary filter files future mail, marks it read, and removes it from Inbox when supported.",
-                  "Spam decisions from the previous step are included as separate Spam rules. You can uncheck any proposed change.",
-                ],
-              )}
-              {spamReady ? (
-                <>
                   {selectedAccounts.map((account) => (
                     <RuleReconciliationPanel
                       key={account.id}
@@ -6347,18 +6825,31 @@ const AppShell = ({
                       onUndo={onUndoRulePlan}
                       onExportProton={onExportProtonRulePlan}
                       onConfirmProtonImport={onConfirmProtonRuleImport}
-                      freshSlate={account.provider === "proton" && cleanupPlan?.existingSetup === "replace"}
+                      freshSlate={
+                        account.provider === "proton" &&
+                        cleanupPlan?.existingSetup === "replace"
+                      }
                     />
                   ))}
                 </>
               ) : (
                 prerequisite(
-                  organizationReady ? "Finish Spam review first" : "Create the folders first",
+                  organizationReady
+                    ? "Finish Spam review first"
+                    : "Create the folders first",
                   organizationReady
                     ? "Rules are built only after spam decisions are saved, so spam cannot be mistaken for ordinary recurring mail."
                     : "Filters cannot use folders that do not exist. Finish Organize first.",
-                  organizationReady ? "spam" : scannedCount ? "organize" : "audit",
-                  organizationReady ? "Open spam review" : scannedCount ? "Open organize" : "Open scan",
+                  organizationReady
+                    ? "spam"
+                    : scannedCount
+                      ? "organize"
+                      : "audit",
+                  organizationReady
+                    ? "Open spam review"
+                    : scannedCount
+                      ? "Open organize"
+                      : "Open scan",
                 )
               )}
             </>
@@ -6379,21 +6870,46 @@ const AppShell = ({
                 prerequisite(
                   "Create filters first",
                   "Finish Spam and Rules first so unwanted senders and ordinary filing rules are handled separately.",
-                  spamReady ? "rules" : organizationReady ? "spam" : scannedCount ? "organize" : "audit",
-                  spamReady ? "Open rules" : organizationReady ? "Open spam review" : scannedCount ? "Open organize" : "Open scan",
+                  spamReady
+                    ? "rules"
+                    : organizationReady
+                      ? "spam"
+                      : scannedCount
+                        ? "organize"
+                        : "audit",
+                  spamReady
+                    ? "Open rules"
+                    : organizationReady
+                      ? "Open spam review"
+                      : scannedCount
+                        ? "Open organize"
+                        : "Open scan",
                 )
               ) : (
                 <>
                   <section className="workflow-inline-intro spam-protection-status">
-                    <span><ShieldCheck size={16} /></span>
+                    <span>
+                      <ShieldCheck size={16} />
+                    </span>
                     <div>
                       <strong>
-                        {selectedAccounts.reduce((sum, account) =>
-                          sum + (rulePlans[account.id]?.operations.filter((operation) => operation.desired?.spam).length ?? 0), 0,
-                        ).toLocaleString()} spam filters
+                        {selectedAccounts
+                          .reduce(
+                            (sum, account) =>
+                              sum +
+                              (rulePlans[account.id]?.operations.filter(
+                                (operation) => operation.desired?.spam,
+                              ).length ?? 0),
+                            0,
+                          )
+                          .toLocaleString()}{" "}
+                        spam filters
                       </strong>
                       <small>
-                        Suspected spam is sent to Spam without an unsubscribe request, so Sift never confirms your address to an unsafe sender. Mailing lists with supported one-click links are shown below.
+                        Suspected spam is sent to Spam without an unsubscribe
+                        request, so Sift never confirms your address to an
+                        unsafe sender. Mailing lists with supported one-click
+                        links are shown below.
                       </small>
                     </div>
                   </section>
@@ -6444,7 +6960,9 @@ const AppShell = ({
                       disabled={!unsubscribeReady}
                       onClick={() => setActivePage("delete")}
                     >
-                      {unsubscribeReady ? "Continue to Delete" : "Unsubscribe still running"}
+                      {unsubscribeReady
+                        ? "Continue to Delete"
+                        : "Unsubscribe still running"}
                     </button>
                   </section>
                 </>
@@ -6467,8 +6985,24 @@ const AppShell = ({
                 prerequisite(
                   "Finish Unsubscribe first",
                   "Find mailing lists for every selected account and let active unsubscribe requests finish. Failed, unavailable, protected, spam, and unselected lists do not block Delete.",
-                  rulesReady ? "unsubscribe" : spamReady ? "rules" : organizationReady ? "spam" : scannedCount ? "organize" : "audit",
-                  rulesReady ? "Open unsubscribe" : spamReady ? "Open rules" : organizationReady ? "Open spam review" : scannedCount ? "Open organize" : "Open scan",
+                  rulesReady
+                    ? "unsubscribe"
+                    : spamReady
+                      ? "rules"
+                      : organizationReady
+                        ? "spam"
+                        : scannedCount
+                          ? "organize"
+                          : "audit",
+                  rulesReady
+                    ? "Open unsubscribe"
+                    : spamReady
+                      ? "Open rules"
+                      : organizationReady
+                        ? "Open spam review"
+                        : scannedCount
+                          ? "Open organize"
+                          : "Open scan",
                 )
               ) : (
                 <>
@@ -6531,13 +7065,22 @@ const AppShell = ({
           ) : null}
 
           {activePage === "settings" ? (
-            <SettingsPanel
-              settings={settings}
-              onUpdate={onUpdateSettings}
-              onCheck={onCheckForUpdates}
-              onOpenAccounts={() => setActivePage("accounts")}
-              onOpenRecovery={() => setActivePage("recovery")}
-            />
+            <>
+              <SettingsPanel
+                settings={settings}
+                onUpdate={onUpdateSettings}
+                onCheck={onCheckForUpdates}
+                onOpenAccounts={() => setActivePage("accounts")}
+                onOpenRecovery={() => setActivePage("recovery")}
+              />
+              {selectedAccounts.map((account) => (
+                <MailHandlingPanel
+                  key={account.id}
+                  account={account}
+                  onSaved={() => onGenerateProposal(account)}
+                />
+              ))}
+            </>
           ) : null}
         </main>
       </div>
@@ -6685,10 +7228,8 @@ export const App = () => {
     setOutlookDeletion(currentOutlookDeletion);
     setOutlookSubscriptions(currentOutlookSubscriptions);
     setDiagnostics(currentDiagnostics);
-    const currentSpamApplications: Record<
-      string,
-      SpamApplicationPlan | null
-    > = {};
+    const currentSpamApplications: Record<string, SpamApplicationPlan | null> =
+      {};
     if (connection) currentSpamApplications[connection.id] = currentProtonSpam;
     if (currentGmail)
       currentSpamApplications[currentGmail.id] = currentGmailSpam;
@@ -6776,7 +7317,9 @@ export const App = () => {
       if (settingsResult.status === "fulfilled") {
         setAppSettings(settingsResult.value);
       } else {
-        errors.push("Sift couldn't load app settings; automatic updates remain off.");
+        errors.push(
+          "Sift couldn't load app settings; automatic updates remain off.",
+        );
         setAppSettings({
           autoUpdateEnabled: false,
           automaticUpdatesActive: false,
@@ -6938,9 +7481,15 @@ export const App = () => {
     setDeletionPlan(null);
     setSubscriptions(null);
     if (protonConnection)
-      setSpamReviews((current) => ({ ...current, [protonConnection.id]: null }));
+      setSpamReviews((current) => ({
+        ...current,
+        [protonConnection.id]: null,
+      }));
     if (protonConnection)
-      setSpamApplications((current) => ({ ...current, [protonConnection.id]: null }));
+      setSpamApplications((current) => ({
+        ...current,
+        [protonConnection.id]: null,
+      }));
   };
 
   const generateCleanup = async (
@@ -6980,13 +7529,14 @@ export const App = () => {
     const progress = await window.emailOrganizer.undoCleanupPlan({ planId });
     setCleanupPlan(progress.plan);
   };
-  const generateDeletion = async (senderDomains: string[]) =>
+  const generateDeletion = async (senderDomains: string[], retention = false) =>
     setDeletionPlan(
       await window.emailOrganizer.generateCleanupPlan({
         kind: "trash",
         existingSetup: "extend",
         containers: {},
         trashSenderDomains: senderDomains,
+        retention,
       }),
     );
   const approveDeletion = async (planId: string, revision: string) => {
@@ -7073,17 +7623,27 @@ export const App = () => {
   const analyzeOutlook = async () => {
     setOutlookAnalysis(await window.emailOrganizer.analyzeOutlook());
     if (outlookConnection)
-      setSpamReviews((current) => ({ ...current, [outlookConnection.id]: null }));
+      setSpamReviews((current) => ({
+        ...current,
+        [outlookConnection.id]: null,
+      }));
     if (outlookConnection)
-      setSpamApplications((current) => ({ ...current, [outlookConnection.id]: null }));
+      setSpamApplications((current) => ({
+        ...current,
+        [outlookConnection.id]: null,
+      }));
   };
   const generateOutlookOrganization = async () =>
     setOutlookOrganization(
       await window.emailOrganizer.generateOutlookOrganizationPlan(),
     );
-  const generateOutlookDeletion = async (senderDomains: string[]) =>
+  const generateOutlookDeletion = async (
+    senderDomains: string[],
+    retention = false,
+  ) =>
     setOutlookDeletion(
       await window.emailOrganizer.generateOutlookDeletionPlan({
+        retention,
         senderDomains,
         olderThanDays: 180,
       }),
@@ -7201,7 +7761,10 @@ export const App = () => {
     setProposals((current) => ({ ...current, [input.connectionId]: null }));
     setRulePlans((current) => ({ ...current, [input.connectionId]: null }));
     setSpamReviews((current) => ({ ...current, [input.connectionId]: null }));
-    setSpamApplications((current) => ({ ...current, [input.connectionId]: null }));
+    setSpamApplications((current) => ({
+      ...current,
+      [input.connectionId]: null,
+    }));
     if (input.provider === "gmail") setGmailOrganization(null);
     else if (input.provider === "outlook") setOutlookOrganization(null);
     else setCleanupPlan(null);
@@ -7345,10 +7908,15 @@ export const App = () => {
   ) => {
     const updated =
       account.provider === "proton"
-        ? (await window.emailOrganizer.undoCleanupPlan({ planId: plan.id })).plan
+        ? (await window.emailOrganizer.undoCleanupPlan({ planId: plan.id }))
+            .plan
         : account.provider === "gmail"
-          ? await window.emailOrganizer.undoGmailOrganizationPlan({ planId: plan.id })
-          : await window.emailOrganizer.undoOutlookOrganizationPlan({ planId: plan.id });
+          ? await window.emailOrganizer.undoGmailOrganizationPlan({
+              planId: plan.id,
+            })
+          : await window.emailOrganizer.undoOutlookOrganizationPlan({
+              planId: plan.id,
+            });
     setSpamApplications((current) => ({ ...current, [account.id]: updated }));
   };
   const refreshRuleInventory = async (account: MailAccountSummary) => {
@@ -7443,7 +8011,10 @@ export const App = () => {
     if (gmailConnection)
       setSpamReviews((current) => ({ ...current, [gmailConnection.id]: null }));
     if (gmailConnection)
-      setSpamApplications((current) => ({ ...current, [gmailConnection.id]: null }));
+      setSpamApplications((current) => ({
+        ...current,
+        [gmailConnection.id]: null,
+      }));
   };
   const setGmailHistoryPlan = (plan: GmailOrganizationPlan) => {
     if (plan.kind === "trash") setGmailDeletion(plan);
@@ -7458,9 +8029,13 @@ export const App = () => {
     setGmailHistoryPlan(
       await window.emailOrganizer.generateGmailOrganizationPlan(),
     );
-  const generateGmailDeletion = async (senderDomains: string[]) =>
+  const generateGmailDeletion = async (
+    senderDomains: string[],
+    retention = false,
+  ) =>
     setGmailHistoryPlan(
       await window.emailOrganizer.generateGmailDeletionPlan({
+        retention,
         senderDomains,
         olderThanDays: 180,
       }),
@@ -7504,8 +8079,7 @@ export const App = () => {
   const updateAppSettings = async (input: UpdateAppSettingsInput) => {
     setAppSettings(await window.emailOrganizer.updateAppSettings(input));
   };
-  const checkForUpdatesNow = () =>
-    window.emailOrganizer.checkForUpdatesNow();
+  const checkForUpdatesNow = () => window.emailOrganizer.checkForUpdatesNow();
 
   if (loading || !appSettings) {
     return (

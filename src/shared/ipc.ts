@@ -100,7 +100,17 @@ import type {
   SpamReviewScope,
 } from "./contracts/spam-review";
 
+import type {
+  HandlingScope,
+  HandlingSave,
+  HandlingState,
+  HandlingPreviewInput,
+  HandlingPreview,
+} from "./contracts/mail-handling";
 export const IPC_CHANNELS = Object.freeze({
+  mailHandlingGet: "mail-handling:get",
+  mailHandlingSave: "mail-handling:save",
+  mailHandlingPreview: "mail-handling:preview",
   appGetVersion: "app:get-version",
   appSettingsGet: "app-settings:get",
   appSettingsUpdate: "app-settings:update",
@@ -111,6 +121,8 @@ export const IPC_CHANNELS = Object.freeze({
   identitiesRefresh: "identities:refresh",
   identitiesUpdate: "identities:update",
   organizationProposalGet: "organization-proposal:get",
+  organizationFoldersCreate: "organization-folders:create",
+  organizationFoldersGet: "organization-folders:get",
   organizationProposalGenerate: "organization-proposal:generate",
   organizationProposalEdit: "organization-proposal:edit",
   spamReviewGet: "spam-review:get",
@@ -215,6 +227,9 @@ export const IPC_CHANNELS = Object.freeze({
 } as const);
 
 export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
+  "getMailHandling",
+  "saveMailHandling",
+  "previewMailHandling",
   "getVersion",
   "getAppSettings",
   "updateAppSettings",
@@ -225,6 +240,8 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   "refreshAccountIdentities",
   "updateAccountIdentity",
   "getOrganizationProposal",
+  "createOrganizationFolders",
+  "getOrganizationFolders",
   "generateOrganizationProposal",
   "editOrganizationProposal",
   "getSpamReview",
@@ -329,6 +346,9 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
 ] as const);
 
 export interface EmailOrganizerBridge {
+  getMailHandling(input: HandlingScope): Promise<HandlingState>;
+  saveMailHandling(input: HandlingSave): Promise<HandlingState>;
+  previewMailHandling(input: HandlingPreviewInput): Promise<HandlingPreview>;
   getVersion(): Promise<string>;
   getAppSettings(): Promise<AppSettings>;
   updateAppSettings(input: UpdateAppSettingsInput): Promise<AppSettings>;
@@ -347,6 +367,12 @@ export interface EmailOrganizerBridge {
   getOrganizationProposal(
     input: OrganizationProposalScope,
   ): Promise<OrganizationProposal | null>;
+  createOrganizationFolders(
+    input: import("./contracts/organization").CreateOrganizationFolders,
+  ): Promise<JobProgress>;
+  getOrganizationFolders(
+    input: import("./contracts/organization").CreateOrganizationFolders,
+  ): Promise<JobProgress | null>;
   generateOrganizationProposal(
     input: OrganizationProposalScope,
   ): Promise<OrganizationProposal>;

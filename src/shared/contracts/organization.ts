@@ -1,6 +1,6 @@
-import { z } from 'zod';
-import { accountProviderSchema } from './accounts';
-import { mailCategorySchema } from './analysis';
+import { z } from "zod";
+import { accountProviderSchema } from "./accounts";
+import { mailCategorySchema } from "./analysis";
 
 export const organizationProposalItemSchema = z.object({
   id: z.uuid(),
@@ -21,26 +21,50 @@ export const organizationProposalSchema = z.object({
   provider: accountProviderSchema,
   connectionId: z.uuid(),
   revision: z.string().length(64),
-  state: z.enum(['draft', 'approved', 'superseded']),
+  state: z.enum(["draft", "approved", "superseded"]),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
+  requiresRebuild: z.boolean().optional(),
   items: z.array(organizationProposalItemSchema),
 });
 
-export const organizationProposalScopeSchema = z.object({
-  provider: accountProviderSchema,
-  connectionId: z.uuid(),
-}).strict();
+export const organizationProposalScopeSchema = z
+  .object({
+    provider: accountProviderSchema,
+    connectionId: z.uuid(),
+  })
+  .strict();
 
-export const editOrganizationProposalSchema = z.object({
-  proposalId: z.uuid(),
-  revision: z.string().length(64),
-  itemId: z.uuid(),
-  category: mailCategorySchema,
-  targetPath: z.string().trim().min(1).max(192).regex(/^[^\\]+$/),
-  enabled: z.boolean(),
-}).strict();
+export const createOrganizationFoldersSchema = organizationProposalScopeSchema
+  .extend({
+    proposalId: z.uuid(),
+    revision: z.string().length(64),
+  })
+  .strict();
+export type CreateOrganizationFolders = z.infer<
+  typeof createOrganizationFoldersSchema
+>;
+
+export const editOrganizationProposalSchema = z
+  .object({
+    proposalId: z.uuid(),
+    revision: z.string().length(64),
+    itemId: z.uuid(),
+    category: mailCategorySchema,
+    targetPath: z
+      .string()
+      .trim()
+      .min(1)
+      .max(192)
+      .regex(/^[^\\]+$/),
+    enabled: z.boolean(),
+  })
+  .strict();
 
 export type OrganizationProposal = z.infer<typeof organizationProposalSchema>;
-export type OrganizationProposalScope = z.infer<typeof organizationProposalScopeSchema>;
-export type EditOrganizationProposal = z.infer<typeof editOrganizationProposalSchema>;
+export type OrganizationProposalScope = z.infer<
+  typeof organizationProposalScopeSchema
+>;
+export type EditOrganizationProposal = z.infer<
+  typeof editOrganizationProposalSchema
+>;

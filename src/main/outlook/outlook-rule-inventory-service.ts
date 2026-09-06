@@ -40,24 +40,7 @@ export class OutlookRuleInventoryService {
       credentials.refreshToken,
       this.fetchPort,
     );
-    const top = await api<{ value?: Folder[] }>(
-      this.fetchPort,
-      token,
-      "/me/mailFolders?$top=100&includeHiddenFolders=true&$select=id,displayName,parentFolderId",
-    );
-    const folders = [...(top.value ?? [])];
-    for (let index = 0; index < folders.length && index < 500; index += 1) {
-      const children = await api<{ value?: Folder[] }>(
-        this.fetchPort,
-        token,
-        `/me/mailFolders/${encodeURIComponent(folders[index]!.id)}/childFolders?$top=100&includeHiddenFolders=true&$select=id,displayName,parentFolderId`,
-      );
-      folders.push(
-        ...(children.value ?? []).filter(
-          (candidate) => !folders.some((folder) => folder.id === candidate.id),
-        ),
-      );
-    }
+    const folders = await readGraphFolders(this.fetchPort, token);
     const byId = new Map(folders.map((folder) => [folder.id, folder]));
     const folderNames = new Map(
       folders.map((folder) => {
@@ -81,7 +64,7 @@ export class OutlookRuleInventoryService {
       folders.find((folder) =>
         ["junk email", "junk"].includes(folder.displayName.toLowerCase()),
       )?.id ?? "junkemail";
-    const rules = await api<{ value?: GraphMessageRule[] }>(
+    const rules = await readGraphPages<GraphMessageRule>(
       this.fetchPort,
       token,
       "/me/mailFolders/inbox/messageRules",
@@ -90,11 +73,13 @@ export class OutlookRuleInventoryService {
       "outlook",
       connectionId,
       "live_api",
-      (rules.value ?? []).map((rule) =>
+      rules.map((rule) =>
         normalizeOutlookRule(rule, folderNames, { inboxId, junkId }),
       ),
       256,
       [...folderNames.values()],
+      Object.fromEntries(folderNames),
     );
   }
 }
+import { readGraphFolders, readGraphPages } from "./graph-inventory";

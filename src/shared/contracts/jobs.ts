@@ -10,6 +10,7 @@ export const jobKindSchema = z.enum([
   "outlook-history",
   "bulk-unsubscribe",
   "provider-rules",
+  "folder-setup",
 ]);
 
 export const jobStateCountsSchema = z.object({

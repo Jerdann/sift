@@ -1,9 +1,38 @@
-import { z } from 'zod';
-import { accountIdentityStatusSchema, identityEvidenceSourceSchema } from './accounts';
+import { z } from "zod";
+import {
+  accountIdentityStatusSchema,
+  identityEvidenceSourceSchema,
+} from "./accounts";
 
 export const mailCategorySchema = z.enum([
-  'personal', 'security', 'accounts', 'transactions', 'finance', 'shopping',
-  'travel', 'games', 'subscriptions', 'promotions', 'social', 'suspicious', 'spam', 'other',
+  "personal",
+  "security",
+  "accounts",
+  "transactions",
+  "finance",
+  "shopping",
+  "travel",
+  "games",
+  "subscriptions",
+  "promotions",
+  "social",
+  "suspicious",
+  "spam",
+  "other",
+  "codes",
+  "bills",
+  "delivery_issues",
+  "account_actions",
+  "refunds",
+  "transfers",
+  "orders",
+  "tickets",
+  "travel_updates",
+  "surveys",
+  "service_notices",
+  "reports",
+  "newsletters",
+  "announcements",
 ]);
 
 export const categorySummarySchema = z.object({
@@ -27,7 +56,12 @@ export const senderStreamSchema = z.object({
 
 export const addressServiceSchema = z.object({
   address: z.string(),
-  ownershipEvidence: z.enum(['provider_account', 'sent_and_received', 'sent', 'received']),
+  ownershipEvidence: z.enum([
+    "provider_account",
+    "sent_and_received",
+    "sent",
+    "received",
+  ]),
   canRetire: z.boolean(),
   sentFromCount: z.number().int().nonnegative(),
   deliveredToCount: z.number().int().nonnegative(),
@@ -35,16 +69,23 @@ export const addressServiceSchema = z.object({
   status: accountIdentityStatusSchema,
   containerEnabled: z.boolean(),
   containerName: z.string().nullable(),
-  recommendation: z.enum(['retain', 'migrate', 'watch', 'consider_deactivation']),
+  recommendation: z.enum([
+    "retain",
+    "migrate",
+    "watch",
+    "consider_deactivation",
+  ]),
   messageCount: z.number().int().nonnegative(),
   latestAt: z.iso.datetime().nullable(),
   importantCount: z.number().int().nonnegative(),
-  services: z.array(z.object({
-    domain: z.string(),
-    messageCount: z.number().int().positive(),
-    latestAt: z.iso.datetime().nullable(),
-    categories: z.array(mailCategorySchema),
-  })),
+  services: z.array(
+    z.object({
+      domain: z.string(),
+      messageCount: z.number().int().positive(),
+      latestAt: z.iso.datetime().nullable(),
+      categories: z.array(mailCategorySchema),
+    }),
+  ),
   rationale: z.string(),
 });
 
@@ -59,6 +100,8 @@ export const mailboxAnalysisSummarySchema = z.object({
 });
 
 export type MailCategory = z.infer<typeof mailCategorySchema>;
-export type MailboxAnalysisSummary = z.infer<typeof mailboxAnalysisSummarySchema>;
+export type MailboxAnalysisSummary = z.infer<
+  typeof mailboxAnalysisSummarySchema
+>;
 export type SenderStream = z.infer<typeof senderStreamSchema>;
 export type AddressService = z.infer<typeof addressServiceSchema>;

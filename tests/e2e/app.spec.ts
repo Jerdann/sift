@@ -14,7 +14,9 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
   try {
     let page = await electronApp.firstWindow();
     await expect(
-      page.getByRole("heading", { name: "Organize email accounts on this computer." }),
+      page.getByRole("heading", {
+        name: "Organize email accounts on this computer.",
+      }),
     ).toBeVisible();
 
     await page
@@ -54,9 +56,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "Manual update checks work only in the installed Windows app.",
       ),
     ).toBeVisible();
-    await page
-      .getByRole("button", { name: "Back to local profiles" })
-      .click();
+    await page.getByRole("button", { name: "Back to local profiles" }).click();
 
     await page.getByRole("button", { name: "Create local profile" }).click();
     await page.getByLabel("Profile name").fill("Owner");
@@ -130,14 +130,14 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
           if (element instanceof HTMLButtonElement) {
             return Boolean(
               element.getAttribute("aria-label") ||
-                element.title ||
-                element.textContent?.trim(),
+              element.title ||
+              element.textContent?.trim(),
             );
           }
           return Boolean(
             element.getAttribute("aria-label") ||
-              element.getAttribute("aria-labelledby") ||
-              element.closest("label"),
+            element.getAttribute("aria-labelledby") ||
+            element.closest("label"),
           );
         }),
     );
@@ -190,6 +190,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "connectOutlook",
         "connectProtonBridge",
         "createEncryptedBackup",
+        "createOrganizationFolders",
         "createProfile",
         "diagnoseProtonBridge",
         "disconnectGmail",
@@ -222,7 +223,9 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "getGmailSpamPlan",
         "getGmailSubscriptionDashboard",
         "getJob",
+        "getMailHandling",
         "getMailboxAnalysis",
+        "getOrganizationFolders",
         "getOrganizationProposal",
         "getOutlookAnalysis",
         "getOutlookAudit",
@@ -252,6 +255,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "onProtonAuditProgress",
         "onUnsubscribeProgress",
         "pauseProtonAudit",
+        "previewMailHandling",
         "rebuildLocalIndex",
         "refreshAccountIdentities",
         "refreshRuleInventory",
@@ -269,6 +273,7 @@ test("creates isolated profiles and resumes interrupted work after relaunch", as
         "retryOutlookBulkUnsubscribe",
         "retryOutlookOrganizationPlan",
         "retryRulePlan",
+        "saveMailHandling",
         "scanGmailSubscriptions",
         "scanOutlookSubscriptions",
         "scanSubscriptions",

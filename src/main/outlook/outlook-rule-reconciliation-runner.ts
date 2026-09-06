@@ -53,8 +53,23 @@ export class OutlookRuleReconciliationRunner {
     readonly fetchPort: OutlookFetch = fetch,
   ) {}
 
+  async folderPreparer(connectionId: string) {
+    const token = await this.#token(connectionId);
+    const state = await this.#state(token);
+    return async (targetPath: string) => {
+      const id = await this.#ensureFolder(token, state, targetPath);
+      const verified = await api<Folder>(
+        this.fetchPort,
+        token,
+        `/me/mailFolders/${encodeURIComponent(id)}?$select=id,displayName`,
+      );
+      if (verified.id !== id) throw new Error("folder_verification_failed");
+    };
+  }
+
   async run(jobId: string) {
     const planId = this.rules.planIdForJob(jobId);
+    this.rules.assertCompatible(planId);
     for (;;) {
       const item = this.jobs.claimNextPending(jobId);
       if (!item) break;
@@ -186,9 +201,7 @@ export class OutlookRuleReconciliationRunner {
       state = await this.#state(token);
       if (
         providerRuleId &&
-        state.rules.some(
-          (rule) => rule.providerRuleId === providerRuleId,
-        )
+        state.rules.some((rule) => rule.providerRuleId === providerRuleId)
       )
         throw new Error("provider_verification_mismatch");
       if (managed) {
@@ -291,24 +304,7 @@ export class OutlookRuleReconciliationRunner {
   }
 
   async #state(token: string): Promise<State> {
-    const top = await api<{ value?: Folder[] }>(
-      this.fetchPort,
-      token,
-      "/me/mailFolders?$top=100&includeHiddenFolders=true&$select=id,displayName,parentFolderId",
-    );
-    const folders = [...(top.value ?? [])];
-    for (let index = 0; index < folders.length && index < 500; index += 1) {
-      const child = await api<{ value?: Folder[] }>(
-        this.fetchPort,
-        token,
-        `/me/mailFolders/${encodeURIComponent(folders[index]!.id)}/childFolders?$top=100&includeHiddenFolders=true&$select=id,displayName,parentFolderId`,
-      );
-      folders.push(
-        ...(child.value ?? []).filter(
-          (candidate) => !folders.some((folder) => folder.id === candidate.id),
-        ),
-      );
-    }
+    const folders = await readGraphFolders(this.fetchPort, token);
     const byId = new Map(folders.map((folder) => [folder.id, folder]));
     const pathFor = (folder: Folder): string => {
       const segments = [folder.displayName];
@@ -336,13 +332,13 @@ export class OutlookRuleReconciliationRunner {
       folders.find((folder) =>
         ["junk email", "junk"].includes(folder.displayName.toLowerCase()),
       )?.id ?? "junkemail";
-    const payload = await api<{ value?: GraphMessageRule[] }>(
+    const payload = await readGraphPages<GraphMessageRule>(
       this.fetchPort,
       token,
       "/me/mailFolders/inbox/messageRules",
     );
     return {
-      rules: (payload.value ?? []).map((rule) =>
+      rules: payload.map((rule) =>
         normalizeOutlookRule(rule, folderPathsById, { inboxId, junkId }),
       ),
       folderIdsByPath,
@@ -357,9 +353,11 @@ export class OutlookRuleReconciliationRunner {
     state: State,
     desired: DesiredManagedRule,
   ): Promise<string> {
-    const destination = desired.spam
-      ? state.junkId
-      : await this.#ensureFolder(token, state, desired.targetPath);
+    const destination = desired.trash
+      ? undefined
+      : desired.spam
+        ? state.junkId
+        : await this.#ensureFolder(token, state, desired.targetPath);
     const created = await api<{ id: string }>(
       this.fetchPort,
       token,
@@ -376,8 +374,13 @@ export class OutlookRuleReconciliationRunner {
               ? { recipientContains: [desired.receivingAddress] }
               : {}),
           },
+          ...(desired.purposeConditions
+            ? outlookPurposePredicates(desired.purposeConditions)
+            : {}),
           actions: {
-            moveToFolder: destination,
+            ...(desired.trash
+              ? { delete: true }
+              : { moveToFolder: destination }),
             markAsRead: desired.markRead,
             stopProcessingRules: true,
           },
@@ -429,3 +432,5 @@ export class OutlookRuleReconciliationRunner {
     );
   }
 }
+import { outlookPurposePredicates } from "../../core/rules/purpose-filter";
+import { readGraphFolders, readGraphPages } from "./graph-inventory";

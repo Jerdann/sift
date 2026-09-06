@@ -1,4 +1,5 @@
 import { sha256 } from "../../core/rules/rule-reconciliation";
+import { serializePredicates } from "../../core/rules/purpose-filter";
 import type {
   NormalizedRuleAction,
   NormalizedRuleCriteria,
@@ -12,8 +13,23 @@ export interface GraphMessageRule {
     senderContains?: string[];
     recipientContains?: string[];
     subjectContains?: string[];
+    fromAddresses?: Array<{ emailAddress: { address: string; name?: string } }>;
+    sentToAddresses?: Array<{
+      emailAddress: { address: string; name?: string };
+    }>;
+    [key: string]: unknown;
   };
-  actions?: { moveToFolder?: string; markAsRead?: boolean; delete?: boolean };
+  exceptions?: Record<string, unknown>;
+  isEnabled?: boolean;
+  isReadOnly?: boolean;
+  hasError?: boolean;
+  actions?: {
+    moveToFolder?: string;
+    markAsRead?: boolean;
+    delete?: boolean;
+    stopProcessingRules?: boolean;
+    [key: string]: unknown;
+  };
 }
 
 export const normalizeOutlookRule = (
@@ -28,8 +44,9 @@ export const normalizeOutlookRule = (
   const subject =
     rule.conditions?.subjectContains?.[0]?.trim().toLowerCase() ?? null;
   const destination = rule.actions?.moveToFolder;
-  const label =
-    destination === specialFolders.junkId
+  const label = rule.actions?.delete
+    ? "TRASH"
+    : destination === specialFolders.junkId
       ? "SPAM"
       : destination
         ? (folders.get(destination) ?? destination)
@@ -37,15 +54,59 @@ export const normalizeOutlookRule = (
   const criteria: NormalizedRuleCriteria = {
     from: sender,
     to: recipient,
-    subject,
-    query: null,
-    negatedQuery: null,
+    subject: rule.conditions?.fromAddresses ? null : subject,
+    query:
+      rule.conditions?.fromAddresses ||
+      (rule.exceptions && Object.keys(rule.exceptions).length) ||
+      Object.values(rule.conditions ?? {}).some(
+        (v) => Array.isArray(v) && v.length > 1,
+      ) ||
+      Object.keys(rule.conditions ?? {}).some(
+        (key) =>
+          !["senderContains", "recipientContains", "subjectContains"].includes(
+            key,
+          ),
+      )
+        ? serializePredicates({
+            conditions: rule.conditions ?? {},
+            exceptions: rule.exceptions ?? {},
+          })
+        : null,
+    // A disabled, broken or more powerful external rule is not identical to a
+    // Sift rule. Preserve opaque effects so it cannot be silently adopted.
+    negatedQuery:
+      rule.isEnabled === false ||
+      rule.isReadOnly ||
+      rule.hasError ||
+      rule.actions?.stopProcessingRules === false ||
+      Object.entries(rule.actions ?? {}).some(
+        ([key, value]) =>
+          ![
+            "moveToFolder",
+            "markAsRead",
+            "delete",
+            "stopProcessingRules",
+          ].includes(key) &&
+          value !== false &&
+          value !== null &&
+          !(Array.isArray(value) && !value.length),
+      )
+        ? serializePredicates({
+            externalRule: true,
+            disabled: rule.isEnabled === false,
+            readOnly: rule.isReadOnly,
+            hasError: rule.hasError,
+            continues: rule.actions?.stopProcessingRules === false,
+            actions: rule.actions,
+          })
+        : null,
     hasAttachment: null,
   };
   const action: NormalizedRuleAction = {
     addLabels: label ? [label] : [],
     removeLabels: [
-      ...(destination && destination !== specialFolders.inboxId
+      ...(rule.actions?.delete ||
+      (destination && destination !== specialFolders.inboxId)
         ? ["INBOX"]
         : []),
       ...(rule.actions?.markAsRead ? ["UNREAD"] : []),

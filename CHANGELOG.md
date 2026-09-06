@@ -4,6 +4,42 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-06
+
+### Added
+
+- Per-profile, account, and alias controls for folder detail, matching strictness, destination, read status, and age-based cleanup reviews. Local examples show the proposed effect before saving.
+- Separate categories for login codes, security changes, account actions, receipts, transfers, refunds, shipping, delivery problems, travel bookings, tickets, surveys, newsletters, and product announcements.
+- A folder-only approval step in Organize. It reuses matching folders, creates missing folders, reports verified progress, and retries without moving messages.
+- Optional age-based Trash reviews for selected low-value message types and old login/registration messages. Nothing expires in the background.
+
+### Changed
+
+- Message purpose takes precedence over company identity. Mailing-list headers no longer classify everything as a subscription, and generic “check-in” language no longer implies travel.
+- Rules match the observed sender address, confirmed receiving alias, and message-purpose conditions together. Higher-priority purposes and replies are excluded. Gmail and Outlook export only the narrower conditions their providers support.
+- Login codes, security changes, payment problems, shipping updates, and active travel preserve read status by default. Folder depth and read status are separate choices.
+- Existing-message cleanup now appears in Rules, after Organize creates folders and Spam review is complete. Shared folders and split aliases remain visibly separate.
+- Promotional messages can be filed, left in place, moved to Spam, or moved to Trash according to the user's choices. A spam decision does not block every message from a mixed-use company.
+
+### Fixed
+
+- Reclassification preserves completed action and recovery records. Legacy unfinished forward plans are stopped on upgrade and require a fresh review.
+- Changed handling preferences invalidate stale proposals and action plans, including inherited profile changes.
+- Proton same-folder read-status changes no longer issue a redundant MOVE. Cleanup and Undo use the plan's account, not whichever account is currently selected.
+- Stale-sender Trash reviews check each message's age and protect records and actionable messages.
+- Outlook inventories follow pagination; disabled, broken, or differently configured external rules cannot be mistaken for identical Sift rules.
+- Removed the legacy sender-wide rule export. Compact Proton Sieve output shares purpose checks while preserving alias and sender restrictions.
+
+### Upgrade notes
+
+- Updating does not reorganize or delete mail. In Organize, rebuild the proposal from the saved scan, choose handling settings, and review the folders. Rescan first if the mailbox has changed.
+- Review Spam, then approve existing-message changes and future filters separately in Rules. Proton still requires importing the reviewed Sieve file in Proton Mail; Bridge cannot install or remove server-side filters.
+- See [Mail handling](docs/MAIL_HANDLING.md) for defaults, limitations, and the upgrade workflow.
+
+### Tests
+
+- Added synthetic classification, purpose-rule, alias-scope, preview, retention, migration, recovery, folder-retry, provider-state, and desktop layout coverage. Tests use isolated profiles and never connect to a real mailbox.
+
 ## [1.5.3] - 2026-08-27
 
 ### Fixed

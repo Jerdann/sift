@@ -3,6 +3,13 @@ import { z } from "zod";
 import type { EmailOrganizerBridge } from "../shared/ipc";
 import { IPC_CHANNELS } from "../shared/ipc";
 import {
+  handlingScopeSchema,
+  handlingSaveSchema,
+  handlingStateSchema,
+  handlingPreviewInputSchema,
+  handlingPreviewSchema,
+} from "../shared/contracts/mail-handling";
+import {
   type CreateProfileInput,
   type SelectProfileInput,
   createProfileInputSchema,
@@ -112,6 +119,7 @@ import {
   editOrganizationProposalSchema,
   organizationProposalSchema,
   organizationProposalScopeSchema,
+  createOrganizationFoldersSchema,
 } from "../shared/contracts/organization";
 import {
   type ApproveRulePlan,
@@ -154,6 +162,33 @@ import {
 } from "../shared/contracts/spam-review";
 
 const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
+  getMailHandling: async (
+    input: import("../shared/contracts/mail-handling").HandlingScope,
+  ) =>
+    handlingStateSchema.parse(
+      await ipcRenderer.invoke(
+        IPC_CHANNELS.mailHandlingGet,
+        handlingScopeSchema.parse(input),
+      ),
+    ),
+  saveMailHandling: async (
+    input: import("../shared/contracts/mail-handling").HandlingSave,
+  ) =>
+    handlingStateSchema.parse(
+      await ipcRenderer.invoke(
+        IPC_CHANNELS.mailHandlingSave,
+        handlingSaveSchema.parse(input),
+      ),
+    ),
+  previewMailHandling: async (
+    input: import("../shared/contracts/mail-handling").HandlingPreviewInput,
+  ) =>
+    handlingPreviewSchema.parse(
+      await ipcRenderer.invoke(
+        IPC_CHANNELS.mailHandlingPreview,
+        handlingPreviewInputSchema.parse(input),
+      ),
+    ),
   getVersion: async () =>
     z.string().parse(await ipcRenderer.invoke(IPC_CHANNELS.appGetVersion)),
   getAppSettings: async () =>
@@ -207,6 +242,26 @@ const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
         accountIdentityUpdateInputSchema.parse(input),
       ),
     ),
+  createOrganizationFolders: async (
+    input: import("../shared/contracts/organization").CreateOrganizationFolders,
+  ) =>
+    jobProgressSchema.parse(
+      await ipcRenderer.invoke(
+        IPC_CHANNELS.organizationFoldersCreate,
+        createOrganizationFoldersSchema.parse(input),
+      ),
+    ),
+  getOrganizationFolders: async (
+    input: import("../shared/contracts/organization").CreateOrganizationFolders,
+  ) =>
+    jobProgressSchema
+      .nullable()
+      .parse(
+        await ipcRenderer.invoke(
+          IPC_CHANNELS.organizationFoldersGet,
+          createOrganizationFoldersSchema.parse(input),
+        ),
+      ),
   getOrganizationProposal: async (input: OrganizationProposalScope) =>
     organizationProposalSchema
       .nullable()

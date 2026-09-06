@@ -51,6 +51,7 @@ export class OutlookHistoryRunner {
     onProgress?: (plan: ReturnType<OutlookHistoryRepository["sync"]>) => void,
   ) {
     const planId = this.plans.planIdForJob(jobId);
+    this.plans.assertCompatible(planId);
     const tokens = new Map<string, string>();
     const folders = new Map<string, FolderState>();
     for (;;) {
@@ -70,8 +71,8 @@ export class OutlookHistoryRunner {
           : action.spam
             ? folderState.junkId
             : await this.#ensureFolder(token, folderState, action.targetFolder);
-        const desiredRead = action.markRead ? true : action.priorIsRead;
         let current = await this.#read(token, action.graphMessageId);
+        const desiredRead = action.markRead || current.isRead;
         if (current.parentFolderId !== destination) {
           if (current.parentFolderId !== action.priorFolderId)
             throw new Error("provider_verification_mismatch");
@@ -243,24 +244,7 @@ export class OutlookHistoryRunner {
   ): Promise<FolderState> {
     const found = cache.get(connectionId);
     if (found) return found;
-    const top = await api<{ value?: Folder[] }>(
-      this.fetchPort,
-      token,
-      "/me/mailFolders?$top=100&includeHiddenFolders=true&$select=id,displayName,parentFolderId",
-    );
-    const all = [...(top.value ?? [])];
-    for (let index = 0; index < all.length && index < 500; index += 1) {
-      const page = await api<{ value?: Folder[] }>(
-        this.fetchPort,
-        token,
-        `/me/mailFolders/${encodeURIComponent(all[index]!.id)}/childFolders?$top=100&includeHiddenFolders=true&$select=id,displayName,parentFolderId`,
-      );
-      all.push(
-        ...(page.value ?? []).filter(
-          (item) => !all.some((existing) => existing.id === item.id),
-        ),
-      );
-    }
+    const all = await readGraphFolders(this.fetchPort, token);
     const byId = new Map(all.map((folder) => [folder.id, folder]));
     const idsByPath = new Map<string, string>();
     for (const folder of all) {
@@ -319,3 +303,4 @@ export class OutlookHistoryRunner {
     return parentId;
   }
 }
+import { readGraphFolders } from "./graph-inventory";

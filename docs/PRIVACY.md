@@ -1,6 +1,6 @@
 # Privacy and data retention
 
-Effective August 26, 2026.
+Effective September 6, 2026.
 
 Sift is a local-first desktop application. It does not operate a hosted mailbox database, advertising system, product-analytics service, or telemetry backend. Sift stores its working data on the computer where it runs and connects directly to the mail services the user chooses.
 
@@ -11,6 +11,7 @@ Each local profile has an isolated SQLite database and encrypted secret namespac
 - email addresses, sender domains, message identifiers, dates, subjects, selected headers, folder or label state, and classification results;
 - Proton plain-text body excerpts only when the user explicitly enables optional body extraction; Gmail and Outlook scans are metadata-only;
 - address-ownership decisions, containers, organization proposals, rule inventories, managed-rule ownership, unsubscribe history, cleanup plans, job checkpoints, verification receipts, and Undo receipts;
+- per-profile, account, and alias handling preferences, including read-status and optional age-review choices;
 - OAuth refresh tokens and Proton Bridge credentials encrypted with the current Windows user's operating-system protection.
 
 Sift does not download attachments. Provider mail remains with Proton, Google, or Microsoft. Sift does not offer permanent provider-mail deletion; approved deletion jobs use the provider's recoverable Spam, Junk, Trash, or Deleted Items location.
@@ -31,12 +32,14 @@ Provider-side messages, folders, labels, Spam, Junk, Trash, and Deleted Items fo
 
 ## Network connections
 
+Handling previews run locally against the saved scan. Age settings offer a separate review; they do not schedule background deletion or change local-index retention. Exported filter files contain addresses and sender conditions and should be treated as private data.
+
 Sift may connect to:
 
 - local Proton Mail Bridge;
 - Google and Microsoft OAuth and mail APIs for accounts the user connects;
 - authenticated one-click unsubscribe endpoints the user approves;
-- the public Sift update service when automatic updates are enabled.
+- the public Sift update service when automatic updates are enabled or the user requests a manual update check.
 
 Sift does not send the local mailbox index, credentials, email addresses, subjects, headers, or message identifiers to the update service. An update request includes the installed Sift version, operating system, and processor architecture needed to select a compatible public release. Disabling automatic updates in Settings stops new scheduled update checks and background downloads; a request already in progress may finish.
 

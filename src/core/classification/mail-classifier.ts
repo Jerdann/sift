@@ -1,24 +1,75 @@
-import type { MailCategory } from '../../shared/contracts/analysis';
+import type { MailCategory } from "../../shared/contracts/analysis";
+import { matchPurpose } from "./message-purpose";
 
-export const CLASSIFIER_VERSION = 'deterministic-1.2.0';
-
-export const CATEGORY_PRESENTATION: Readonly<Record<MailCategory, { label: string; folder: string }>> = {
-  personal: { label: 'Personal', folder: 'Personal' },
-  security: { label: 'Security & access', folder: 'Important/Security' },
-  accounts: { label: 'Accounts & memberships', folder: 'Important/Accounts' },
-  transactions: { label: 'Receipts & transactions', folder: 'Money/Receipts' },
-  finance: { label: 'Banking & finance', folder: 'Money/Finance' },
-  shopping: { label: 'Shopping & deliveries', folder: 'Shopping/Orders' },
-  travel: { label: 'Travel & reservations', folder: 'Travel' },
-  games: { label: 'Games & gaming accounts', folder: 'Games' },
-  subscriptions: { label: 'Newsletters & subscriptions', folder: 'Subscriptions' },
-  promotions: { label: 'Promotions & deals', folder: 'Promotions' },
-  social: { label: 'Social networks', folder: 'Social' },
-  suspicious: { label: 'Suspicious review', folder: 'Review/Suspicious' },
-  spam: { label: 'Likely spam', folder: 'Spam Review' },
-  other: { label: 'Unsorted review', folder: 'Review/Unsorted' },
+export const CLASSIFIER_VERSION = "purpose-2.0.0";
+export const CATEGORY_PRESENTATION: Readonly<
+  Record<MailCategory, { label: string; folder: string }>
+> = {
+  personal: { label: "Personal conversations", folder: "Personal" },
+  codes: {
+    label: "Login codes & verification",
+    folder: "Security/Login codes",
+  },
+  security: {
+    label: "Account security changes",
+    folder: "Security/Account changes",
+  },
+  accounts: {
+    label: "Account registrations",
+    folder: "Accounts/Registrations",
+  },
+  account_actions: {
+    label: "Account actions & renewals",
+    folder: "Accounts/Action required",
+  },
+  subscriptions: {
+    label: "Subscription status",
+    folder: "Accounts/Subscriptions",
+  },
+  service_notices: {
+    label: "Service notices",
+    folder: "Accounts/Service notices",
+  },
+  transactions: { label: "Receipts", folder: "Money/Receipts" },
+  finance: {
+    label: "Statements & financial records",
+    folder: "Money/Statements",
+  },
+  transfers: { label: "Transfers & deposits", folder: "Money/Transfers" },
+  refunds: { label: "Refunds", folder: "Money/Refunds" },
+  bills: {
+    label: "Bills & payment issues",
+    folder: "Money/Bills & payment issues",
+  },
+  orders: {
+    label: "Order confirmations",
+    folder: "Shopping/Order confirmations",
+  },
+  shopping: { label: "Shipping updates", folder: "Shopping/Shipping updates" },
+  delivery_issues: {
+    label: "Delivery problems & order questions",
+    folder: "Shopping/Delivery problems",
+  },
+  travel: { label: "Travel bookings", folder: "Travel/Bookings" },
+  tickets: { label: "Tickets & boarding passes", folder: "Travel/Tickets" },
+  travel_updates: { label: "Trip updates", folder: "Travel/Trip updates" },
+  games: { label: "Game updates", folder: "Updates/Games" },
+  newsletters: { label: "Newsletters", folder: "Updates/Newsletters" },
+  surveys: {
+    label: "Surveys & feedback requests",
+    folder: "Updates/Surveys & feedback",
+  },
+  reports: { label: "Activity reports", folder: "Updates/Reports" },
+  promotions: { label: "Sales & offers", folder: "Promotions/Sales & offers" },
+  announcements: {
+    label: "Product announcements",
+    folder: "Promotions/Product announcements",
+  },
+  social: { label: "Social activity", folder: "Updates/Social activity" },
+  suspicious: { label: "Suspicious messages", folder: "Review/Suspicious" },
+  spam: { label: "Likely spam", folder: "Review/Spam" },
+  other: { label: "Needs classification", folder: "Review/Unsorted" },
 };
-
 export interface ClassificationInput {
   subject: string | null;
   bodyText: string | null;
@@ -26,7 +77,6 @@ export interface ClassificationInput {
   recipients: string[];
   headers: Record<string, string>;
 }
-
 export interface ClassificationResult {
   category: MailCategory;
   confidence: number;
@@ -34,82 +84,96 @@ export interface ClassificationResult {
   senderDomain: string;
   receivingAddresses: string[];
 }
-
-const has = (text: string, pattern: RegExp) => pattern.test(text);
-const emailPattern = /[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/gi;
-
-const domainFor = (address: string | undefined): string => {
-  const domain = address?.split('@').at(-1)?.toLowerCase().replace(/^www\./, '');
-  return domain && /^[a-z0-9.-]+$/.test(domain) ? domain : 'unknown-sender';
-};
-
-export const classifyMessage = (input: ClassificationInput): ClassificationResult => {
-  const subject = input.subject?.toLowerCase() ?? '';
-  const body = input.bodyText?.toLowerCase().slice(0, 32_768) ?? '';
-  const text = `${subject}\n${body}`;
-  const headerText = Object.values(input.headers).join('\n').toLowerCase();
-  const senderDomain = domainFor(input.senders[0]);
-  const headerRecipients = [input.headers['delivered-to'], input.headers['x-original-to']]
-    .flatMap((value) => value?.match(emailPattern) ?? [])
-    .map((address) => address.toLowerCase());
-  const receivingAddresses = [...new Set([...headerRecipients, ...input.recipients.map((value) => value.toLowerCase())])];
-  const evidence: string[] = [];
-  const result = (category: MailCategory, confidence: number, ...reasons: string[]): ClassificationResult => ({
+export const classifyMessage = (
+  input: ClassificationInput,
+): ClassificationResult => {
+  const headers = Object.fromEntries(
+    Object.entries(input.headers).map(([key, value]) => [
+      key.toLowerCase(),
+      value,
+    ]),
+  );
+  const senderDomain =
+    input.senders[0]?.split("@").at(-1)?.toLowerCase() ?? "unknown-sender";
+  const receivingAddresses = [
+    ...new Set(
+      [
+        ...[headers["delivered-to"], headers["x-original-to"]].flatMap(
+          (value) =>
+            value?.match(
+              /[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/gi,
+            ) ?? [],
+        ),
+        ...input.recipients,
+      ].map((address) => address.toLowerCase()),
+    ),
+  ];
+  const result = (
+    category: MailCategory,
+    confidence: number,
+    ...evidence: string[]
+  ): ClassificationResult => ({
     category,
     confidence,
-    evidence: [...evidence, ...reasons],
+    evidence,
     senderDomain,
     receivingAddresses,
   });
-
-  const authFailed = has(headerText, /(?:spf|dkim|dmarc)=(?:fail|softfail|temperror|permerror)/);
-  const listMail = Boolean(input.headers['list-id'] || input.headers['list-unsubscribe']);
-  const obviousJunk = has(text, /\b(?:crypto giveaway|risk[- ]free investment|wire transfer urgently|you have won|claim your prize|adult dating|miracle cure)\b/);
-  if (authFailed) evidence.push('sender authentication failed');
-  if (obviousJunk && authFailed) return result('spam', 0.94, 'high-risk unsolicited language');
-  if (obviousJunk || (authFailed && has(text, /\b(?:urgent|verify immediately|suspended|click here)\b/))) {
-    return result('suspicious', authFailed ? 0.88 : 0.72, 'suspicious language requires review');
-  }
-
-  if (has(text, /\b(?:one[- ]time (?:code|password)|verification code|security alert|new (?:login|sign[- ]in)|password (?:reset|changed)|two[- ]factor|2fa|authenticate|unusual activity)\b/)) {
-    return result('security', 0.94, 'security or access language');
-  }
-  if (has(senderDomain, /(?:bank|credit|paypal|venmo|cashapp|stripe|wise|coinbase|fidelity|schwab)/) || has(text, /\b(?:bank statement|credit score|account balance|monthly statement|tax document)\b/)) {
-    return result('finance', 0.9, 'financial sender or statement language');
-  }
-  if (has(text, /\b(?:receipt|invoice|payment (?:received|confirmed)|order confirmation|your order|purchase confirmation|refund|charged)\b/)) {
-    return result('transactions', 0.91, 'receipt or payment language');
-  }
-  if (has(text, /\b(?:shipped|out for delivery|tracking number|delivery update|package (?:arrived|delivered))\b/)) {
-    return result('shopping', 0.91, 'shipping or delivery language');
-  }
-  if (has(text, /\b(?:flight|boarding pass|hotel|reservation|itinerary|check[- ]in|rental car|booking confirmation)\b/)) {
-    return result('travel', 0.9, 'travel or reservation language');
-  }
-  if (has(senderDomain, /(?:steampowered|steamgames|xbox|playstation|nintendo|epicgames|riotgames|blizzard|ea\.com|ubisoft|twitch)/) || has(text, /\b(?:game account|wishlist game|gaming|steam|playstation|xbox|nintendo|battle\.net)\b/)) {
-    return result('games', 0.88, 'gaming sender or account language');
-  }
-  if (has(senderDomain, /(?:facebook|instagram|linkedin|twitter|x\.com|reddit|tiktok|discord|snapchat)/) || has(text, /\b(?:friend request|mentioned you|new follower|direct message|connection request)\b/)) {
-    return result('social', 0.86, 'social-network sender or notification');
-  }
-  if (has(text, /\b(?:welcome to|account (?:created|activated)|confirm your email|verify your email address|membership|complete your profile)\b/)) {
-    return result('accounts', 0.88, 'account lifecycle language');
-  }
-  if (listMail && has(text, /\b(?:sale|save \d+%|\d+% off|discount|deal|offer|shop now|limited time|clearance|coupon|promo)\b/)) {
-    return result('promotions', 0.91, 'mailing-list headers and promotional language');
-  }
-  if (listMail) return result('subscriptions', 0.87, 'mailing-list headers');
-  if (has(text, /\b(?:sale|discount|deal|offer|shop now|limited time|clearance|coupon|promo)\b/)) {
-    return result('promotions', 0.7, 'promotional language without mailing-list headers');
-  }
-  if (has(senderDomain, /(?:gmail|outlook|hotmail|icloud|protonmail|pm\.me|yahoo)\./) && input.senders.length === 1) {
-    return result('personal', 0.68, 'individual mailbox sender');
+  const subject = input.subject ?? "";
+  const failedAuth = /(?:spf|dkim|dmarc)=(?:fail|softfail|permerror)\b/i.test(
+    headers["authentication-results"] ?? "",
+  );
+  const junk =
+    /\b(?:crypto giveaway|risk.free investment|wire transfer urgently|claim your prize|miracle cure)\b/i.test(
+      subject,
+    );
+  if (junk)
+    return result(
+      failedAuth ? "spam" : "suspicious",
+      failedAuth ? 0.94 : 0.72,
+      "Unsolicited high-risk wording needs review",
+    );
+  if (failedAuth)
+    return result(
+      "suspicious",
+      0.72,
+      "Sender authentication failed; message purpose does not prove authenticity",
+    );
+  if (
+    headers["in-reply-to"] ||
+    headers.references ||
+    /^\s*(?:re|fw|fwd):/i.test(subject)
+  )
+    return result(
+      "personal",
+      0.75,
+      "A reply or forwarded message may be personal; do not apply automated sender-wide handling",
+    );
+  const match = matchPurpose(subject);
+  if (match)
+    return result(
+      match.category,
+      0.9,
+      match.reason,
+      "Subject evidence; score is a heuristic, not measured accuracy",
+    );
+  if (input.bodyText) {
+    const firstParagraph =
+      input.bodyText.split(/\r?\n\s*\r?\n/)[0]?.slice(0, 1500) ?? "";
+    const bodyMatch = matchPurpose(firstParagraph);
+    if (bodyMatch)
+      return result(
+        bodyMatch.category,
+        0.7,
+        bodyMatch.reason,
+        "Body-only evidence: excluded from future rules and destructive handling",
+      );
   }
   return result(
-    'other',
-    input.bodyText ? 0.58 : 0.45,
-    input.bodyText
-      ? 'No category matched with enough certainty'
-      : 'Only the sender, recipient, subject, and message headers were available',
+    "other",
+    0.45,
+    headers["list-unsubscribe"] || headers["list-id"]
+      ? "Mailing-list headers do not identify message purpose"
+      : "The available content does not establish message purpose",
   );
 };

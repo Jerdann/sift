@@ -1176,6 +1176,33 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       PRAGMA legacy_alter_table = OFF;
     `,
   },
+  {
+    version: 32,
+    statements: `
+      CREATE TABLE mail_handling_preferences (
+        profile_id TEXT NOT NULL, scope_key TEXT NOT NULL, preferences_json TEXT NOT NULL,
+        revision TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(profile_id,scope_key)
+      );
+      ALTER TABLE cleanup_actions ADD COLUMN mark_read INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE cleanup_plans ADD COLUMN handling_revision TEXT;
+      ALTER TABLE gmail_organization_plans ADD COLUMN handling_revision TEXT;
+      ALTER TABLE outlook_history_plans ADD COLUMN handling_revision TEXT;
+      ALTER TABLE organization_proposals ADD COLUMN classifier_version TEXT;
+      ALTER TABLE organization_proposals ADD COLUMN handling_revision TEXT;
+      ALTER TABLE rule_inventories ADD COLUMN container_names_json TEXT NOT NULL DEFAULT '{}';
+      ALTER TABLE rule_reconciliation_plans ADD COLUMN handling_revision TEXT;
+      UPDATE job_items SET state='skipped',error_code='classification_changed_rebuild_proposal'
+        WHERE state IN ('pending','running') AND job_id IN (
+          SELECT job_id FROM cleanup_plans UNION SELECT job_id FROM gmail_organization_plans
+          UNION SELECT job_id FROM outlook_history_plans UNION SELECT job_id FROM rule_reconciliation_plans
+        );
+      UPDATE jobs SET state='failed',error_code='classification_changed_rebuild_proposal'
+        WHERE state IN ('pending','running') AND id IN (
+          SELECT job_id FROM cleanup_plans UNION SELECT job_id FROM gmail_organization_plans
+          UNION SELECT job_id FROM outlook_history_plans UNION SELECT job_id FROM rule_reconciliation_plans
+        );
+    `,
+  },
 ]);
 
 export const applyMigrations = (

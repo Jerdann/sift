@@ -11,11 +11,12 @@ The working desktop build supports:
 - Proton Mail through the local Proton Mail Bridge: discovery, resumable metadata-first history audit, proof-based alias detection, per-address containers, local classification, sender recency review, approval-gated folder cleanup, native Spam and Trash routing, safe bulk unsubscribe, and Proton Sieve export.
 - Gmail through Google OAuth for Desktop apps: resumable metadata-only history audit, local classification, an exact approval plan, nested labels, future filters, historical mark-read/archive batches, native Spam and recoverable Trash labeling, authenticated one-click bulk unsubscribe, and exact-label Undo.
 - Outlook, Hotmail, and Microsoft 365 mail through Microsoft public-client OAuth with PKCE: resumable metadata-only Graph audit, provider-backed aliases, immutable message IDs, nested folders, live inbox-rule reconciliation, verified historical moves, native Junk and recoverable Deleted Items, authenticated one-click unsubscribe, and exact folder/read-state Undo.
-- Provider-neutral local profiles and portable JSON rule packs, so separate people and mailboxes do not share data or credentials.
-- A gated five-stage sieve—Scan → Organize → Rules → Unsubscribe → Delete—with owned-address and alias-container decisions handled at the start of Organize.
+- Provider-neutral local profiles, so separate people and mailboxes do not share data or credentials.
+- The workflow is Scan → Organize → Spam → Rules → Unsubscribe → Delete. Organize creates approved folders without moving mail; Rules reviews existing-message changes and future filters separately.
+- Purpose-based classification and per-profile/account/alias handling controls, with local examples, independent read status, optional age-based Trash reviews, and simple or detailed folder structures. See [Mail handling](docs/MAIL_HANDLING.md).
 - A Recovery workspace with content-free health reports, same-Windows-user encrypted profile backups, verified restore with rollback, and a local-index rebuild that preserves connections, managed rules, and unsubscribe history.
 
-No permanent deletion is implemented. The final cleanup pass moves only approved stale history to the provider's recoverable Trash. Personal, security, account, transaction, finance, suspicious, uncertain, and mixed-use sender streams are excluded from that pass.
+No permanent deletion is implemented. Cleanup moves approved messages to provider Trash or Spam, which the provider may later empty automatically. Records and actionable mail are protected from broad promotional cleanup. Old login codes and registration confirmations are included in age-based Trash reviews only when the user enables that option and approves the review.
 
 No provider password, OAuth token, address, subject, body, or raw message content belongs in source control, logs, fixtures, or diagnostics.
 

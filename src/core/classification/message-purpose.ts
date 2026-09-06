@@ -1,0 +1,421 @@
+import type { MailCategory } from "../../shared/contracts/analysis";
+
+// The same ordered subject predicates are used by previews and future filters.
+// Company names are never evidence of a message's purpose.
+export interface PurposeRule {
+  category: MailCategory;
+  patterns: readonly string[];
+  reason: string;
+}
+export const PURPOSE_RULES: readonly PurposeRule[] = [
+  {
+    category: "codes",
+    patterns: [
+      "*verification code*",
+      "*sign-in code*",
+      "*sign in code*",
+      "*login code*",
+      "*one-time code*",
+      "*one time code*",
+      "*one-time password*",
+      "*2fa code*",
+      "*authenticate your*",
+      "*confirm your email*",
+      "*verify your email*",
+      "*verify your new*email*",
+      "*confirm your signup*",
+      "*email verification*",
+    ],
+    reason: "A login code or verification action is requested",
+  },
+  {
+    category: "security",
+    patterns: [
+      "*password*reset*",
+      "*password*changed*",
+      "*password*change*",
+      "*new login*",
+      "*new sign-in*",
+      "*new sign in*",
+      "*login attempt*",
+      "*new device*",
+      "*device*using your account*",
+      "*recently sign*in*",
+      "*two-factor*",
+      "*two factor*",
+      "*passkey*",
+      "*security alert*",
+      "*unusual activity*",
+      "*suspicious activity*",
+      "*account*compromised*",
+    ],
+    reason: "Account access or security settings changed",
+  },
+  {
+    category: "bills",
+    patterns: [
+      "*payment*unsuccessful*",
+      "*payment*failed*",
+      "*payment*declined*",
+      "*payment*due*",
+      "*payment*coming up*",
+      "*amount*due*",
+      "*invoice*due*",
+      "*unpaid invoice*",
+      "*overdue*",
+      "*duty*payment required*",
+      "*duties*owed*",
+    ],
+    reason: "Payment is due or needs attention",
+  },
+  {
+    category: "delivery_issues",
+    patterns: [
+      "*delivery*delay*",
+      "*delay*shipping*",
+      "*shipment*delay*",
+      "*delivery*exception*",
+      "*delivery*attempt*",
+      "*delivery*action required*",
+      "*package*held*",
+      "*customs*action required*",
+      "*order question*",
+      "*question*order*",
+    ],
+    reason: "A delivery problem or order question may need a response",
+  },
+  {
+    category: "account_actions",
+    patterns: [
+      "*account*suspended*",
+      "*account*sanction*",
+      "*games sanction*",
+      "*account*locked*",
+      "*final cancellation*",
+      "*renew*expired*",
+      "*domain*canceled*",
+      "*domain*cancelled*",
+      "*subscription*renews*",
+      "*subscription*renewal*",
+      "*membership*cancelled*",
+      "*membership*canceled*",
+      "*account*expires*",
+      "*action required*account*",
+    ],
+    reason: "An account change, renewal or restriction may need attention",
+  },
+  {
+    category: "refunds",
+    patterns: ["*refund*", "*chargeback*"],
+    reason: "A refund or payment reversal is reported",
+  },
+  {
+    category: "transactions",
+    patterns: [
+      "receipt",
+      "*your receipt*",
+      "*order receipt*",
+      "*payment receipt*",
+      "*receipt for*",
+      "*payment confirmed*",
+      "*payment confirmation*",
+      "*payment received*",
+      "*payment is complete*",
+      "*payment completed*",
+      "*you made*payment*",
+      "*purchase receipt*",
+      "*invoice paid*",
+      "*paid invoice*",
+    ],
+    reason: "A completed payment or receipt is identified",
+  },
+  {
+    category: "transfers",
+    patterns: [
+      "*e-transfer*",
+      "*e transfer*",
+      "*transfer*successful*",
+      "*transfer*completed*",
+      "*transfer*deposited*",
+      "*transfer*received*",
+      "*transferring money*",
+      "*you sent*payment*",
+      "*you have a payout*",
+      "*deposit confirmation*",
+      "*direct deposit*",
+    ],
+    reason: "A transfer, deposit or payout is reported",
+  },
+  {
+    category: "finance",
+    patterns: [
+      "*bank statement*",
+      "*monthly statement*",
+      "*account statement*",
+      "*account balance*",
+      "*tax document*",
+      "*credit score*",
+      "*annual statement*",
+    ],
+    reason: "A financial statement or account record is identified",
+  },
+  {
+    category: "shopping",
+    patterns: [
+      "*shipped*",
+      "*out for delivery*",
+      "*tracking number*",
+      "*delivery update*",
+      "*package*delivered*",
+      "*package*arrived*",
+      "*shipment*on the way*",
+      "*card is on the way*",
+      "*refill*prepared*",
+      "*refill*preparing*",
+    ],
+    reason: "An active shipment or fulfillment update is identified",
+  },
+  {
+    category: "tickets",
+    patterns: ["*boarding pass*", "*your*tickets*", "*e-ticket*", "*eticket*"],
+    reason: "A ticket or boarding document is identified",
+  },
+  {
+    category: "travel_updates",
+    patterns: [
+      "*flight*delay*",
+      "*flight*cancel*",
+      "*itinerary*change*",
+      "*booking*change*",
+      "*check-in*flight*",
+      "*check in*flight*",
+      "*check-in*hotel*",
+      "*check in*hotel*",
+      "*flight*check-in*",
+      "*hotel*check-in*",
+    ],
+    reason: "An existing trip needs attention or has an update",
+  },
+  {
+    category: "travel",
+    patterns: [
+      "*trip confirmation*",
+      "*travel confirmation*",
+      "*booking confirmation*",
+      "*booking*confirmed*",
+      "*reservation*confirmed*",
+      "*reservation confirmation*",
+      "*your itinerary*",
+      "*hotel*confirmation*",
+      "*flight*confirmation*",
+      "*rental car*confirmation*",
+    ],
+    reason: "A trip, booking or reservation is confirmed",
+  },
+  {
+    category: "surveys",
+    patterns: [
+      "*survey*",
+      "*rate your*",
+      "*rate*transaction*",
+      "*review*purchase*",
+      "*review on*",
+      "*review your purchase*",
+      "*feedback*",
+      "*did*order*meet*expectations*",
+      "*everything good*let us know*",
+      "*invited*research*",
+    ],
+    reason: "A review, survey or feedback is requested",
+  },
+  {
+    category: "promotions",
+    patterns: [
+      "*% off*",
+      "*% savings*",
+      "*save up to*",
+      "*save big*",
+      "*save *%*",
+      "* sale*",
+      "sale *",
+      "*discount*",
+      "*coupon*",
+      "*shop now*",
+      "*shop*deals*",
+      "*game deals*",
+      "*limited-time*",
+      "*limited time*offer*",
+      "*special offer*",
+      "*welcome bonus*",
+      "*come back*save*",
+      "*come back*take*%*",
+      "*last chance*",
+      "*lowest fare*",
+      "*fare*lower*",
+      "*your*cart*saved*",
+      "*claim*bonus*",
+    ],
+    reason: "The subject explicitly advertises an offer or purchase",
+  },
+  {
+    category: "orders",
+    patterns: [
+      "*order confirmation*",
+      "*order*confirmed*",
+      "*order*placed*",
+      "*order*received*",
+      "*order*complete*",
+      "*purchase confirmation*",
+    ],
+    reason: "An order has been placed or confirmed",
+  },
+  {
+    category: "accounts",
+    patterns: [
+      "*account*created*",
+      "*account activation*",
+      "*account*activated*",
+      "*your*user id*",
+      "*welcome to*account*",
+      "*registration confirmation*",
+      "*signup confirmation*",
+      "*sign-up confirmation*",
+    ],
+    reason: "An account registration or identifier is confirmed",
+  },
+  {
+    category: "subscriptions",
+    patterns: [
+      "*thanks for subscribing*",
+      "*subscription confirmed*",
+      "*subscription*activated*",
+      "*membership confirmation*",
+      "*your subscription*",
+    ],
+    reason:
+      "Subscription status is identified, not merely a mailing-list header",
+  },
+  {
+    category: "service_notices",
+    patterns: [
+      "*system maintenance*",
+      "*scheduled maintenance*",
+      "*terms of use*",
+      "*terms*policies*",
+      "*privacy statement*",
+      "*privacy policy*",
+      "*purchase limits*",
+      "*service notice*",
+    ],
+    reason: "A service or policy notice is identified",
+  },
+  {
+    category: "reports",
+    patterns: [
+      "*your*recap*",
+      "*recap*release*",
+      "*release*recap*",
+      "*your*performance*report*",
+      "*your monthly report*",
+      "*your weekly report*",
+      "*release*performing*",
+      "*check-in*release*",
+      "*check in*release*",
+    ],
+    reason: "An activity or performance report is identified",
+  },
+  {
+    category: "social",
+    patterns: [
+      "*mentioned you*",
+      "*new follower*",
+      "*friend request*",
+      "*connection request*",
+      "*replied to your*",
+      "*commented on your*",
+      "*sent you a message*",
+    ],
+    reason: "A person interacted with the account",
+  },
+  {
+    category: "newsletters",
+    patterns: [
+      "*newsletter*",
+      "*weekly news*",
+      "*weekly*digest*",
+      "*monthly*digest*",
+      "*daily*digest*",
+      "*this week in*",
+    ],
+    reason: "An editorial newsletter or digest is identified",
+  },
+  {
+    category: "announcements",
+    patterns: [
+      "*daily product updates*",
+      "*new app*",
+      "*new season*",
+      "*expansion*now live*",
+      "*is now live*",
+      "*is coming to*",
+      "*see what*next*",
+      "*new*plans*",
+      "*new*collection*",
+      "*new*arrived*",
+      "*introducing*",
+    ],
+    reason: "A product, feature or release is announced",
+  },
+];
+const patternCache = new Map<string, RegExp>();
+export const matchesPattern = (value: string, pattern: string): boolean => {
+  let compiled = patternCache.get(pattern);
+  if (!compiled) {
+    compiled = new RegExp(
+      `^${pattern
+        .split("*")
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("[\\s\\S]*")}$`,
+      "i",
+    );
+    if (patternCache.size >= 1024)
+      patternCache.delete(patternCache.keys().next().value!);
+    patternCache.set(pattern, compiled);
+  }
+  return compiled.test(value);
+};
+export const matchPurpose = (subject: string): PurposeRule | undefined =>
+  PURPOSE_RULES.find((rule) =>
+    rule.patterns.some((pattern) => matchesPattern(subject, pattern)),
+  );
+export const patternsFor = (category: MailCategory): readonly string[] =>
+  PURPOSE_RULES.find((rule) => rule.category === category)?.patterns ?? [];
+export const exclusionsFor = (category: MailCategory): readonly string[] => {
+  const index = PURPOSE_RULES.findIndex((rule) => rule.category === category);
+  return index < 0
+    ? []
+    : PURPOSE_RULES.slice(0, index).flatMap((rule) => rule.patterns);
+};
+export const attentionCategories = new Set<MailCategory>([
+  "codes",
+  "security",
+  "bills",
+  "delivery_issues",
+  "account_actions",
+  "shopping",
+  "travel",
+  "tickets",
+  "travel_updates",
+  "personal",
+  "refunds",
+]);
+export const removableCategories = new Set<MailCategory>([
+  "promotions",
+  "announcements",
+  "surveys",
+  "newsletters",
+  "reports",
+  "social",
+  "service_notices",
+  "games",
+]);

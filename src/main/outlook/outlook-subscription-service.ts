@@ -146,12 +146,7 @@ export class OutlookSubscriptionService {
     }
     const scanId = this.#createId();
     const now = this.#now();
-    const protectedCategories = new Set<MailCategory>([
-      "security",
-      "accounts",
-      "transactions",
-      "finance",
-    ]);
+    const protectedCategories = TRASH_PROTECTED_CATEGORIES;
     this.#database.transaction(() => {
       this.#database
         .prepare("DELETE FROM outlook_subscription_scans WHERE analysis_id=?")
@@ -229,8 +224,7 @@ export class OutlookSubscriptionService {
         "SELECT * FROM outlook_subscription_scans WHERE id=? AND profile_id=?",
       )
       .get(scanId, this.#profileId) as
-      | { analysis_id: string; generated_at: string }
-      | undefined;
+      { analysis_id: string; generated_at: string } | undefined;
     if (!scan) throw new Error("outlook_subscription_scan_missing");
     const connection = this.#database
       .prepare(
@@ -359,8 +353,7 @@ export class OutlookSubscriptionService {
         "SELECT osc.id,osc.endpoint,osc.eligibility FROM outlook_subscription_candidates osc JOIN outlook_subscription_scans oss ON oss.id=osc.scan_id WHERE osc.id=? AND oss.profile_id=?",
       )
       .get(id, this.#profileId) as
-      | { id: string; endpoint: string | null; eligibility: string }
-      | undefined;
+      { id: string; endpoint: string | null; eligibility: string } | undefined;
     if (!row || row.eligibility !== "eligible" || !row.endpoint)
       throw new Error("unsubscribe_candidate_ineligible");
     return { id: row.id, endpoint: row.endpoint, eligibility: "eligible" };
@@ -421,3 +414,4 @@ export class OutlookSubscriptionService {
     return row.scan_id;
   }
 }
+import { TRASH_PROTECTED_CATEGORIES } from "../../core/pruning/stale-stream-ranking";

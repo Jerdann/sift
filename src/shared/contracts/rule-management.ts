@@ -1,27 +1,31 @@
-import { z } from 'zod';
-import { accountProviderSchema } from './accounts';
-import { mailCategorySchema } from './analysis';
-import { jobProgressSchema } from './jobs';
+import { z } from "zod";
+import { accountProviderSchema } from "./accounts";
+import { mailCategorySchema } from "./analysis";
+import { jobProgressSchema } from "./jobs";
 
-export const normalizedRuleCriteriaSchema = z.object({
-  from: z.string().nullable(),
-  to: z.string().nullable(),
-  subject: z.string().nullable(),
-  query: z.string().nullable(),
-  negatedQuery: z.string().nullable(),
-  hasAttachment: z.boolean().nullable(),
-}).strict();
+export const normalizedRuleCriteriaSchema = z
+  .object({
+    from: z.string().nullable(),
+    to: z.string().nullable(),
+    subject: z.string().nullable(),
+    query: z.string().nullable(),
+    negatedQuery: z.string().nullable(),
+    hasAttachment: z.boolean().nullable(),
+  })
+  .strict();
 
-export const normalizedRuleActionSchema = z.object({
-  addLabels: z.array(z.string()).max(32),
-  removeLabels: z.array(z.string()).max(32),
-}).strict();
+export const normalizedRuleActionSchema = z
+  .object({
+    addLabels: z.array(z.string()).max(32),
+    removeLabels: z.array(z.string()).max(32),
+  })
+  .strict();
 
 export const providerRuleSnapshotSchema = z.object({
   providerRuleId: z.string().min(1).max(256),
   stableKey: z.string().length(64).nullable(),
   fingerprint: z.string().length(64),
-  ownership: z.enum(['external', 'managed', 'adopted', 'exported']),
+  ownership: z.enum(["external", "managed", "adopted", "exported"]),
   criteria: normalizedRuleCriteriaSchema,
   action: normalizedRuleActionSchema,
 });
@@ -30,7 +34,7 @@ export const ruleInventorySchema = z.object({
   id: z.uuid(),
   provider: accountProviderSchema,
   connectionId: z.uuid(),
-  capability: z.enum(['live_api', 'managed_export']),
+  capability: z.enum(["live_api", "managed_export"]),
   capturedAt: z.iso.datetime(),
   providerLimit: z.number().int().positive().nullable(),
   containers: z.array(z.string().min(1).max(512)),
@@ -50,16 +54,35 @@ export const desiredManagedRuleSchema = z.object({
   observedMessages: z.number().int().positive(),
   confidence: z.number().min(0).max(1),
   categoryShare: z.number().min(0).max(1).default(1),
+  purposeConditions: z
+    .object({
+      subjectPatterns: z.array(z.string().min(1).max(256)).max(200),
+      excludeSubjectPatterns: z.array(z.string().min(1).max(256)).max(500),
+      senderAddresses: z.array(z.email()).max(500),
+      receivingAddress: z.email(),
+      excludedReceivingAddresses: z.array(z.email()).max(500).optional(),
+    })
+    .optional(),
+  compiledCriteria: normalizedRuleCriteriaSchema.optional(),
+  trash: z.boolean().optional(),
+  matchNote: z.string().max(500).optional(),
 });
 
 export const ruleReconciliationOperationSchema = z.object({
   id: z.uuid(),
   stableKey: z.string().length(64),
-  kind: z.enum(['create', 'replace', 'remove', 'adopt', 'unchanged']),
+  kind: z.enum(["create", "replace", "remove", "adopt", "unchanged"]),
   desired: desiredManagedRuleSchema.nullable(),
   prior: providerRuleSnapshotSchema.nullable(),
   priorManaged: desiredManagedRuleSchema.nullable(),
-  state: z.enum(['pending', 'running', 'succeeded', 'failed', 'verification_mismatch', 'undone']),
+  state: z.enum([
+    "pending",
+    "running",
+    "succeeded",
+    "failed",
+    "verification_mismatch",
+    "undone",
+  ]),
   providerRuleId: z.string().nullable(),
   errorCode: z.string().nullable(),
   enabled: z.boolean(),
@@ -74,7 +97,14 @@ export const ruleReconciliationPlanSchema = z.object({
   spamReviewId: z.uuid(),
   inventoryId: z.uuid(),
   revision: z.string().length(64),
-  state: z.enum(['draft', 'approved', 'executing', 'completed', 'failed', 'undone']),
+  state: z.enum([
+    "draft",
+    "approved",
+    "executing",
+    "completed",
+    "failed",
+    "undone",
+  ]),
   createdAt: z.iso.datetime(),
   approvedAt: z.iso.datetime().nullable(),
   operations: z.array(ruleReconciliationOperationSchema),
@@ -82,30 +112,38 @@ export const ruleReconciliationPlanSchema = z.object({
   undoJob: jobProgressSchema.nullable(),
 });
 
-export const ruleManagementScopeSchema = z.object({
-  provider: accountProviderSchema,
-  connectionId: z.uuid(),
-  replaceExternalRules: z.boolean().optional(),
-}).strict();
+export const ruleManagementScopeSchema = z
+  .object({
+    provider: accountProviderSchema,
+    connectionId: z.uuid(),
+    replaceExternalRules: z.boolean().optional(),
+  })
+  .strict();
 
-export const approveRulePlanSchema = z.object({
-  planId: z.uuid(),
-  revision: z.string().length(64),
-  enabledOperationIds: z.array(z.uuid()).max(5_000).optional(),
-}).strict();
+export const approveRulePlanSchema = z
+  .object({
+    planId: z.uuid(),
+    revision: z.string().length(64),
+    enabledOperationIds: z.array(z.uuid()).max(5_000).optional(),
+  })
+  .strict();
 
-export const retryRulePlanSchema = z.object({
-  planId: z.uuid(),
-  operationIds: z.array(z.uuid()).min(1).max(1_000),
-}).strict();
+export const retryRulePlanSchema = z
+  .object({
+    planId: z.uuid(),
+    operationIds: z.array(z.uuid()).min(1).max(1_000),
+  })
+  .strict();
 
 export const undoRulePlanSchema = z.object({ planId: z.uuid() }).strict();
 
-export const exportProtonRulePlanSchema = z.object({
-  planId: z.uuid(),
-  revision: z.string().length(64),
-  enabledOperationIds: z.array(z.uuid()).max(5_000).optional(),
-}).strict();
+export const exportProtonRulePlanSchema = z
+  .object({
+    planId: z.uuid(),
+    revision: z.string().length(64),
+    enabledOperationIds: z.array(z.uuid()).max(5_000).optional(),
+  })
+  .strict();
 
 export const protonRuleExportResultSchema = z.object({
   canceled: z.boolean(),
@@ -115,16 +153,24 @@ export const protonRuleExportResultSchema = z.object({
   plan: ruleReconciliationPlanSchema,
 });
 
-export type NormalizedRuleCriteria = z.infer<typeof normalizedRuleCriteriaSchema>;
+export type NormalizedRuleCriteria = z.infer<
+  typeof normalizedRuleCriteriaSchema
+>;
 export type NormalizedRuleAction = z.infer<typeof normalizedRuleActionSchema>;
 export type ProviderRuleSnapshot = z.infer<typeof providerRuleSnapshotSchema>;
 export type RuleInventory = z.infer<typeof ruleInventorySchema>;
 export type DesiredManagedRule = z.infer<typeof desiredManagedRuleSchema>;
-export type RuleReconciliationOperation = z.infer<typeof ruleReconciliationOperationSchema>;
-export type RuleReconciliationPlan = z.infer<typeof ruleReconciliationPlanSchema>;
+export type RuleReconciliationOperation = z.infer<
+  typeof ruleReconciliationOperationSchema
+>;
+export type RuleReconciliationPlan = z.infer<
+  typeof ruleReconciliationPlanSchema
+>;
 export type RuleManagementScope = z.infer<typeof ruleManagementScopeSchema>;
 export type ApproveRulePlan = z.infer<typeof approveRulePlanSchema>;
 export type RetryRulePlan = z.infer<typeof retryRulePlanSchema>;
 export type UndoRulePlan = z.infer<typeof undoRulePlanSchema>;
 export type ExportProtonRulePlan = z.infer<typeof exportProtonRulePlanSchema>;
-export type ProtonRuleExportResult = z.infer<typeof protonRuleExportResultSchema>;
+export type ProtonRuleExportResult = z.infer<
+  typeof protonRuleExportResultSchema
+>;

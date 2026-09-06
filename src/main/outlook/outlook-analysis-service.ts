@@ -129,15 +129,26 @@ export class OutlookAnalysisService {
         streams.set(key, stream);
       }
     }
-    const analysisId = this.#createId();
+    const analysisId =
+      (
+        this.#database
+          .prepare(
+            "SELECT id FROM outlook_mailbox_analyses WHERE connection_id=?",
+          )
+          .get(connection.id) as { id: string } | undefined
+      )?.id ?? this.#createId();
     const analyzedAt = this.#now();
     this.#database.transaction(() => {
-      this.#database
-        .prepare("DELETE FROM outlook_mailbox_analyses WHERE connection_id=?")
-        .run(connection.id);
+      for (const table of [
+        "outlook_message_classifications",
+        "outlook_analysis_streams",
+      ])
+        this.#database
+          .prepare(`DELETE FROM ${table} WHERE analysis_id=?`)
+          .run(analysisId);
       this.#database
         .prepare(
-          "INSERT INTO outlook_mailbox_analyses(id,connection_id,profile_id,classifier_version,analyzed_at) VALUES (?,?,?,?,?)",
+          "INSERT INTO outlook_mailbox_analyses(id,connection_id,profile_id,classifier_version,analyzed_at) VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET classifier_version=excluded.classifier_version,analyzed_at=excluded.analyzed_at",
         )
         .run(
           analysisId,

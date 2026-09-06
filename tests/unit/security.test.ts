@@ -120,6 +120,9 @@ describe("desktop security boundary", () => {
 
   it("exposes a closed bridge and no raw HTML rendering primitive", () => {
     expect(EMAIL_ORGANIZER_BRIDGE_METHODS).toEqual([
+      "getMailHandling",
+      "saveMailHandling",
+      "previewMailHandling",
       "getVersion",
       "getAppSettings",
       "updateAppSettings",
@@ -130,6 +133,8 @@ describe("desktop security boundary", () => {
       "refreshAccountIdentities",
       "updateAccountIdentity",
       "getOrganizationProposal",
+      "createOrganizationFolders",
+      "getOrganizationFolders",
       "generateOrganizationProposal",
       "editOrganizationProposal",
       "getSpamReview",

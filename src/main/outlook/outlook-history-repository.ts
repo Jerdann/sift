@@ -1,3 +1,4 @@
+import { assertCurrentClassification } from "../settings/handling-safety";
 import type BetterSqlite3 from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
 import type { MailCategory } from "../../shared/contracts/analysis";
@@ -5,6 +6,13 @@ import type { GmailOrganizationPlan } from "../../shared/contracts/gmail-organiz
 import { gmailOrganizationPlanSchema } from "../../shared/contracts/gmail-organize";
 import type { OutlookConnectionSummary } from "../../shared/contracts/outlook";
 import type { JobRepository } from "../jobs/job-repository";
+import { MailHandlingRepository } from "../settings/mail-handling-repository";
+import {
+  handlingFor,
+  handlingEligible,
+  retentionEligible,
+} from "../../core/classification/mail-handling";
+import { removableCategories } from "../../core/classification/message-purpose";
 import {
   approvedSpamSelection,
   spamSelectionKey,
@@ -79,9 +87,14 @@ export class OutlookHistoryRepository {
       kind?: "organize" | "spam" | "trash";
       senderDomains?: readonly string[];
       olderThanDays?: number;
+      retention?: boolean;
     } = {},
   ): GmailOrganizationPlan {
     const kind = input.kind ?? "organize";
+    const handling = new MailHandlingRepository(
+      this.#database,
+      this.#profileId,
+    );
     const proposal =
       kind === "organize"
         ? (this.#database
@@ -89,8 +102,7 @@ export class OutlookHistoryRepository {
               "SELECT * FROM organization_proposals WHERE profile_id=? AND provider='outlook' AND connection_id=? AND state='draft' ORDER BY updated_at DESC,rowid DESC LIMIT 1",
             )
             .get(this.#profileId, connection.id) as
-            | Record<string, unknown>
-            | undefined)
+            Record<string, unknown> | undefined)
         : undefined;
     if (kind === "organize" && !proposal)
       throw new Error("organization_proposal_required");
@@ -101,9 +113,15 @@ export class OutlookHistoryRepository {
           "SELECT id analysis_id FROM outlook_mailbox_analyses WHERE profile_id=? AND connection_id=?",
         )
         .get(this.#profileId, connection.id) as
-        | Record<string, unknown>
-        | undefined);
+        Record<string, unknown> | undefined);
     if (!analysis) throw new Error("outlook_analysis_required");
+    assertCurrentClassification(
+      this.#database,
+      this.#profileId,
+      "outlook",
+      connection.id,
+      proposal ? String(proposal.id) : undefined,
+    );
     const spamSelection =
       kind === "spam"
         ? approvedSpamSelection(
@@ -134,10 +152,14 @@ export class OutlookHistoryRepository {
       .all(analysis.analysis_id) as Message[];
     const providerFolders = this.#database
       .prepare(
-        "SELECT junk_email_id,deleted_items_id FROM outlook_folder_ids WHERE connection_id=?",
+        "SELECT junk_email_id,deleted_items_id,sent_items_id FROM outlook_folder_ids WHERE connection_id=?",
       )
       .get(connection.id) as
-      | { junk_email_id: string; deleted_items_id: string }
+      | {
+          junk_email_id: string;
+          deleted_items_id: string;
+          sent_items_id: string;
+        }
       | undefined;
     const domains = new Set(
       (input.senderDomains ?? []).map((value) => value.toLowerCase()),
@@ -160,6 +182,17 @@ export class OutlookHistoryRepository {
           value.toLowerCase(),
         ),
       );
+      if (
+        addresses.size !== 1 ||
+        [
+          providerFolders?.junk_email_id,
+          providerFolders?.deleted_items_id,
+          providerFolders?.sent_items_id,
+        ].includes(message.parent_folder_id)
+      ) {
+        skipped++;
+        continue;
+      }
       const candidates = (bySource.get(message.source_category) ?? [])
         .filter(
           (item) =>
@@ -171,6 +204,11 @@ export class OutlookHistoryRepository {
             Number(Boolean(right.scope_address)) -
             Number(Boolean(left.scope_address)),
         );
+      const preferences = handling.resolve(
+        "outlook",
+        connection.id,
+        [...addresses].sort()[0] ?? null,
+      );
       const spamAddress =
         kind === "spam"
           ? [...addresses]
@@ -184,6 +222,8 @@ export class OutlookHistoryRepository {
       const item =
         kind === "spam"
           ? spamAddress &&
+            (removableCategories.has(message.source_category) ||
+              message.source_category === "spam") &&
             message.parent_folder_id !== providerFolders?.junk_email_id &&
             message.parent_folder_id !== providerFolders?.deleted_items_id
             ? {
@@ -197,28 +237,46 @@ export class OutlookHistoryRepository {
               }
             : undefined
           : kind === "trash"
-            ? domains.has(message.sender_domain.toLowerCase()) &&
-            !protectedCategories.has(message.source_category) &&
-            Boolean(message.received_at) &&
-            Date.parse(message.received_at!) < cutoff
-            ? {
-                id: `trash:${message.sender_domain}:${message.source_category}`,
-                scope_address: [...addresses][0] ?? null,
-                source_category: message.source_category,
-                category: message.source_category,
-                target_path: "TRASH",
-                enabled: 1,
-                confidence: message.confidence,
-              }
+            ? (
+                input.retention
+                  ? retentionEligible(
+                      preferences,
+                      message.source_category,
+                      message.confidence,
+                      message.received_at,
+                      this.#now(),
+                    )
+                  : domains.has(message.sender_domain.toLowerCase()) &&
+                    removableCategories.has(message.source_category) &&
+                    message.confidence >= 0.82 &&
+                    Boolean(message.received_at) &&
+                    Date.parse(message.received_at!) < cutoff
+              )
+              ? {
+                  id: `trash:${message.sender_domain}:${message.source_category}`,
+                  scope_address: [...addresses][0] ?? null,
+                  source_category: message.source_category,
+                  category: message.source_category,
+                  target_path: "TRASH",
+                  enabled: 1,
+                  confidence: message.confidence,
+                }
               : undefined
             : candidates.find(
                 (candidate) =>
-                  !["spam", "suspicious"].includes(candidate.category),
+                  handlingEligible(
+                    preferences,
+                    message.source_category,
+                    message.confidence,
+                  ) &&
+                  handlingFor(preferences, candidate.category).destination !==
+                    "inbox" &&
+                  (!["spam", "trash"].includes(
+                    handlingFor(preferences, candidate.category).destination,
+                  ) ||
+                    removableCategories.has(message.source_category)),
               );
-      if (
-        !item ||
-        !item.enabled
-      ) {
+      if (!item || !item.enabled) {
         skipped += 1;
         continue;
       }
@@ -264,7 +322,7 @@ export class OutlookHistoryRepository {
     this.#database.transaction(() => {
       this.#database
         .prepare(
-          "DELETE FROM outlook_history_plans WHERE connection_id=? AND plan_kind=?",
+          "DELETE FROM outlook_history_plans WHERE connection_id=? AND plan_kind=? AND state='draft'",
         )
         .run(connection.id, kind);
       this.#database
@@ -291,20 +349,28 @@ export class OutlookHistoryRepository {
       );
       for (const group of normalized) {
         const impactId = this.#createId();
+        const policy = handlingFor(
+          handling.resolve("outlook", connection.id, group.item.scope_address),
+          group.item.category,
+        );
         const spam =
           kind === "spam" ||
-          (kind === "organize" && group.item.category === "spam");
-        const markRead = true;
+          (kind === "organize" && policy.destination === "spam");
+        const trash =
+          kind === "trash" ||
+          (kind === "organize" && policy.destination === "trash");
+        const markRead =
+          kind === "organize" ? policy.markRead : kind === "spam";
         addImpact.run(
           impactId,
           planId,
           group.item.scope_address,
           group.item.source_category,
           group.item.category,
-          kind === "trash" ? "TRASH" : spam ? "SPAM" : group.item.target_path,
+          trash ? "TRASH" : spam ? "SPAM" : group.item.target_path,
           markRead ? 1 : 0,
           spam ? 1 : 0,
-          kind === "trash" ? 1 : 0,
+          trash ? 1 : 0,
           group.item.confidence,
           group.messages.length,
         );
@@ -320,6 +386,12 @@ export class OutlookHistoryRepository {
           );
       }
     })();
+    handling.stampPlan(
+      "outlook_history_plans",
+      planId,
+      "outlook",
+      connection.id,
+    );
     return this.get(connection.id, kind)!;
   }
 
@@ -332,8 +404,7 @@ export class OutlookHistoryRepository {
         "SELECT ohp.* FROM outlook_history_plans ohp JOIN outlook_connections oc ON oc.id=ohp.connection_id WHERE ohp.connection_id=? AND oc.profile_id=? AND ohp.plan_kind=? ORDER BY ohp.rowid DESC LIMIT 1",
       )
       .get(connectionId, this.#profileId, kind) as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     return row ? this.#plan(row) : null;
   }
   getById(planId: string): GmailOrganizationPlan {
@@ -354,14 +425,19 @@ export class OutlookHistoryRepository {
     if (plan.revision !== revision) throw new Error("outlook_plan_stale");
     if (["approved", "running"].includes(plan.state) && plan.job) return plan;
     if (plan.state !== "draft") throw new Error("outlook_plan_stale");
+    new MailHandlingRepository(this.#database, this.#profileId).assertPlan(
+      "outlook_history_plans",
+      planId,
+      "outlook",
+      connectionId,
+    );
     if (plan.kind === "organize") {
       const current = this.#database
         .prepare(
           "SELECT id,revision FROM organization_proposals WHERE profile_id=? AND provider='outlook' AND connection_id=? AND state='draft' ORDER BY updated_at DESC,rowid DESC LIMIT 1",
         )
         .get(this.#profileId, connectionId) as
-        | { id: string; revision: string }
-        | undefined;
+        { id: string; revision: string } | undefined;
       if (
         !current ||
         current.id !== plan.proposalId ||
@@ -395,6 +471,30 @@ export class OutlookHistoryRepository {
       )
       .run(this.#now(), job.id, planId, connectionId);
     return this.getById(planId);
+  }
+  assertCompatible(planId: string): void {
+    const row = this.#database
+      .prepare(
+        "SELECT connection_id,job_id FROM outlook_history_plans WHERE id=?",
+      )
+      .get(planId) as
+      { connection_id: string; job_id: string | null } | undefined;
+    if (!row) throw new Error("history_plan_not_found");
+    try {
+      new MailHandlingRepository(this.#database, this.#profileId).assertPlan(
+        "outlook_history_plans",
+        planId,
+        "outlook",
+        row.connection_id,
+      );
+    } catch (error) {
+      if (row.job_id)
+        this.#jobs.blockPendingJob(
+          row.job_id,
+          "mail_handling_changed_rebuild_plan",
+        );
+      throw error;
+    }
   }
   planIdForJob(jobId: string): string {
     const row = this.#database
@@ -450,6 +550,7 @@ export class OutlookHistoryRepository {
       );
   }
   retry(planId: string, ids: readonly string[]): GmailOrganizationPlan {
+    this.assertCompatible(planId);
     const plan = this.getById(planId);
     if (!plan.job) throw new Error("outlook_history_job_missing");
     this.#jobs.retryItems(plan.job.id, ids);

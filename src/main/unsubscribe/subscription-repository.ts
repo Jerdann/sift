@@ -1,9 +1,13 @@
-import type BetterSqlite3 from 'better-sqlite3';
-import { randomUUID } from 'node:crypto';
-import type { MailCategory } from '../../shared/contracts/analysis';
-import { type SubscriptionDashboard, subscriptionDashboardSchema } from '../../shared/contracts/unsubscribe';
-import type { JobRepository } from '../jobs/job-repository';
-import { subscriptionPriorityScore } from '../../core/pruning/subscription-ranking';
+import { TRASH_PROTECTED_CATEGORIES } from "../../core/pruning/stale-stream-ranking";
+import type BetterSqlite3 from "better-sqlite3";
+import { randomUUID } from "node:crypto";
+import type { MailCategory } from "../../shared/contracts/analysis";
+import {
+  type SubscriptionDashboard,
+  subscriptionDashboardSchema,
+} from "../../shared/contracts/unsubscribe";
+import type { JobRepository } from "../jobs/job-repository";
+import { subscriptionPriorityScore } from "../../core/pruning/subscription-ranking";
 
 interface EvidenceRow {
   analysis_id: string;
@@ -35,17 +39,22 @@ interface Group {
 export interface SubscriptionAction {
   id: string;
   endpoint: string;
-  eligibility: 'eligible';
+  eligibility: "eligible";
 }
 
 const httpsEndpoint = (value: string | undefined): string | null => {
   if (!value) return null;
-  const values = [...value.matchAll(/<([^>]+)>|([^,\s]+)/g)].map((match) => match[1] ?? match[2] ?? '');
+  const values = [...value.matchAll(/<([^>]+)>|([^,\s]+)/g)].map(
+    (match) => match[1] ?? match[2] ?? "",
+  );
   for (const candidate of values) {
     try {
       const url = new URL(candidate.trim());
-      if (url.protocol === 'https:' && !url.username && !url.password) return url.toString();
-    } catch { /* malformed list endpoint */ }
+      if (url.protocol === "https:" && !url.username && !url.password)
+        return url.toString();
+    } catch {
+      /* malformed list endpoint */
+    }
   }
   return null;
 };
@@ -70,39 +79,65 @@ export class SubscriptionRepository {
     this.#createId = options.createId ?? randomUUID;
   }
 
-  get profileId(): string { return this.#profileId; }
+  get profileId(): string {
+    return this.#profileId;
+  }
 
   scan(connectionId: string): SubscriptionDashboard {
-    const rows = this.#database.prepare(`
+    const rows = this.#database
+      .prepare(
+        `
       SELECT mc.analysis_id, mc.canonical_key, mc.category, mc.sender_domain,
              mc.receiving_addresses_json, im.subject, im.received_at, im.headers_json, im.flags_json
       FROM message_classifications mc
       JOIN mailbox_analyses ma ON ma.id = mc.analysis_id
       JOIN indexed_messages im ON im.id = mc.message_row_id
       WHERE ma.connection_id = ? AND ma.profile_id = ?
-    `).all(connectionId, this.#profileId) as EvidenceRow[];
-    if (!rows.length) throw new Error('mailbox_analysis_required');
+    `,
+      )
+      .all(connectionId, this.#profileId) as EvidenceRow[];
+    if (!rows.length) throw new Error("mailbox_analysis_required");
     const analysisId = rows[0]!.analysis_id;
-    const activeRun = this.#database.prepare(`
+    const activeRun = this.#database
+      .prepare(
+        `
       SELECT 1
       FROM subscription_scans ss
       JOIN unsubscribe_runs ur ON ur.scan_id = ss.id
       JOIN jobs j ON j.id = ur.job_id
       WHERE ss.analysis_id = ? AND ss.profile_id = ? AND j.state IN ('pending', 'running')
       LIMIT 1
-    `).get(analysisId, this.#profileId);
-    if (activeRun) throw new Error('unsubscribe_run_active');
+    `,
+      )
+      .get(analysisId, this.#profileId);
+    if (activeRun) throw new Error("unsubscribe_run_active");
     const groups = new Map<string, Group>();
     for (const row of rows) {
       const headers = JSON.parse(row.headers_json) as Record<string, string>;
       if (
-        !headers['list-id'] &&
-        !headers['list-unsubscribe'] &&
-        !['subscriptions', 'promotions', 'spam', 'suspicious'].includes(row.category)
-      ) continue;
-      const listId = (headers['list-id'] ?? row.sender_domain).replace(/[<>]/g, '').trim().toLowerCase().slice(0, 320);
+        !headers["list-id"] &&
+        !headers["list-unsubscribe"] &&
+        ![
+          "subscriptions",
+          "promotions",
+          "newsletters",
+          "surveys",
+          "announcements",
+          "reports",
+          "social",
+          "service_notices",
+          "spam",
+          "suspicious",
+        ].includes(row.category)
+      )
+        continue;
+      const listId = (headers["list-id"] ?? row.sender_domain)
+        .replace(/[<>]/g, "")
+        .trim()
+        .toLowerCase()
+        .slice(0, 320);
       const addresses = JSON.parse(row.receiving_addresses_json) as string[];
-      for (const address of addresses.length ? addresses : ['unknown']) {
+      for (const address of addresses.length ? addresses : ["unknown"]) {
         const key = `${listId}\0${row.sender_domain}\0${address}`;
         const current = groups.get(key) ?? {
           senderDomain: row.sender_domain,
@@ -120,22 +155,48 @@ export class SubscriptionRepository {
         };
         current.messageCount += 1;
         current.categories.add(row.category);
-        if (row.received_at && (!current.latestAt || row.received_at > current.latestAt)) current.latestAt = row.received_at;
-        if (row.received_at && (!current.earliestAt || row.received_at < current.earliestAt)) current.earliestAt = row.received_at;
-        if ((JSON.parse(row.flags_json) as string[]).some((flag) => flag.toLowerCase() === '\\seen')) current.readCount += 1;
-        if (row.subject && current.subjects.length < 3 && !current.subjects.includes(row.subject)) current.subjects.push(row.subject.slice(0, 180));
-        current.endpoint ??= httpsEndpoint(headers['list-unsubscribe']);
-        current.oneClick ||= /list-unsubscribe\s*=\s*one-click/i.test(headers['list-unsubscribe-post'] ?? '');
-        const auth = (headers['authentication-results'] ?? '').toLowerCase();
-        current.authenticated ||= /dkim=pass/.test(auth) && /(?:dmarc|spf)=pass/.test(auth);
+        if (
+          row.received_at &&
+          (!current.latestAt || row.received_at > current.latestAt)
+        )
+          current.latestAt = row.received_at;
+        if (
+          row.received_at &&
+          (!current.earliestAt || row.received_at < current.earliestAt)
+        )
+          current.earliestAt = row.received_at;
+        if (
+          (JSON.parse(row.flags_json) as string[]).some(
+            (flag) => flag.toLowerCase() === "\\seen",
+          )
+        )
+          current.readCount += 1;
+        if (
+          row.subject &&
+          current.subjects.length < 3 &&
+          !current.subjects.includes(row.subject)
+        )
+          current.subjects.push(row.subject.slice(0, 180));
+        current.endpoint ??= httpsEndpoint(headers["list-unsubscribe"]);
+        current.oneClick ||= /list-unsubscribe\s*=\s*one-click/i.test(
+          headers["list-unsubscribe-post"] ?? "",
+        );
+        const auth = (headers["authentication-results"] ?? "").toLowerCase();
+        current.authenticated ||=
+          /dkim=pass/.test(auth) && /(?:dmarc|spf)=pass/.test(auth);
         groups.set(key, current);
       }
     }
     const scanId = this.#createId();
     const generatedAt = this.#now();
     this.#database.transaction(() => {
-      this.#database.prepare('DELETE FROM subscription_scans WHERE analysis_id = ?').run(analysisId);
-      this.#database.prepare('INSERT INTO subscription_scans(id, analysis_id, profile_id, generated_at) VALUES (?, ?, ?, ?)')
+      this.#database
+        .prepare("DELETE FROM subscription_scans WHERE analysis_id = ?")
+        .run(analysisId);
+      this.#database
+        .prepare(
+          "INSERT INTO subscription_scans(id, analysis_id, profile_id, generated_at) VALUES (?, ?, ?, ?)",
+        )
         .run(scanId, analysisId, this.#profileId, generatedAt);
       const insert = this.#database.prepare(`
         INSERT INTO subscription_candidates(
@@ -144,28 +205,56 @@ export class SubscriptionRepository {
           sample_subjects_json, status, reason, earliest_at, read_count
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-      const protectedCategories = new Set<MailCategory>(['security', 'accounts', 'transactions', 'finance']);
+      const protectedCategories = TRASH_PROTECTED_CATEGORIES;
       for (const group of groups.values()) {
         const categories = [...group.categories].sort();
-        let eligibility: 'eligible' | 'manual' | 'protected' | 'spam_skipped';
-        let status: 'pending' | 'manual' | 'spam_skipped';
+        let eligibility: "eligible" | "manual" | "protected" | "spam_skipped";
+        let status: "pending" | "manual" | "spam_skipped";
         let reason: string;
-        if (categories.some((category) => category === 'spam' || category === 'suspicious')) {
-          eligibility = 'spam_skipped'; status = 'spam_skipped'; reason = 'Suspected spam: Sift will not contact this sender. Use a Spam filter instead.';
-        } else if (categories.some((category) => protectedCategories.has(category))) {
-          eligibility = 'protected'; status = 'manual'; reason = 'Contains transaction, security, account, or finance messages. Sift will not unsubscribe automatically.';
+        if (
+          categories.some(
+            (category) => category === "spam" || category === "suspicious",
+          )
+        ) {
+          eligibility = "spam_skipped";
+          status = "spam_skipped";
+          reason =
+            "Suspected spam: Sift will not contact this sender. Use a Spam filter instead.";
+        } else if (
+          categories.some((category) => protectedCategories.has(category))
+        ) {
+          eligibility = "protected";
+          status = "manual";
+          reason =
+            "Contains transaction, security, account, or finance messages. Sift will not unsubscribe automatically.";
         } else if (group.endpoint && group.oneClick && group.authenticated) {
-          eligibility = 'eligible'; status = 'pending'; reason = 'Supports standard one-click unsubscribe.';
+          eligibility = "eligible";
+          status = "pending";
+          reason = "Supports standard one-click unsubscribe.";
         } else {
-          eligibility = 'manual'; status = 'manual'; reason = !group.authenticated
-            ? 'Sift could not confirm the sender, so it will not send an automatic request.'
-            : 'No supported one-click unsubscribe link was found.';
+          eligibility = "manual";
+          status = "manual";
+          reason = !group.authenticated
+            ? "Sift could not confirm the sender, so it will not send an automatic request."
+            : "No supported one-click unsubscribe link was found.";
         }
         insert.run(
-          this.#createId(), scanId, group.senderDomain, group.listId, group.receivingAddress,
-          group.endpoint, eligibility, group.authenticated ? 1 : 0, group.messageCount,
-          group.latestAt, JSON.stringify(categories), JSON.stringify(group.subjects), status, reason,
-          group.earliestAt, group.readCount,
+          this.#createId(),
+          scanId,
+          group.senderDomain,
+          group.listId,
+          group.receivingAddress,
+          group.endpoint,
+          eligibility,
+          group.authenticated ? 1 : 0,
+          group.messageCount,
+          group.latestAt,
+          JSON.stringify(categories),
+          JSON.stringify(group.subjects),
+          status,
+          reason,
+          group.earliestAt,
+          group.readCount,
         );
       }
     })();
@@ -173,118 +262,232 @@ export class SubscriptionRepository {
   }
 
   getCurrent(connectionId: string): SubscriptionDashboard | null {
-    const row = this.#database.prepare(`
+    const row = this.#database
+      .prepare(
+        `
       SELECT ss.id FROM subscription_scans ss
       JOIN mailbox_analyses ma ON ma.id = ss.analysis_id
       WHERE ma.connection_id = ? AND ss.profile_id = ? ORDER BY ss.rowid DESC LIMIT 1
-    `).get(connectionId, this.#profileId) as { id: string } | undefined;
+    `,
+      )
+      .get(connectionId, this.#profileId) as { id: string } | undefined;
     return row ? this.getByScan(row.id) : null;
   }
 
   getByScan(scanId: string): SubscriptionDashboard {
-    const scan = this.#database.prepare('SELECT * FROM subscription_scans WHERE id = ? AND profile_id = ?').get(scanId, this.#profileId) as { id: string; analysis_id: string; generated_at: string } | undefined;
-    if (!scan) throw new Error('Subscription scan was not found');
-    const rows = this.#database.prepare('SELECT * FROM subscription_candidates WHERE scan_id = ?').all(scanId) as Array<Record<string, unknown>>;
-    const connection = this.#database.prepare('SELECT ma.connection_id FROM subscription_scans ss JOIN mailbox_analyses ma ON ma.id=ss.analysis_id WHERE ss.id=?').get(scanId) as { connection_id: string };
-    const ledgerRows = this.#database.prepare("SELECT list_id,receiving_address,requested_at FROM unsubscribe_ledger WHERE profile_id=? AND provider='proton' AND connection_id=?")
-      .all(this.#profileId, connection.connection_id) as Array<{ list_id: string; receiving_address: string; requested_at: string }>;
-    const ledger = new Map(ledgerRows.map((row) => [`${row.list_id}\0${row.receiving_address}`, row]));
-    const jobRow = this.#database.prepare('SELECT job_id FROM unsubscribe_runs WHERE scan_id = ? ORDER BY rowid DESC LIMIT 1').get(scanId) as { job_id: string } | undefined;
+    const scan = this.#database
+      .prepare(
+        "SELECT * FROM subscription_scans WHERE id = ? AND profile_id = ?",
+      )
+      .get(scanId, this.#profileId) as
+      { id: string; analysis_id: string; generated_at: string } | undefined;
+    if (!scan) throw new Error("Subscription scan was not found");
+    const rows = this.#database
+      .prepare("SELECT * FROM subscription_candidates WHERE scan_id = ?")
+      .all(scanId) as Array<Record<string, unknown>>;
+    const connection = this.#database
+      .prepare(
+        "SELECT ma.connection_id FROM subscription_scans ss JOIN mailbox_analyses ma ON ma.id=ss.analysis_id WHERE ss.id=?",
+      )
+      .get(scanId) as { connection_id: string };
+    const ledgerRows = this.#database
+      .prepare(
+        "SELECT list_id,receiving_address,requested_at FROM unsubscribe_ledger WHERE profile_id=? AND provider='proton' AND connection_id=?",
+      )
+      .all(this.#profileId, connection.connection_id) as Array<{
+      list_id: string;
+      receiving_address: string;
+      requested_at: string;
+    }>;
+    const ledger = new Map(
+      ledgerRows.map((row) => [
+        `${row.list_id}\0${row.receiving_address}`,
+        row,
+      ]),
+    );
+    const jobRow = this.#database
+      .prepare(
+        "SELECT job_id FROM unsubscribe_runs WHERE scan_id = ? ORDER BY rowid DESC LIMIT 1",
+      )
+      .get(scanId) as { job_id: string } | undefined;
     return subscriptionDashboardSchema.parse({
       analysisId: scan.analysis_id,
       generatedAt: scan.generated_at,
-      candidates: rows.map((row) => {
-        const categories = JSON.parse(String(row.categories_json)) as MailCategory[];
-        const prior = ledger.get(`${row.list_id}\0${row.receiving_address}`);
-        const recurrence = prior ? row.latest_at && String(row.latest_at) > prior.requested_at ? 'recurring' : 'quiet' : 'never_requested';
-        const spanDays = row.earliest_at && row.latest_at ? Math.max(30, (Date.parse(String(row.latest_at)) - Date.parse(String(row.earliest_at))) / 86_400_000) : 30;
-        const messagesPerMonth = Number(row.message_count) / (spanDays / 30);
-        const readRate = Number(row.read_count) / Number(row.message_count);
-        return {
-        id: String(row.id),
-        senderDomain: String(row.sender_domain),
-        listId: String(row.list_id),
-        receivingAddress: String(row.receiving_address),
-        eligibility: row.eligibility,
-        authenticated: Boolean(row.authenticated),
-        messageCount: Number(row.message_count),
-        latestAt: row.latest_at ? String(row.latest_at) : null,
-        messagesPerMonth, readRate,
-        priorityScore: subscriptionPriorityScore(Number(row.message_count), row.latest_at ? String(row.latest_at) : null, categories, messagesPerMonth, readRate),
-        requestedAt: prior?.requested_at ?? null,
-        recurrence,
-        categories,
-        sampleSubjects: JSON.parse(String(row.sample_subjects_json)),
-        status: row.status,
-        reason: recurrence === 'recurring' ? `${row.reason} New mail arrived after the previous unsubscribe request.` : row.reason,
-      }; }).sort((left, right) => right.priorityScore - left.priorityScore || right.messageCount - left.messageCount || left.senderDomain.localeCompare(right.senderDomain)),
+      candidates: rows
+        .map((row) => {
+          const categories = JSON.parse(
+            String(row.categories_json),
+          ) as MailCategory[];
+          const prior = ledger.get(`${row.list_id}\0${row.receiving_address}`);
+          const recurrence = prior
+            ? row.latest_at && String(row.latest_at) > prior.requested_at
+              ? "recurring"
+              : "quiet"
+            : "never_requested";
+          const spanDays =
+            row.earliest_at && row.latest_at
+              ? Math.max(
+                  30,
+                  (Date.parse(String(row.latest_at)) -
+                    Date.parse(String(row.earliest_at))) /
+                    86_400_000,
+                )
+              : 30;
+          const messagesPerMonth = Number(row.message_count) / (spanDays / 30);
+          const readRate = Number(row.read_count) / Number(row.message_count);
+          return {
+            id: String(row.id),
+            senderDomain: String(row.sender_domain),
+            listId: String(row.list_id),
+            receivingAddress: String(row.receiving_address),
+            eligibility: row.eligibility,
+            authenticated: Boolean(row.authenticated),
+            messageCount: Number(row.message_count),
+            latestAt: row.latest_at ? String(row.latest_at) : null,
+            messagesPerMonth,
+            readRate,
+            priorityScore: subscriptionPriorityScore(
+              Number(row.message_count),
+              row.latest_at ? String(row.latest_at) : null,
+              categories,
+              messagesPerMonth,
+              readRate,
+            ),
+            requestedAt: prior?.requested_at ?? null,
+            recurrence,
+            categories,
+            sampleSubjects: JSON.parse(String(row.sample_subjects_json)),
+            status: row.status,
+            reason:
+              recurrence === "recurring"
+                ? `${row.reason} New mail arrived after the previous unsubscribe request.`
+                : row.reason,
+          };
+        })
+        .sort(
+          (left, right) =>
+            right.priorityScore - left.priorityScore ||
+            right.messageCount - left.messageCount ||
+            left.senderDomain.localeCompare(right.senderDomain),
+        ),
       job: jobRow ? this.#jobs.getProgress(jobRow.job_id) : null,
     });
   }
 
   start(candidateIds: readonly string[]): SubscriptionDashboard {
-    const placeholders = candidateIds.map(() => '?').join(',');
-    const rows = this.#database.prepare(`
+    const placeholders = candidateIds.map(() => "?").join(",");
+    const rows = this.#database
+      .prepare(
+        `
       SELECT sc.id, sc.scan_id FROM subscription_candidates sc
       JOIN subscription_scans ss ON ss.id = sc.scan_id
       WHERE sc.id IN (${placeholders}) AND sc.eligibility = 'eligible' AND ss.profile_id = ?
-    `).all(...candidateIds, this.#profileId) as Array<{ id: string; scan_id: string }>;
-    if (rows.length !== candidateIds.length || new Set(rows.map((row) => row.scan_id)).size !== 1) {
-      throw new Error('unsubscribe_selection_invalid');
+    `,
+      )
+      .all(...candidateIds, this.#profileId) as Array<{
+      id: string;
+      scan_id: string;
+    }>;
+    if (
+      rows.length !== candidateIds.length ||
+      new Set(rows.map((row) => row.scan_id)).size !== 1
+    ) {
+      throw new Error("unsubscribe_selection_invalid");
     }
     const scanId = rows[0]!.scan_id;
     const job = this.#jobs.createJob({
       profileId: this.#profileId,
-      kind: 'bulk-unsubscribe',
-      idempotencyKey: `unsubscribe:${scanId}:${[...candidateIds].sort().join(',')}`,
+      kind: "bulk-unsubscribe",
+      idempotencyKey: `unsubscribe:${scanId}:${[...candidateIds].sort().join(",")}`,
       itemKeys: rows.map((row) => row.id),
     });
-    this.#database.prepare('INSERT OR IGNORE INTO unsubscribe_runs(job_id, scan_id, created_at) VALUES (?, ?, ?)')
+    this.#database
+      .prepare(
+        "INSERT OR IGNORE INTO unsubscribe_runs(job_id, scan_id, created_at) VALUES (?, ?, ?)",
+      )
       .run(job.id, scanId, this.#now());
     return this.getByScan(scanId);
   }
 
   action(candidateId: string): SubscriptionAction {
-    const row = this.#database.prepare(`
+    const row = this.#database
+      .prepare(
+        `
       SELECT sc.id, sc.endpoint, sc.eligibility FROM subscription_candidates sc
       JOIN subscription_scans ss ON ss.id = sc.scan_id
       WHERE sc.id = ? AND ss.profile_id = ?
-    `).get(candidateId, this.#profileId) as { id: string; endpoint: string | null; eligibility: string } | undefined;
-    if (!row || row.eligibility !== 'eligible' || !row.endpoint) throw new Error('unsubscribe_candidate_ineligible');
-    return { id: row.id, endpoint: row.endpoint, eligibility: 'eligible' };
+    `,
+      )
+      .get(candidateId, this.#profileId) as
+      { id: string; endpoint: string | null; eligibility: string } | undefined;
+    if (!row || row.eligibility !== "eligible" || !row.endpoint)
+      throw new Error("unsubscribe_candidate_ineligible");
+    return { id: row.id, endpoint: row.endpoint, eligibility: "eligible" };
   }
 
-  mark(candidateId: string, status: 'unsubscribed' | 'failed'): void {
+  mark(candidateId: string, status: "unsubscribed" | "failed"): void {
     this.#database.transaction(() => {
-      this.#database.prepare('UPDATE subscription_candidates SET status = ? WHERE id = ?').run(status, candidateId);
-      if (status !== 'unsubscribed') return;
-      const row = this.#database.prepare(`
+      this.#database
+        .prepare("UPDATE subscription_candidates SET status = ? WHERE id = ?")
+        .run(status, candidateId);
+      if (status !== "unsubscribed") return;
+      const row = this.#database
+        .prepare(
+          `
         SELECT sc.list_id,sc.receiving_address,sc.latest_at,ma.connection_id
         FROM subscription_candidates sc JOIN subscription_scans ss ON ss.id=sc.scan_id
         JOIN mailbox_analyses ma ON ma.id=ss.analysis_id WHERE sc.id=? AND ss.profile_id=?
-      `).get(candidateId, this.#profileId) as { list_id: string; receiving_address: string; latest_at: string | null; connection_id: string } | undefined;
-      if (!row) throw new Error('unsubscribe_candidate_missing');
-      this.#database.prepare(`
+      `,
+        )
+        .get(candidateId, this.#profileId) as
+        | {
+            list_id: string;
+            receiving_address: string;
+            latest_at: string | null;
+            connection_id: string;
+          }
+        | undefined;
+      if (!row) throw new Error("unsubscribe_candidate_missing");
+      this.#database
+        .prepare(
+          `
         INSERT INTO unsubscribe_ledger(id,profile_id,provider,connection_id,list_id,receiving_address,requested_at,latest_seen_at_request,updated_at)
         VALUES (?,?,'proton',?,?,?,?,?,?)
         ON CONFLICT(profile_id,provider,connection_id,list_id,receiving_address) DO UPDATE SET
           recurrence_count=unsubscribe_ledger.recurrence_count + CASE WHEN excluded.latest_seen_at_request > unsubscribe_ledger.requested_at THEN 1 ELSE 0 END,
           requested_at=excluded.requested_at,latest_seen_at_request=excluded.latest_seen_at_request,updated_at=excluded.updated_at
-      `).run(this.#createId(), this.#profileId, row.connection_id, row.list_id, row.receiving_address, this.#now(), row.latest_at, this.#now());
+      `,
+        )
+        .run(
+          this.#createId(),
+          this.#profileId,
+          row.connection_id,
+          row.list_id,
+          row.receiving_address,
+          this.#now(),
+          row.latest_at,
+          this.#now(),
+        );
     })();
   }
 
   retry(jobId: string, candidateIds: readonly string[]): SubscriptionDashboard {
     const scanId = this.scanIdForJob(jobId);
     this.#jobs.retryItems(jobId, candidateIds);
-    const placeholders = candidateIds.map(() => '?').join(',');
-    this.#database.prepare(`UPDATE subscription_candidates SET status='pending' WHERE scan_id=? AND id IN (${placeholders})`).run(scanId, ...candidateIds);
+    const placeholders = candidateIds.map(() => "?").join(",");
+    this.#database
+      .prepare(
+        `UPDATE subscription_candidates SET status='pending' WHERE scan_id=? AND id IN (${placeholders})`,
+      )
+      .run(scanId, ...candidateIds);
     return this.getByScan(scanId);
   }
 
   scanIdForJob(jobId: string): string {
-    const row = this.#database.prepare('SELECT scan_id FROM unsubscribe_runs WHERE job_id = ?').get(jobId) as { scan_id: string } | undefined;
-    if (!row) throw new Error('Unsubscribe run was not found');
+    const row = this.#database
+      .prepare("SELECT scan_id FROM unsubscribe_runs WHERE job_id = ?")
+      .get(jobId) as { scan_id: string } | undefined;
+    if (!row) throw new Error("Unsubscribe run was not found");
     return row.scan_id;
   }
 }

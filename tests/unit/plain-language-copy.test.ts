@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { rebuildIndexInputSchema } from "../../src/shared/contracts/recovery";
 
 describe("plain-language interface copy", () => {
-  const renderer = readFileSync(resolve("src/renderer/App.tsx"), "utf8");
+  const renderer = readFileSync(resolve("src/renderer/App.tsx"), "utf8").replace(/\s+/g, " ");
   const applicationCopy = [
     renderer,
     "src/core/classification/mail-classifier.ts",

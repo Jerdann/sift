@@ -90,65 +90,9 @@ export const registerAnalysisHandlers = ({
   });
   ipcMain.handle(IPC_CHANNELS.rulesExport, async (event, rawInput) => {
     trust(event);
-    const input = exportRulePackInputSchema.parse(rawInput);
-    const context = profileSession.requireActiveContext();
-    const analysis =
-      input.source === "proton"
-        ? services().repository.get(services().connection.id)
-        : input.source === "gmail"
-          ? (() => {
-              const connection = new GmailConnectionRepository(
-                context.database,
-                profileSession.requireSecretVault(),
-                context.profile.id,
-              ).get();
-              return connection
-                ? new GmailAnalysisService(
-                    context.database,
-                    context.profile.id,
-                  ).get(connection)
-                : null;
-            })()
-          : (() => {
-              const connection = new OutlookConnectionRepository(
-                context.database,
-                profileSession.requireSecretVault(),
-                context.profile.id,
-              ).get();
-              return connection
-                ? new OutlookAnalysisService(
-                    context.database,
-                    context.profile.id,
-                  ).get(connection)
-                : null;
-            })();
-    if (!analysis) throw new Error("mailbox_analysis_required");
-    const pack = buildPortableRulePack(analysis);
-    const sieve = input.format === "proton-sieve";
-    const result = await dialog.showSaveDialog({
-      title: sieve ? "Save Proton filter file (Sieve)" : "Save filters as JSON",
-      defaultPath: sieve ? "sift-proton.sieve" : "sift-rules.json",
-      filters: sieve
-        ? [{ name: "Sieve filters", extensions: ["sieve"] }]
-        : [{ name: "JSON filter file", extensions: ["json"] }],
-    });
-    if (result.canceled || !result.filePath) {
-      return exportRulePackResultSchema.parse({
-        canceled: true,
-        path: null,
-        ruleCount: pack.rules.length,
-      });
-    }
-    await writeFile(
-      result.filePath,
-      sieve ? renderProtonSieve(pack) : `${JSON.stringify(pack, null, 2)}\n`,
-      { encoding: "utf8", flag: "w" },
-    );
-    return exportRulePackResultSchema.parse({
-      canceled: false,
-      path: result.filePath,
-      ruleCount: pack.rules.length,
-    });
+    exportRulePackInputSchema.parse(rawInput);
+    profileSession.requireActiveContext();
+    throw new Error("review_purpose_filters_in_rules");
   });
   ipcMain.handle(IPC_CHANNELS.rulePlanExportProton, async (event, rawInput) => {
     trust(event);
@@ -201,8 +145,10 @@ export const registerAnalysisHandlers = ({
     const input = exportProtonRulePlanSchema.parse(rawInput);
     const context = profileSession.requireActiveContext();
     return ruleReconciliationPlanSchema.parse(
-      new RuleReconciliationRepository(context.database, context.profile.id)
-        .confirmProtonImport(input.planId, input.revision),
+      new RuleReconciliationRepository(
+        context.database,
+        context.profile.id,
+      ).confirmProtonImport(input.planId, input.revision),
     );
   });
 

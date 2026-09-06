@@ -1,9 +1,15 @@
-import { normalizeGmailFilter, type GmailFilterResource } from '../../core/rules/rule-reconciliation';
-import type { DesiredManagedRule } from '../../shared/contracts/rule-management';
-import type { JobRepository } from '../jobs/job-repository';
-import type { RuleOperationRecord, RuleReconciliationRepository } from '../rules/rule-reconciliation-repository';
-import type { GmailConnectionRepository } from './gmail-connection-repository';
-import { refreshGmailAccessToken, type OAuthFetch } from './gmail-oauth';
+import {
+  normalizeGmailFilter,
+  type GmailFilterResource,
+} from "../../core/rules/rule-reconciliation";
+import type { DesiredManagedRule } from "../../shared/contracts/rule-management";
+import type { JobRepository } from "../jobs/job-repository";
+import type {
+  RuleOperationRecord,
+  RuleReconciliationRepository,
+} from "../rules/rule-reconciliation-repository";
+import type { GmailConnectionRepository } from "./gmail-connection-repository";
+import { refreshGmailAccessToken, type OAuthFetch } from "./gmail-oauth";
 
 interface ProviderState {
   labelsById: Map<string, string>;
@@ -11,10 +17,19 @@ interface ProviderState {
   filters: Array<ReturnType<typeof normalizeGmailFilter>>;
 }
 
-const api = async <T>(fetchPort: OAuthFetch, token: string, url: string, init: RequestInit = {}): Promise<T> => {
+const api = async <T>(
+  fetchPort: OAuthFetch,
+  token: string,
+  url: string,
+  init: RequestInit = {},
+): Promise<T> => {
   const response = await fetchPort(url, {
     ...init,
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...(init.headers ?? {}) },
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      ...(init.headers ?? {}),
+    },
   });
   if (!response.ok) throw new Error(`gmail_api_${response.status}`);
   return (response.status === 204 ? null : await response.json()) as T;
@@ -38,17 +53,42 @@ export class GmailRuleReconciliationRunner {
     this.#fetchPort = fetchPort;
   }
 
+  async folderPreparer(connectionId: string) {
+    const credentials = this.#connections.credentials(connectionId);
+    if (!credentials) throw new Error("gmail_not_connected");
+    const token = await refreshGmailAccessToken(
+      credentials.connection.clientId,
+      credentials.refreshToken,
+      credentials.clientSecret,
+      this.#fetchPort,
+    );
+    const state = await this.#state(token);
+    return async (targetPath: string) => {
+      await this.#ensureLabel(token, state, {
+        targetPath,
+        spam: false,
+      } as DesiredManagedRule);
+      const verified = await this.#state(token);
+      if (!verified.labelIdsByName.has(targetPath))
+        throw new Error("folder_verification_failed");
+    };
+  }
+
   async run(jobId: string) {
     const planId = this.#rules.planIdForJob(jobId);
+    this.#rules.assertCompatible(planId);
     for (;;) {
       const item = this.#jobs.claimNextPending(jobId);
       if (!item) break;
       const operation = this.#rules.operation(item.itemKey);
       this.#rules.setOperationRunning(operation.id);
       try {
-        if (operation.provider !== 'gmail') throw new Error('gmail_rule_provider_mismatch');
-        const credentials = this.#connections.credentials(operation.connectionId);
-        if (!credentials) throw new Error('gmail_not_connected');
+        if (operation.provider !== "gmail")
+          throw new Error("gmail_rule_provider_mismatch");
+        const credentials = this.#connections.credentials(
+          operation.connectionId,
+        );
+        if (!credentials) throw new Error("gmail_not_connected");
         const token = await refreshGmailAccessToken(
           credentials.connection.clientId,
           credentials.refreshToken,
@@ -56,14 +96,23 @@ export class GmailRuleReconciliationRunner {
           this.#fetchPort,
         );
         await this.#apply(token, operation);
-        this.#jobs.transitionItem(item.id, 'succeeded', {
-          result: { operation: 'provider-rule-action', verified: true },
+        this.#jobs.transitionItem(item.id, "succeeded", {
+          result: { operation: "provider-rule-action", verified: true },
         });
       } catch (error) {
-        const code = error instanceof Error ? error.message : 'gmail_rule_failed';
-        const mismatch = code === 'provider_verification_mismatch';
-        this.#rules.setOperationResult(operation.id, mismatch ? 'verification_mismatch' : 'failed', { errorCode: code });
-        this.#jobs.transitionItem(item.id, mismatch ? 'verification_mismatch' : 'failed', { errorCode: code });
+        const code =
+          error instanceof Error ? error.message : "gmail_rule_failed";
+        const mismatch = code === "provider_verification_mismatch";
+        this.#rules.setOperationResult(
+          operation.id,
+          mismatch ? "verification_mismatch" : "failed",
+          { errorCode: code },
+        );
+        this.#jobs.transitionItem(
+          item.id,
+          mismatch ? "verification_mismatch" : "failed",
+          { errorCode: code },
+        );
       }
     }
     return this.#rules.syncPlanState(planId);
@@ -74,10 +123,14 @@ export class GmailRuleReconciliationRunner {
     for (;;) {
       const item = this.#jobs.claimNextPending(jobId);
       if (!item) break;
-      const operation = this.#rules.operation(item.itemKey.replace(/^undo:/, ''));
+      const operation = this.#rules.operation(
+        item.itemKey.replace(/^undo:/, ""),
+      );
       try {
-        const credentials = this.#connections.credentials(operation.connectionId);
-        if (!credentials) throw new Error('gmail_not_connected');
+        const credentials = this.#connections.credentials(
+          operation.connectionId,
+        );
+        if (!credentials) throw new Error("gmail_not_connected");
         const token = await refreshGmailAccessToken(
           credentials.connection.clientId,
           credentials.refreshToken,
@@ -85,15 +138,24 @@ export class GmailRuleReconciliationRunner {
           this.#fetchPort,
         );
         await this.#undoOperation(token, operation);
-        this.#rules.setOperationResult(operation.id, 'undone');
-        this.#jobs.transitionItem(item.id, 'succeeded', {
-          result: { operation: 'provider-rule-action', verified: true },
+        this.#rules.setOperationResult(operation.id, "undone");
+        this.#jobs.transitionItem(item.id, "succeeded", {
+          result: { operation: "provider-rule-action", verified: true },
         });
       } catch (error) {
-        const code = error instanceof Error ? error.message : 'gmail_rule_undo_failed';
-        const mismatch = code === 'provider_verification_mismatch';
-        this.#rules.setOperationResult(operation.id, mismatch ? 'verification_mismatch' : 'failed', { errorCode: code });
-        this.#jobs.transitionItem(item.id, mismatch ? 'verification_mismatch' : 'failed', { errorCode: code });
+        const code =
+          error instanceof Error ? error.message : "gmail_rule_undo_failed";
+        const mismatch = code === "provider_verification_mismatch";
+        this.#rules.setOperationResult(
+          operation.id,
+          mismatch ? "verification_mismatch" : "failed",
+          { errorCode: code },
+        );
+        this.#jobs.transitionItem(
+          item.id,
+          mismatch ? "verification_mismatch" : "failed",
+          { errorCode: code },
+        );
       }
     }
     return this.#rules.syncUndoState(planId);
@@ -102,135 +164,283 @@ export class GmailRuleReconciliationRunner {
   async #apply(token: string, operation: RuleOperationRecord): Promise<void> {
     let state = await this.#state(token);
     const exact = operation.desired
-      ? state.filters.find((filter) => filter.fingerprint === operation.desired!.fingerprint)
+      ? state.filters.find(
+          (filter) => filter.fingerprint === operation.desired!.fingerprint,
+        )
       : undefined;
-    const managed = this.#rules.managedRule('gmail', operation.connectionId, operation.stableKey);
+    const managed = this.#rules.managedRule(
+      "gmail",
+      operation.connectionId,
+      operation.stableKey,
+    );
 
-    if (operation.kind === 'unchanged') {
-      const current = state.filters.find((filter) => filter.providerRuleId === managed?.provider_rule_id);
-      if (!operation.desired || !current || current.fingerprint !== operation.desired.fingerprint) {
-        throw new Error('provider_verification_mismatch');
+    if (operation.kind === "unchanged") {
+      const current = state.filters.find(
+        (filter) => filter.providerRuleId === managed?.provider_rule_id,
+      );
+      if (
+        !operation.desired ||
+        !current ||
+        current.fingerprint !== operation.desired.fingerprint
+      ) {
+        throw new Error("provider_verification_mismatch");
       }
-      this.#rules.setOperationResult(operation.id, 'succeeded', { providerRuleId: current.providerRuleId, verifiedFingerprint: current.fingerprint });
+      this.#rules.setOperationResult(operation.id, "succeeded", {
+        providerRuleId: current.providerRuleId,
+        verifiedFingerprint: current.fingerprint,
+      });
       return;
     }
 
-    if (operation.kind === 'adopt') {
-      if (!operation.desired || !exact) throw new Error('provider_verification_mismatch');
-      this.#rules.activateManagedRule('gmail', operation.connectionId, operation.desired, exact.providerRuleId, 'adopted');
-      this.#rules.setOperationResult(operation.id, 'succeeded', { providerRuleId: exact.providerRuleId, verifiedFingerprint: exact.fingerprint });
+    if (operation.kind === "adopt") {
+      if (!operation.desired || !exact)
+        throw new Error("provider_verification_mismatch");
+      this.#rules.activateManagedRule(
+        "gmail",
+        operation.connectionId,
+        operation.desired,
+        exact.providerRuleId,
+        "adopted",
+      );
+      this.#rules.setOperationResult(operation.id, "succeeded", {
+        providerRuleId: exact.providerRuleId,
+        verifiedFingerprint: exact.fingerprint,
+      });
       return;
     }
 
-    if (operation.kind === 'remove') {
-      const providerRuleId = managed?.ownership === 'managed' && managed.provider_rule_id
-        ? managed.provider_rule_id
-        : operation.prior?.ownership === 'external'
-          ? operation.prior.providerRuleId
-          : null;
+    if (operation.kind === "remove") {
+      const providerRuleId =
+        managed?.ownership === "managed" && managed.provider_rule_id
+          ? managed.provider_rule_id
+          : operation.prior?.ownership === "external"
+            ? operation.prior.providerRuleId
+            : null;
       if (providerRuleId) {
-        const exists = state.filters.some((filter) => filter.providerRuleId === providerRuleId);
+        const exists = state.filters.some(
+          (filter) => filter.providerRuleId === providerRuleId,
+        );
         if (exists) await this.#deleteFilter(token, providerRuleId);
         state = await this.#state(token);
-        if (state.filters.some((filter) => filter.providerRuleId === providerRuleId)) {
-          throw new Error('provider_verification_mismatch');
+        if (
+          state.filters.some(
+            (filter) => filter.providerRuleId === providerRuleId,
+          )
+        ) {
+          throw new Error("provider_verification_mismatch");
         }
       }
-      if (managed) this.#rules.removeManagedRule('gmail', operation.connectionId, operation.stableKey);
-      this.#rules.setOperationResult(operation.id, 'succeeded', { verifiedFingerprint: operation.prior?.fingerprint ?? null });
+      if (managed)
+        this.#rules.removeManagedRule(
+          "gmail",
+          operation.connectionId,
+          operation.stableKey,
+        );
+      this.#rules.setOperationResult(operation.id, "succeeded", {
+        verifiedFingerprint: operation.prior?.fingerprint ?? null,
+      });
       return;
     }
 
-    if (!operation.desired) throw new Error('rule_desired_state_missing');
+    if (!operation.desired) throw new Error("rule_desired_state_missing");
     if (exact) {
-      const ownership = operation.providerRuleId === exact.providerRuleId ? 'managed' : 'adopted';
-      this.#rules.activateManagedRule('gmail', operation.connectionId, operation.desired, exact.providerRuleId, ownership);
-      this.#rules.setOperationResult(operation.id, 'succeeded', { providerRuleId: exact.providerRuleId, verifiedFingerprint: exact.fingerprint });
+      const ownership =
+        operation.providerRuleId === exact.providerRuleId
+          ? "managed"
+          : "adopted";
+      this.#rules.activateManagedRule(
+        "gmail",
+        operation.connectionId,
+        operation.desired,
+        exact.providerRuleId,
+        ownership,
+      );
+      this.#rules.setOperationResult(operation.id, "succeeded", {
+        providerRuleId: exact.providerRuleId,
+        verifiedFingerprint: exact.fingerprint,
+      });
       return;
     }
 
-    if (operation.kind === 'replace' && managed?.ownership === 'managed' && managed.provider_rule_id) {
-      if (state.filters.some((filter) => filter.providerRuleId === managed.provider_rule_id)) {
+    if (
+      operation.kind === "replace" &&
+      managed?.ownership === "managed" &&
+      managed.provider_rule_id
+    ) {
+      if (
+        state.filters.some(
+          (filter) => filter.providerRuleId === managed.provider_rule_id,
+        )
+      ) {
         await this.#deleteFilter(token, managed.provider_rule_id);
       }
     }
     const labelId = await this.#ensureLabel(token, state, operation.desired);
-    const created = await api<{ id: string }>(this.#fetchPort, token, 'https://gmail.googleapis.com/gmail/v1/users/me/settings/filters', {
-      method: 'POST',
-      body: JSON.stringify(this.#filterPayload(operation.desired, labelId)),
-    });
+    const created = await api<{ id: string }>(
+      this.#fetchPort,
+      token,
+      "https://gmail.googleapis.com/gmail/v1/users/me/settings/filters",
+      {
+        method: "POST",
+        body: JSON.stringify(this.#filterPayload(operation.desired, labelId)),
+      },
+    );
     this.#rules.setOperationProviderId(operation.id, created.id);
     state = await this.#state(token);
-    const verified = state.filters.find((filter) => filter.providerRuleId === created.id);
+    const verified = state.filters.find(
+      (filter) => filter.providerRuleId === created.id,
+    );
     if (!verified || verified.fingerprint !== operation.desired.fingerprint) {
-      throw new Error('provider_verification_mismatch');
+      throw new Error("provider_verification_mismatch");
     }
-    this.#rules.activateManagedRule('gmail', operation.connectionId, operation.desired, created.id, 'managed');
-    this.#rules.setOperationResult(operation.id, 'succeeded', { providerRuleId: created.id, verifiedFingerprint: verified.fingerprint });
+    this.#rules.activateManagedRule(
+      "gmail",
+      operation.connectionId,
+      operation.desired,
+      created.id,
+      "managed",
+    );
+    this.#rules.setOperationResult(operation.id, "succeeded", {
+      providerRuleId: created.id,
+      verifiedFingerprint: verified.fingerprint,
+    });
   }
 
-  async #undoOperation(token: string, operation: RuleOperationRecord): Promise<void> {
+  async #undoOperation(
+    token: string,
+    operation: RuleOperationRecord,
+  ): Promise<void> {
     let state = await this.#state(token);
-    const current = this.#rules.managedRule('gmail', operation.connectionId, operation.stableKey);
-    if (current?.ownership === 'managed' && current.provider_rule_id) {
-      if (state.filters.some((filter) => filter.providerRuleId === current.provider_rule_id)) {
+    const current = this.#rules.managedRule(
+      "gmail",
+      operation.connectionId,
+      operation.stableKey,
+    );
+    if (current?.ownership === "managed" && current.provider_rule_id) {
+      if (
+        state.filters.some(
+          (filter) => filter.providerRuleId === current.provider_rule_id,
+        )
+      ) {
         await this.#deleteFilter(token, current.provider_rule_id);
       }
       state = await this.#state(token);
-      if (state.filters.some((filter) => filter.providerRuleId === current.provider_rule_id)) {
-        throw new Error('provider_verification_mismatch');
+      if (
+        state.filters.some(
+          (filter) => filter.providerRuleId === current.provider_rule_id,
+        )
+      ) {
+        throw new Error("provider_verification_mismatch");
       }
     }
 
-    if (operation.kind === 'create' || operation.kind === 'adopt') {
-      this.#rules.removeManagedRule('gmail', operation.connectionId, operation.stableKey);
+    if (operation.kind === "create" || operation.kind === "adopt") {
+      this.#rules.removeManagedRule(
+        "gmail",
+        operation.connectionId,
+        operation.stableKey,
+      );
       return;
     }
 
     if (!operation.prior || !operation.priorManaged) {
-      this.#rules.removeManagedRule('gmail', operation.connectionId, operation.stableKey);
+      this.#rules.removeManagedRule(
+        "gmail",
+        operation.connectionId,
+        operation.stableKey,
+      );
       return;
     }
     state = await this.#state(token);
-    let restored = state.filters.find((filter) => filter.fingerprint === operation.prior!.fingerprint);
-    let ownership: 'managed' | 'adopted' = operation.prior.ownership === 'adopted' ? 'adopted' : 'managed';
+    let restored = state.filters.find(
+      (filter) => filter.fingerprint === operation.prior!.fingerprint,
+    );
+    let ownership: "managed" | "adopted" =
+      operation.prior.ownership === "adopted" ? "adopted" : "managed";
     if (!restored) {
-      const labelId = await this.#ensureLabel(token, state, operation.priorManaged);
-      const created = await api<{ id: string }>(this.#fetchPort, token, 'https://gmail.googleapis.com/gmail/v1/users/me/settings/filters', {
-        method: 'POST',
-        body: JSON.stringify(this.#filterPayload(operation.priorManaged, labelId)),
-      });
+      const labelId = await this.#ensureLabel(
+        token,
+        state,
+        operation.priorManaged,
+      );
+      const created = await api<{ id: string }>(
+        this.#fetchPort,
+        token,
+        "https://gmail.googleapis.com/gmail/v1/users/me/settings/filters",
+        {
+          method: "POST",
+          body: JSON.stringify(
+            this.#filterPayload(operation.priorManaged, labelId),
+          ),
+        },
+      );
       state = await this.#state(token);
-      restored = state.filters.find((filter) => filter.providerRuleId === created.id);
-      ownership = 'managed';
+      restored = state.filters.find(
+        (filter) => filter.providerRuleId === created.id,
+      );
+      ownership = "managed";
     }
     if (!restored || restored.fingerprint !== operation.prior.fingerprint) {
-      throw new Error('provider_verification_mismatch');
+      throw new Error("provider_verification_mismatch");
     }
-    this.#rules.activateManagedRule('gmail', operation.connectionId, operation.priorManaged, restored.providerRuleId, ownership);
+    this.#rules.activateManagedRule(
+      "gmail",
+      operation.connectionId,
+      operation.priorManaged,
+      restored.providerRuleId,
+      ownership,
+    );
   }
 
   async #state(token: string): Promise<ProviderState> {
     const [labelsPayload, filtersPayload] = await Promise.all([
-      api<{ labels?: Array<{ id: string; name: string }> }>(this.#fetchPort, token, 'https://gmail.googleapis.com/gmail/v1/users/me/labels'),
-      api<{ filter?: GmailFilterResource[] }>(this.#fetchPort, token, 'https://gmail.googleapis.com/gmail/v1/users/me/settings/filters'),
+      api<{ labels?: Array<{ id: string; name: string }> }>(
+        this.#fetchPort,
+        token,
+        "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+      ),
+      api<{ filter?: GmailFilterResource[] }>(
+        this.#fetchPort,
+        token,
+        "https://gmail.googleapis.com/gmail/v1/users/me/settings/filters",
+      ),
     ]);
-    const labelsById = new Map((labelsPayload.labels ?? []).map((label) => [label.id, label.name]));
+    const labelsById = new Map(
+      (labelsPayload.labels ?? []).map((label) => [label.id, label.name]),
+    );
     return {
       labelsById,
-      labelIdsByName: new Map((labelsPayload.labels ?? []).map((label) => [label.name, label.id])),
-      filters: (filtersPayload.filter ?? []).map((filter) => normalizeGmailFilter(filter, labelsById)),
+      labelIdsByName: new Map(
+        (labelsPayload.labels ?? []).map((label) => [label.name, label.id]),
+      ),
+      filters: (filtersPayload.filter ?? []).map((filter) =>
+        normalizeGmailFilter(filter, labelsById),
+      ),
     };
   }
 
-  async #ensureLabel(token: string, state: ProviderState, desired: DesiredManagedRule): Promise<string> {
-    if (desired.spam) return 'SPAM';
+  async #ensureLabel(
+    token: string,
+    state: ProviderState,
+    desired: DesiredManagedRule,
+  ): Promise<string> {
+    if (desired.trash) return "TRASH";
+    if (desired.spam) return "SPAM";
     const existing = state.labelIdsByName.get(desired.targetPath);
     if (existing) return existing;
-    const created = await api<{ id: string; name: string }>(this.#fetchPort, token, 'https://gmail.googleapis.com/gmail/v1/users/me/labels', {
-      method: 'POST',
-      body: JSON.stringify({ name: desired.targetPath, labelListVisibility: 'labelShow', messageListVisibility: 'show' }),
-    });
+    const created = await api<{ id: string; name: string }>(
+      this.#fetchPort,
+      token,
+      "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: desired.targetPath,
+          labelListVisibility: "labelShow",
+          messageListVisibility: "show",
+        }),
+      },
+    );
     state.labelsById.set(created.id, desired.targetPath);
     state.labelIdsByName.set(desired.targetPath, created.id);
     return created.id;
@@ -238,13 +448,24 @@ export class GmailRuleReconciliationRunner {
 
   #filterPayload(desired: DesiredManagedRule, labelId: string) {
     return {
-      criteria: {
-        from: `@${desired.senderDomain}`,
-        ...(desired.receivingAddress ? { to: desired.receivingAddress } : {}),
-      },
+      criteria: desired.compiledCriteria
+        ? Object.fromEntries(
+            Object.entries(desired.compiledCriteria).filter(
+              ([, value]) => value !== null,
+            ),
+          )
+        : {
+            from: `@${desired.senderDomain}`,
+            ...(desired.receivingAddress
+              ? { to: desired.receivingAddress }
+              : {}),
+          },
       action: {
         addLabelIds: [labelId],
-        removeLabelIds: [...(desired.archive ? ['INBOX'] : []), ...(desired.markRead ? ['UNREAD'] : [])],
+        removeLabelIds: [
+          ...(desired.archive ? ["INBOX"] : []),
+          ...(desired.markRead ? ["UNREAD"] : []),
+        ],
       },
     };
   }
@@ -254,7 +475,7 @@ export class GmailRuleReconciliationRunner {
       this.#fetchPort,
       token,
       `https://gmail.googleapis.com/gmail/v1/users/me/settings/filters/${encodeURIComponent(providerRuleId)}`,
-      { method: 'DELETE' },
+      { method: "DELETE" },
     );
   }
 }
