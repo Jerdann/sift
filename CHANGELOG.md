@@ -4,7 +4,9 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
-## [1.6.0] - 2026-09-06
+## [1.6.1] - 2026-09-06
+
+Version 1.6.0 did not publish an installer because the hosted test runner timed out. This release includes the complete update below and serializes database-heavy tests on CI. No tests or assertions were removed.
 
 ### Added
 

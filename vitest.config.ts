@@ -5,10 +5,12 @@ export default defineConfig({
     coverage: { enabled: false },
     environment: 'node',
     include: ['tests/unit/**/*.test.ts'],
-    maxWorkers: 4,
+    // These integration tests create real SQLite databases. Serialize them on
+    // shared CI disks so concurrent migration/fsync work does not starve tests.
+    maxWorkers: process.env.CI ? 1 : 4,
     passWithNoTests: true,
     restoreMocks: true,
     setupFiles: ['tests/setup.ts'],
-    testTimeout: 15_000,
+    testTimeout: process.env.CI ? 30_000 : 15_000,
   },
 });
