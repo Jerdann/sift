@@ -57,9 +57,12 @@ export function MailHandlingPanel({
   useEffect(() => {
     if (!addressGroups) return;
     const ids = new Set(addressGroups.groups.map((g) => g.id));
-    setCopySource((id) => (ids.has(id) ? id : "main"));
-    setCopyTargets((targets) => targets.filter((id) => ids.has(id)));
-  }, [addressGroups?.revision]);
+    const source = ids.has(copySource) ? copySource : "main";
+    setCopySource(source);
+    setCopyTargets((targets) =>
+      targets.filter((id) => ids.has(id) && id !== source),
+    );
+  }, [addressGroups?.revision, copySource]);
   const [scopeReload, setScopeReload] = useState(0);
   useEffect(() => {
     let canceled = false;
