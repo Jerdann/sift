@@ -540,8 +540,8 @@ describe("approved Proton cleanup", () => {
       await expect.poll(() => service.get(input)?.state).toBe("succeeded");
       expect([...created].sort()).toEqual([
         "Primary",
-        "Primary/Money",
-        "Primary/Money/Receipts",
+        "Primary/Promotions",
+        "Primary/Promotions/Sales & offers",
         "Primary/Security",
         "Primary/Security/Account changes",
       ]);
