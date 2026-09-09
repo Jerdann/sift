@@ -124,12 +124,18 @@ export class AccountIdentityRepository {
     const row = this.#database
       .prepare(
         `
-      SELECT id FROM account_identities
+      SELECT id,group_id,container_enabled,container_name FROM account_identities
       WHERE profile_id=? AND provider=? AND connection_id=? AND normalized_address=?
     `,
       )
       .get(this.#profileId, input.provider, input.connectionId, address) as
-      { id: string } | undefined;
+      | {
+          id: string;
+          group_id: string;
+          container_enabled: number;
+          container_name: string | null;
+        }
+      | undefined;
     if (!row) throw new Error("account_identity_not_found");
     return this.#database.transaction(() => {
       const containerEnabled =
@@ -156,14 +162,22 @@ export class AccountIdentityRepository {
         this.#profileId,
       );
       const state = groups.get(input);
-      const target = containerEnabled
-        ? (state.groups.find((g) => g.name === input.containerName) ?? {
-            id: this.#createId(),
-            name: input.containerName!,
-            color: "blue" as const,
-            addresses: [],
-          })
-        : state.groups.find((g) => g.id === "main")!;
+      const unchangedGrouping =
+        Boolean(row.container_enabled) === input.containerEnabled &&
+        row.container_name === input.containerName;
+      const existingGroup = unchangedGrouping
+        ? state.groups.find((g) => g.id === row.group_id)
+        : null;
+      const target =
+        existingGroup ??
+        (containerEnabled
+          ? (state.groups.find((g) => g.name === input.containerName) ?? {
+              id: this.#createId(),
+              name: input.containerName!,
+              color: "blue" as const,
+              addresses: [],
+            })
+          : state.groups.find((g) => g.id === "main")!);
       if (!state.groups.some((g) => g.id === target.id))
         state.groups.push(target);
       for (const g of state.groups)

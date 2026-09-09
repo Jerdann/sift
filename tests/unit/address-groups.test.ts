@@ -30,6 +30,43 @@ import { GROUP_COLORS } from "../../src/core/classification/group-colors";
 import { rebuildLocalIndex } from "../../src/main/recovery/recovery-service";
 
 describe("address groups", () => {
+  it("reconfirming ownership keeps a sole custom group instead of moving the address to Main", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "sift-group-ownership-")),
+      f = seedBulkMailbox(root),
+      db = new ProfileRepository(root).openProfile(f.profileId).database;
+    try {
+      const account = {
+          provider: "proton" as const,
+          connectionId: f.connectionId,
+        },
+        groups = new AddressGroupRepository(db, f.profileId),
+        state = groups.get(account);
+      const all = state.groups.flatMap((g) => g.addresses),
+        custom = state.groups.find((g) => g.id !== "main")!;
+      const saved = groups.save({
+        ...account,
+        revision: state.revision,
+        groups: state.groups.map((g) => ({
+          ...g,
+          addresses: g.id === custom.id ? all : [],
+        })),
+      });
+      expect(
+        groups.routing(account).get("owner@example.test")?.parent,
+      ).toBeNull();
+      new AccountIdentityRepository(db, f.profileId).update({
+        ...account,
+        address: "owner@example.test",
+        status: "confirmed",
+        containerEnabled: false,
+        containerName: null,
+      });
+      expect(groups.get(account)).toEqual(saved);
+    } finally {
+      db.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   it("keeps address-specific sender rules through moves, copies, failures and scan removal", () => {
     const root = mkdtempSync(path.join(tmpdir(), "sift-group-moves-")),
       f = seedBulkMailbox(root),
