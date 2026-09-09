@@ -7,7 +7,9 @@ export const handlingGroups = (detail: "simple" | "detailed") => {
     { id: string; label: string; categories: MailCategory[] }
   >();
   for (const category of Object.keys(CATEGORY_PRESENTATION) as MailCategory[]) {
-    const special = ["other", "suspicious", "spam"].includes(category);
+    const special = ["other", "suspicious", "spam", "mailing_lists"].includes(
+      category,
+    );
     const label =
       category === "other"
         ? "Needs sorting"

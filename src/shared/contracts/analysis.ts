@@ -33,6 +33,7 @@ export const mailCategorySchema = z.enum([
   "reports",
   "newsletters",
   "announcements",
+  "mailing_lists",
 ]);
 
 export const categorySummarySchema = z.object({

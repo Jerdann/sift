@@ -43,6 +43,7 @@ export const handlingSaveSchema = handlingScopeSchema.extend({
   reset: z.boolean().optional(),
 });
 export const handlingPreviewInputSchema = handlingSaveSchema.extend({
+  excludeSeparated: z.boolean().optional(),
   page: z.number().int().min(0).max(10000).default(0),
   category: mailCategorySchema.nullable().default(null),
   categories: z.array(mailCategorySchema).optional(),

@@ -12,7 +12,7 @@ export const defaultHandling = (category: MailCategory): CategoryHandling => ({
     : "file",
   markRead:
     !attentionCategories.has(category) &&
-    !["other", "suspicious", "spam"].includes(category),
+    !["other", "suspicious", "spam", "mailing_lists"].includes(category),
   retentionDays: null,
 });
 export const handlingFor = (
@@ -36,6 +36,25 @@ export const handlingFor = (
         : null,
   };
 };
+// Copy the group decisions, not sender-specific rules tied to another address.
+// Materialize defaults so later main-tree edits cannot alter this snapshot.
+export const copyGroupChoices = (
+  source: HandlingPreferences,
+  target: HandlingPreferences,
+  address: string,
+): HandlingPreferences => ({
+  ...source,
+  categories: Object.fromEntries(
+    (Object.keys(CATEGORY_PRESENTATION) as MailCategory[]).map((c) => [
+      c,
+      { ...handlingFor(source, c) },
+    ]),
+  ),
+  rules:
+    target.rules?.filter(
+      (r) => r.address.toLowerCase() === address.toLowerCase(),
+    ) ?? [],
+});
 export const handlingTarget = (
   preferences: HandlingPreferences,
   category: MailCategory,

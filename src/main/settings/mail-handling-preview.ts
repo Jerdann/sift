@@ -145,12 +145,15 @@ export const previewMailHandling = (
     const addresses = (JSON.parse(row.receiving_addresses_json) as string[])
       .map((a) => a.toLowerCase())
       .filter((a) => owned.has(a));
+    const address = new Set(addresses).size === 1 ? addresses[0]! : null;
+    if (input.level === "alias" && address !== input.address!.toLowerCase())
+      continue;
     if (
-      input.level === "alias" &&
-      !addresses.includes(input.address!.toLowerCase())
+      input.excludeSeparated &&
+      input.level === "account" &&
+      addresses.some((a) => owned.get(a)?.container_enabled)
     )
       continue;
-    const address = new Set(addresses).size === 1 ? addresses[0]! : null;
     const identity = address ? owned.get(address) : null;
     const basePrefs =
       preferenceCache.get(address) ?? repo.resolveDraft(input, address);
@@ -181,7 +184,13 @@ export const previewMailHandling = (
               ["SENT", "DRAFT", "SPAM", "TRASH"].includes(label),
             )
           : Object.values(outlookFolders ?? {}).includes(row.roles);
-    if (!excluded && address && sender && c.category === "other") {
+    if (
+      !excluded &&
+      address &&
+      sender &&
+      ["other", "mailing_lists"].includes(c.category) &&
+      (!input.categories || input.categories.includes(c.category))
+    ) {
       const key = sender + "\0" + address;
       const group = senders.get(key) ?? {
         sender,

@@ -392,8 +392,17 @@ export const registerAccountHandlers = ({
 
   ipcMain.handle(IPC_CHANNELS.identitiesUpdate, (event, rawInput: unknown) => {
     trust(event);
+    const current = repositories();
+    if (
+      current.context.database
+        .prepare(
+          "SELECT 1 FROM jobs WHERE profile_id=? AND state IN ('pending','running') LIMIT 1",
+        )
+        .get(current.context.profile.id)
+    )
+      throw new Error("mail_job_running");
     return accountIdentitySummarySchema.parse(
-      repositories().identities.update(
+      current.identities.update(
         accountIdentityUpdateInputSchema.parse(rawInput),
       ),
     );

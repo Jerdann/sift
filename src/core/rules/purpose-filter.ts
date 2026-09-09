@@ -4,6 +4,7 @@ import {
   patternsFor,
   exclusionsFor,
   matchesPattern,
+  PURPOSE_RULES,
 } from "../classification/message-purpose";
 
 export interface PurposeConditions {
@@ -12,6 +13,7 @@ export interface PurposeConditions {
   senderAddresses: string[];
   receivingAddress: string;
   excludedReceivingAddresses?: string[];
+  mailingList?: boolean;
 }
 
 // Graph and Gmail cannot express ordered wildcard gaps. Use only contiguous
@@ -23,16 +25,24 @@ export const purposeConditions = (
   senders: string[],
   address: string,
 ): PurposeConditions => {
-  const positive = [...patternsFor(category)];
-  const negative = [...exclusionsFor(category)];
+  const mailingList = category === "mailing_lists";
+  const positive = mailingList
+    ? provider === "gmail"
+      ? []
+      : ["*"]
+    : [...patternsFor(category)];
+  const negative = mailingList
+    ? PURPOSE_RULES.flatMap((r) => [...r.patterns])
+    : [...exclusionsFor(category)];
   const longest = (pattern: string) =>
     pattern
       .split("*")
       .filter(Boolean)
       .sort((a, b) => b.length - a.length)[0] ?? "";
   return {
+    ...(mailingList ? { mailingList: true } : {}),
     subjectPatterns:
-      provider === "proton"
+      provider === "proton" || mailingList
         ? positive
         : positive.filter(
             (pattern) =>
@@ -56,8 +66,15 @@ export const matchesPurposeConditions = (
   subject: string,
   sender: string,
   addresses: readonly string[],
+  headers: Record<string, string> = {},
 ): boolean =>
   conditions.senderAddresses.includes(sender.toLowerCase()) &&
+  (!conditions.mailingList ||
+    Object.entries(headers).some(
+      ([key, value]) =>
+        ["list-id", "list-unsubscribe"].includes(key.toLowerCase()) &&
+        value.trim(),
+    )) &&
   addresses.map((a) => a.toLowerCase()).includes(conditions.receivingAddress) &&
   !addresses.some((a) =>
     conditions.excludedReceivingAddresses?.includes(a.toLowerCase()),
@@ -99,6 +116,9 @@ export const outlookPurposePredicates = (conditions: PurposeConditions) => ({
     ...(conditions.subjectPatterns.includes("*")
       ? {}
       : { subjectContains: conditions.subjectPatterns.map(phrase) }),
+    ...(conditions.mailingList
+      ? { headerContains: ["List-Id:", "List-Unsubscribe:"] }
+      : {}),
   },
   exceptions: {
     ...(conditions.excludedReceivingAddresses?.length

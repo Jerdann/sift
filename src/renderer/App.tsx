@@ -5067,7 +5067,7 @@ const RuleReconciliationPanel = ({
       desired.archive ? "remove it from the inbox" : null,
     ].filter((value): value is string => Boolean(value));
     const behavior = consequences.join(", ");
-    const basis = `${desired.observedMessages.toLocaleString()} saved messages match these sender, address, and subject conditions. ${desired.matchNote ?? "Rebuild this old rule before using it."}`;
+    const basis = `${desired.observedMessages.toLocaleString()} saved messages match these sender, address, and ${desired.purposeConditions?.mailingList ? "mailing-list header" : "subject"} conditions. ${desired.matchNote ?? "Rebuild this old rule before using it."}`;
     if (operation.kind === "adopt") {
       return `Use this existing filter without changing it. Future matches will ${behavior}. ${basis}`;
     }
@@ -5197,9 +5197,10 @@ const RuleReconciliationPanel = ({
             sales, receipts, and login codes get different handling.
           </li>
           <li>
-            Only clear subject matches become future filters. Mailing-list
-            headers, company names, and tentative content matches are not
-            enough.
+            Recognized subjects get purpose-specific filters. Other mailing-list
+            mail can get a separate filing rule on Proton and Outlook, which
+            also checks for a mailing-list header. A list header alone never
+            makes mail spam or a paid subscription.
           </li>
           <li>
             Security and urgent actions take priority over sales. Replies,
@@ -5386,6 +5387,9 @@ const RuleReconciliationPanel = ({
                         )}
                       </p>
                       <p>
+                        {operation.desired.purposeConditions.mailingList
+                          ? "Requires a List-Id or List-Unsubscribe header. "
+                          : ""}
                         Subject matches:{" "}
                         {operation.desired.purposeConditions.subjectPatterns.join(
                           " · ",
@@ -6591,13 +6595,11 @@ const AppShell = ({
           {activePage === "organize" ? (
             <>
               {taskIntro(
-                "Choose how to handle mail and create folders",
-                "Set destinations and read status, then create or reuse the approved folders. No messages move in this step.",
+                "Organize mail",
+                "Choose what to keep, file, or remove. Create folders after reviewing the plan. No messages move here.",
                 [
-                  "Confirm which addresses are yours and which need separate folder trees.",
-                  "Choose destinations, read status, folder detail, and age reviews for each kind of message. Check the local examples before saving.",
-                  "Review and edit the shared folders and any split alias folders. Matching folders are reused; missing folders are created only after approval.",
-                  "Next review Spam. Existing-message moves and removal of obsolete folders are reviewed in Rules afterward.",
+                  "Separate any address that needs its own folders. Copy main choices or set different ones.",
+                  "Pick a mail group, check the examples, and save. Review the folders below; then continue to Spam and Rules.",
                 ],
               )}
               {!scanInventoryReady ? (
@@ -6641,25 +6643,16 @@ const AppShell = ({
                     >
                       <MailHandlingPanel
                         account={account}
+                        identities={identities[account.id] ?? []}
+                        onUpdateIdentity={onUpdateIdentity}
                         onSaved={() => onGenerateProposal(account)}
                       />
-                      <details
-                        className="folder-editor-details"
-                        open={
-                          !proposals[account.id] ||
-                          proposals[account.id]?.requiresRebuild
-                            ? true
-                            : undefined
-                        }
-                      >
-                        <summary>Review or edit the proposed folders</summary>
-                        <OrganizationProposalEditor
-                          account={account}
-                          proposal={proposals[account.id] ?? null}
-                          onGenerate={onGenerateProposal}
-                          onEdit={onEditProposal}
-                        />
-                      </details>
+                      <OrganizationProposalEditor
+                        account={account}
+                        proposal={proposals[account.id] ?? null}
+                        onGenerate={onGenerateProposal}
+                        onEdit={onEditProposal}
+                      />
                       {proposals[account.id] ? (
                         <FolderSetupPanel
                           account={account}
@@ -7073,13 +7066,13 @@ const AppShell = ({
                 onOpenAccounts={() => setActivePage("accounts")}
                 onOpenRecovery={() => setActivePage("recovery")}
               />
-              {selectedAccounts.map((account) => (
-                <MailHandlingPanel
-                  key={account.id}
-                  account={account}
-                  onSaved={() => onGenerateProposal(account)}
-                />
-              ))}
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setActivePage("organize")}
+              >
+                Edit mail rules in Organize
+              </button>
             </>
           ) : null}
         </main>

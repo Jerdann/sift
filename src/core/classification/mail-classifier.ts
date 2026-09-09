@@ -1,7 +1,7 @@
 import type { MailCategory } from "../../shared/contracts/analysis";
 import { matchPurpose } from "./message-purpose";
 
-export const CLASSIFIER_VERSION = "purpose-2.1.0";
+export const CLASSIFIER_VERSION = "purpose-2.2.0";
 export const CATEGORY_PRESENTATION: Readonly<
   Record<MailCategory, { label: string; folder: string }>
 > = {
@@ -28,7 +28,7 @@ export const CATEGORY_PRESENTATION: Readonly<
   },
   service_notices: {
     label: "Service notices",
-    folder: "Accounts/Service notices",
+    folder: "Updates/Service notices",
   },
   transactions: { label: "Receipts", folder: "Money/Receipts" },
   finance: {
@@ -69,6 +69,10 @@ export const CATEGORY_PRESENTATION: Readonly<
   suspicious: { label: "Suspicious messages", folder: "Review/Suspicious" },
   spam: { label: "Likely spam", folder: "Review/Spam" },
   other: { label: "Needs classification", folder: "Review/Unsorted" },
+  mailing_lists: {
+    label: "Other mailing-list mail",
+    folder: "Updates/Mailing lists",
+  },
 };
 export interface ClassificationInput {
   subject: string | null;
@@ -182,6 +186,13 @@ export const classifyMessage = (
         "Body-only evidence: excluded from future rules and destructive handling",
       );
   }
+  if (headers["list-id"]?.trim() || headers["list-unsubscribe"]?.trim())
+    return result(
+      "mailing_lists",
+      0.86,
+      "The sender included a mailing-list or unsubscribe header, but the message purpose is unclear",
+      "File separately without marking read by default; this is not evidence of spam or a paid subscription",
+    );
   return result(
     "other",
     0.45,

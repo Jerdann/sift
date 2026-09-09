@@ -29,6 +29,7 @@ import { FolderSetup } from "../../src/main/organization/folder-setup";
 import { applyMigrations } from "../../src/main/storage/migrations";
 import { handlingGroups } from "../../src/core/classification/handling-groups";
 import { senderRuleConditions } from "../../src/core/classification/sender-handling";
+import { copyGroupChoices } from "../../src/core/classification/mail-handling";
 import {
   gmailPurposeCriteria,
   outlookPurposePredicates,
@@ -63,6 +64,158 @@ const rule = () => ({
   },
 });
 describe("bulk handling and durable drafts", () => {
+  it("isolates the main and separate-tree previews, and saves copied choices independently", () => {
+    const { db, profileId, connectionId } = setup();
+    try {
+      const repo = new MailHandlingRepository(db, profileId);
+      const scope = {
+        provider: "proton" as const,
+        connectionId,
+        level: "account" as const,
+        address: null,
+      };
+      const preferences = handlingPreferencesSchema.parse({
+        detail: "simple",
+        categories: {
+          promotions: {
+            destination: "spam",
+            markRead: true,
+            retentionDays: 30,
+          },
+        },
+      });
+      repo.save({ ...scope, preferences });
+      const all = previewMailHandling(db, profileId, {
+        ...scope,
+        preferences,
+        page: 0,
+        category: null,
+      });
+      const main = previewMailHandling(db, profileId, {
+        ...scope,
+        preferences,
+        page: 0,
+        category: null,
+        excludeSeparated: true,
+      });
+      const aliasScope = {
+        ...scope,
+        level: "alias" as const,
+        address: "shared@example.test",
+      };
+      const alias = previewMailHandling(db, profileId, {
+        ...aliasScope,
+        preferences,
+        page: 0,
+        category: null,
+      });
+      expect(main.total + alias.total).toBe(all.total);
+      expect(
+        main.senders.every((s) => s.address === "owner@example.test"),
+      ).toBe(true);
+      expect(alias.senders).toContainEqual(
+        expect.objectContaining({ address: "shared@example.test", count: 30 }),
+      );
+      const copied = copyGroupChoices(
+        preferences,
+        repo.get(aliasScope).preferences,
+        aliasScope.address,
+      );
+      repo.save({ ...aliasScope, preferences: copied });
+      repo.save({
+        ...scope,
+        preferences: {
+          ...preferences,
+          categories: {
+            promotions: {
+              destination: "trash",
+              markRead: true,
+              retentionDays: 30,
+            },
+          },
+        },
+      });
+      expect(
+        repo.resolve("proton", connectionId, "shared@example.test").categories
+          .promotions?.destination,
+      ).toBe("spam");
+      expect(
+        repo.resolve("proton", connectionId, "owner@example.test").categories
+          .promotions?.destination,
+      ).toBe("trash");
+      const proposal = new OrganizationProposalRepository(
+        db,
+        profileId,
+      ).generate("proton", connectionId);
+      expect(
+        proposal.items.filter(
+          (i) =>
+            i.scopeAddress === "shared@example.test" && i.category === "codes",
+        )[0]?.targetPath,
+      ).toBe("Shared home/Security");
+    } finally {
+      db.close();
+    }
+  });
+  it("builds header-specific future filing rules from mailing-list matches, not sender-only catch-alls", () => {
+    const { db, profileId, connectionId } = setup();
+    try {
+      db.prepare(
+        "UPDATE indexed_messages SET headers_json=json_set(headers_json,'$.\"list-id\"','<letters.example.test>') WHERE sender_json=?",
+      ).run(JSON.stringify(["updates@small.example"]));
+      analyzeMailbox(db, profileId, connectionId);
+      new OrganizationProposalRepository(db, profileId).generate(
+        "proton",
+        connectionId,
+      );
+      const history = new CleanupPlanRepository(
+        db,
+        new JobRepository(db),
+        profileId,
+      ).generate(connectionId, {
+        kind: "organize",
+        containers: {},
+        trashSenderDomains: [],
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) n,MAX(mark_read) read FROM cleanup_actions WHERE plan_id=? AND category='mailing_lists'",
+          )
+          .get(history.id),
+      ).toEqual({ n: 80, read: 0 });
+      const reviews = new SpamReviewRepository(db, profileId),
+        review = reviews.generate("proton", connectionId);
+      reviews.complete({
+        reviewId: review.id,
+        revision: review.revision,
+        decisions: review.candidates.map((c) => ({
+          candidateId: c.id,
+          decision: "not_spam" as const,
+        })),
+      });
+      new CleanupPlanRepository(db, new JobRepository(db), profileId).generate(
+        connectionId,
+        { kind: "spam", containers: {}, trashSenderDomains: [] },
+      );
+      const rules = new RuleReconciliationRepository(db, profileId).desired(
+        "proton",
+        connectionId,
+      ).rules;
+      expect(rules.filter((r) => r.category === "mailing_lists")).toMatchObject(
+        [
+          {
+            observedMessages: 80,
+            markRead: false,
+            spam: false,
+            purposeConditions: { mailingList: true },
+          },
+        ],
+      );
+    } finally {
+      db.close();
+    }
+  });
   it("does not let uncertain messages hide clear matches in the same folder or sender stream", () => {
     const { db, profileId, connectionId } = setup();
     try {
@@ -559,6 +712,55 @@ describe("bulk handling and durable drafts", () => {
       });
       applyMigrations(db);
       expect(jobs.getProgress(orphan.id).counts.succeeded).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+  it("stops prior-version forward jobs on upgrade without stopping undo work or losing successes", () => {
+    const { db, profileId, connectionId } = setup();
+    try {
+      const jobs = new JobRepository(db);
+      const plan = new CleanupPlanRepository(db, jobs, profileId).generate(
+        connectionId,
+        { kind: "organize", containers: {}, trashSenderDomains: [] },
+      );
+      const forward = jobs.createJob({
+        profileId,
+        kind: "proton-cleanup",
+        idempotencyKey: "old-forward",
+        itemKeys: ["done", "remaining"],
+      });
+      const undo = jobs.createJob({
+        profileId,
+        kind: "proton-cleanup",
+        idempotencyKey: "undo",
+        itemKeys: ["recover"],
+      });
+      const done = jobs.claimNextPending(forward.id)!;
+      jobs.transitionItem(done.id, "succeeded", {
+        result: { operation: "provider-rule-action", verified: true },
+      });
+      db.prepare(
+        "UPDATE cleanup_plans SET job_id=?,undo_job_id=? WHERE id=?",
+      ).run(forward.id, undo.id, plan.id);
+      db.prepare("DELETE FROM schema_migrations WHERE version=34").run();
+      applyMigrations(db);
+      expect(jobs.getProgress(forward.id)).toMatchObject({
+        state: "failed",
+        counts: { succeeded: 1, skipped: 1 },
+        errorCode: "classification_changed_rebuild_proposal",
+      });
+      expect(jobs.getProgress(undo.id)).toMatchObject({
+        state: "pending",
+        counts: { pending: 1 },
+      });
+      expect(
+        db.prepare("SELECT result_json FROM job_items WHERE id=?").get(done.id),
+      ).toEqual({
+        result_json: '{"operation":"provider-rule-action","verified":true}',
+      });
+      applyMigrations(db);
+      expect(jobs.getProgress(undo.id).state).toBe("pending");
     } finally {
       db.close();
     }

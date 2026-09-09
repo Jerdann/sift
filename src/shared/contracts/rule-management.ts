@@ -60,6 +60,7 @@ export const desiredManagedRuleSchema = z.object({
       excludeSubjectPatterns: z.array(z.string().min(1).max(256)).max(500),
       senderAddresses: z.array(z.email()).max(500),
       receivingAddress: z.email(),
+      mailingList: z.boolean().optional(),
       excludedReceivingAddresses: z.array(z.email()).max(500).optional(),
     })
     .optional(),

@@ -7,7 +7,8 @@ import type {
 import { removableCategories, PURPOSE_RULES } from "./message-purpose";
 
 export const senderRuleAllowed = (category: ClassificationResult["category"]) =>
-  category === "other" || removableCategories.has(category);
+  ["other", "mailing_lists"].includes(category) ||
+  removableCategories.has(category);
 export const ruleMarker = "User-selected sender rule: ";
 export const ruleIdFromEvidence = (evidence: string): string | null => {
   const entry = (JSON.parse(evidence) as string[]).find((item) =>

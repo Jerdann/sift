@@ -4,10 +4,20 @@ Sift proposes actions using the message's purpose, not just the company that sen
 
 ## Controls
 
-In Organize, choose a group and review examples from the saved scan. Choices apply to the current account unless you select profile defaults or a specific confirmed alias. Account choices override profile defaults; alias choices override the account. General settings are separate from group actions.
+In Organize, first choose Main folders or a separate address. Then choose a mail group and review examples from the saved scan. Main-folder previews exclude separate addresses. Account choices override profile defaults; individual-address choices override the account. Advanced defaults and individual-address settings are available below the editor.
+
+## Separate folder trees
+
+**Separate email addresses** stays visible after addresses are confirmed. Choose an address, then **Create separate tree**. Name its parent folder and select its tab to edit only that address's mail. Main and separate-tree future rules exclude the other confirmed addresses; mail with multiple possible owners stays out of automatic routing.
+
+**Copy main choices** copies the current main draft or saved group choices and folder detail into the selected address's draft. It preserves that address's sender rules and never copies a sender rule for a different recipient. Saving makes this an independent copy; later changes to the main tree do not overwrite it. An address with no saved choices inherits the main choices until it is customized.
+
+**Use main folders** changes the proposed destinations but keeps the address's handling choices. Those choices remain editable under **Other account and address settings**. No existing folder is renamed or removed by these controls; review and approve the resulting plan separately.
+
+## Group controls
 
 - **Folders and groups:** Fewer combines related types into fewer folders and fewer groups to edit. More detail separates specific types. Only needed, selected destinations are created. Split aliases get their own folders.
-- **Match strictness:** Strict uses clear subject matches. Normal also tries similar wording after punctuation and spacing changes. Broad also uses locally saved message text, if available. Tentative matches never become future filters or Spam/Trash actions.
+- **Match strictness:** Strict uses clear subject matches. Normal also tries similar wording after punctuation and spacing changes. Broad is offered only when locally saved message text is available. Tentative matches never become future filters or Spam/Trash actions.
 - **Keep / File / Spam / Trash:** leave the message in place, file it, or send eligible low-value types to Spam or Trash.
 - **Read status:** preserve the current status or mark read. Login codes, account security changes, payment problems, refunds, shipping updates, and active travel preserve status by default.
 - **Age:** keep indefinitely or offer a separate Trash review after the chosen number of days. This is not a background expiration task.
@@ -30,7 +40,9 @@ Control changes are saved as local drafts, without changing mail. Drafts survive
 
 ## Matching logic
 
-Sift first holds suspicious authentication failures and conversations for review. Subject evidence for login/security, payment problems, receipts, delivery, and travel is checked before promotional handling. Surveys, sales, newsletters, service notices, and announcements are distinct types. A mailing-list or unsubscribe header alone does not identify the purpose of a message.
+Sift first holds suspicious authentication failures and conversations for review. Subject evidence for login/security, payment problems, receipts, delivery, and travel is checked before promotional handling. Surveys, sales, newsletters, service notices, and announcements are distinct types. Policy notices go to Updates, not Accounts.
+
+An otherwise unrecognized message with a mailing-list or unsubscribe header is shown as **Other mailing-list mail**. The header proves neither a paid subscription nor spam. This group defaults to File with read status preserved; group-wide Spam, Trash, and age deletion are not offered. Examples include a sender-rule action if you want a more specific choice. Proton and Outlook future filing requires the list header as well as the sender and alias, and excludes recognized message purposes. Gmail cannot express this header-presence condition, so Sift skips that automatic future rule instead of replacing it with a sender-only catch-all. This is distinct from editorial newsletters and subscription status.
 
 The matching score is a heuristic, not a measured accuracy percentage. A subject can be vague, misleading, or use unsupported wording. Uncertain messages remain unchanged. Review examples rather than assuming every message was recognized.
 

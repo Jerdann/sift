@@ -322,7 +322,7 @@ export class RuleReconciliationRepository {
     const prefix = provider === "proton" ? "" : `${provider}_`;
     const sourceMessages = this.#database
       .prepare(
-        `SELECT mc.evidence_json,mc.category,mc.sender_domain,mc.confidence,mc.receiving_addresses_json,im.subject,im.sender_json FROM ${prefix}message_classifications mc JOIN ${prefix}indexed_messages im ON im.id=mc.message_row_id JOIN ${prefix}mailbox_analyses ma ON ma.id=mc.analysis_id WHERE ma.connection_id=? AND ma.profile_id=?`,
+        `SELECT mc.evidence_json,mc.category,mc.sender_domain,mc.confidence,mc.receiving_addresses_json,im.subject,im.sender_json,im.headers_json FROM ${prefix}message_classifications mc JOIN ${prefix}indexed_messages im ON im.id=mc.message_row_id JOIN ${prefix}mailbox_analyses ma ON ma.id=mc.analysis_id WHERE ma.connection_id=? AND ma.profile_id=?`,
       )
       .all(connectionId, this.#profileId) as Array<{
       category: MailCategory;
@@ -332,6 +332,7 @@ export class RuleReconciliationRepository {
       receiving_addresses_json: string;
       subject: string | null;
       sender_json: string;
+      headers_json: string;
     }>;
     const aliases = handling.aliases({ provider, connectionId });
     for (const address of aliases) {
@@ -464,6 +465,7 @@ export class RuleReconciliationRepository {
             message.subject ?? "",
             safeStringArray(message.sender_json)[0] ?? "",
             safeStringArray(message.receiving_addresses_json),
+            JSON.parse(message.headers_json),
           ),
         );
         if (!matching.length) continue;
@@ -490,8 +492,9 @@ export class RuleReconciliationRepository {
               matching.length,
             categoryShare: matching.length / total,
             purposeConditions: conditions,
-            matchNote:
-              provider === "proton"
+            matchNote: conditions.mailingList
+              ? "Requires a mailing-list header, this sender and this address. Recognized purposes and replies are excluded; unclear mailing-list mail is not assumed to be spam."
+              : provider === "proton"
                 ? "Matches the listed sender addresses, this alias, and message-purpose conditions. Protected purposes and replies are excluded."
                 : "Uses a narrower set of subject phrases supported by this provider. Protected-purpose terms are excluded; unsupported patterns are not exported.",
           }),

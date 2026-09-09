@@ -15,16 +15,16 @@ const limits = [
     files: readdirSync(rendererAssets)
       .filter((file) => file.endsWith(".js"))
       .map((file) => path.join(rendererAssets, file)),
-    // Includes the per-message handling editor and folder-only review in v1.6.
+    // Includes address-tree controls and the expanded shared purpose predicates in v1.8.
     // Runtime validation stays in preload/main, not in the renderer.
-    maxBytes: 420 * 1024,
+    maxBytes: 432 * 1024,
   },
   {
     label: "renderer CSS",
     files: readdirSync(rendererAssets)
       .filter((file) => file.endsWith(".css"))
       .map((file) => path.join(rendererAssets, file)),
-    maxBytes: 64 * 1024,
+    maxBytes: 68 * 1024,
   },
   {
     label: "preload JavaScript",

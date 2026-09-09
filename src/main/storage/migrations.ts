@@ -1240,6 +1240,28 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
           AND NOT EXISTS(SELECT 1 FROM rule_reconciliation_plans p WHERE p.job_id=jobs.id OR p.undo_job_id=jobs.id);
     `,
   },
+  {
+    version: 34,
+    statements: `
+      -- The purpose-2.2 classifier requires a new review for unfinished forward
+      -- plans. Keep completed actions and all undo jobs; do not strand old jobs
+      -- as pending when the new classifier will refuse to resume their plan.
+      CREATE TEMP TABLE sift_pre_18_forward_jobs AS
+        SELECT j.id FROM jobs j WHERE j.state IN ('pending','running') AND j.id IN (
+          SELECT job_id FROM cleanup_plans UNION SELECT job_id FROM gmail_organization_plans
+          UNION SELECT job_id FROM outlook_history_plans UNION SELECT job_id FROM rule_reconciliation_plans
+        )
+        AND NOT EXISTS(SELECT 1 FROM cleanup_plans p WHERE p.undo_job_id=j.id)
+        AND NOT EXISTS(SELECT 1 FROM gmail_organization_plans p WHERE p.undo_job_id=j.id)
+        AND NOT EXISTS(SELECT 1 FROM outlook_history_plans p WHERE p.undo_job_id=j.id)
+        AND NOT EXISTS(SELECT 1 FROM rule_reconciliation_plans p WHERE p.undo_job_id=j.id);
+      UPDATE job_items SET state='skipped',error_code='classification_changed_rebuild_proposal'
+        WHERE state IN ('pending','running') AND job_id IN (SELECT id FROM sift_pre_18_forward_jobs);
+      UPDATE jobs SET state='failed',error_code='classification_changed_rebuild_proposal',finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        WHERE id IN (SELECT id FROM sift_pre_18_forward_jobs);
+      DROP TABLE sift_pre_18_forward_jobs;
+    `,
+  },
 ]);
 
 export const applyMigrations = (

@@ -79,7 +79,7 @@ describe("purpose-first mail handling", () => {
           headers: { "list-unsubscribe": "<https://example.test/unsubscribe>" },
           bodyText: null,
         }).category,
-      ).toBe("other");
+      ).toBe("mailing_lists");
   });
   it("protects reply context and authentication failures even when the subject sounds promotional", () => {
     expect(

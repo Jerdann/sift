@@ -380,9 +380,154 @@ select:focus-visible {
 .handling-content {
   padding: 24px;
 }
+.mail-handling,
+.organization-trees {
+  font-size: 12px;
+}
+.mail-handling h3 {
+  font-size: 14px;
+}
+.tree-content {
+  padding: 0 24px 24px;
+}
+.tree-content > p {
+  color: #aeb9b7;
+  line-height: 1.6;
+}
+.tree-content > small {
+  display: block;
+  margin-top: 16px;
+  color: #aeb9b7;
+}
+.tree-tabs {
+  margin: 16px -24px;
+}
+.tree-tabs button {
+  min-width: 170px;
+  flex: 1;
+}
+.tree-address-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(140px, 1fr) auto auto;
+  align-items: end;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+}
+.tree-address-row strong,
+.tree-address-row small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.tree-address-row small,
+.tree-add label,
+.tree-address-row label {
+  color: #aeb9b7;
+  font-size: 11px;
+}
+.tree-address-row small {
+  margin-top: 6px;
+}
+.tree-add {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  margin-top: 20px;
+}
+.tree-add label {
+  flex: 1;
+}
+.tree-add select,
+.tree-address-row input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: #0e1116;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 12px;
+}
+.handling-workspace {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  border-top: 1px solid var(--line);
+}
+.handling-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.handling-group-list button {
+  display: flex;
+  justify-content: space-between;
+  text-align: left;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #aeb9b7;
+  font-size: 12px;
+  cursor: pointer;
+}
+.handling-group-list button:hover {
+  background: #20272d;
+  color: var(--text);
+}
+.handling-group-list button[aria-current="true"] {
+  background: #1c2927;
+  color: var(--green);
+}
+.handling-group-list b {
+  font-size: 11px;
+  font-weight: 500;
+}
+.handling-mobile-picker {
+  display: none;
+}
+.handling-group-body {
+  min-width: 0;
+  padding: 22px 0 0 24px;
+  border-left: 1px solid var(--line);
+}
+.handling-active-group {
+  margin: 0 0 18px;
+}
+.handling-copy small {
+  display: block;
+  color: #aeb9b7;
+  margin-top: 8px;
+}
+.handling-old-mail {
+  padding: 12px 0;
+}
+.mail-handling .handling-general {
+  grid-template-columns: 1fr auto;
+}
+.handling-group-body .handling-category {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.handling-group-body .handling-category legend {
+  display: none;
+}
+.handling-group-body .handling-senders h3 {
+  margin-top: 0;
+}
+.mail-handling button:focus-visible,
+.organization-trees button:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
+}
 .handling-note {
   color: #aeb9b7;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.6;
 }
 .handling-controls {
@@ -432,8 +577,7 @@ select:focus-visible {
   margin-bottom: 8px;
 }
 .handling-group-picker {
-  padding: 20px 0;
-  border-top: 1px solid var(--line);
+  padding: 12px 16px 12px 0;
 }
 .handling-group-picker label {
   font-size: 19px;
@@ -448,18 +592,19 @@ select:focus-visible {
   gap: 6px;
 }
 .handling-segments button {
-  padding: 10px 20px;
+  padding: 9px 16px;
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--text);
   background: #0e1116;
   font: inherit;
+  font-size: 12px;
   cursor: pointer;
 }
 .handling-segments button[aria-pressed="true"] {
-  background: var(--green);
-  color: #0c1714;
-  border-color: var(--green);
+  background: #1c2927;
+  color: var(--green);
+  border-color: #407360;
   font-weight: 700;
 }
 .handling-segments button:disabled {
@@ -581,7 +726,7 @@ select:focus-visible {
 .handling-examples li span,
 .handling-examples li small {
   color: #aeb9b7;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.5;
 }
 .handling-pagination,
@@ -593,11 +738,50 @@ select:focus-visible {
   margin-top: 20px;
 }
 @media (max-width: 1050px) {
+  .tree-address-row {
+    grid-template-columns: 1fr 1fr;
+  }
   .handling-controls {
     grid-template-columns: 1fr;
   }
   .handling-general {
     grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 760px) {
+  .handling-workspace {
+    display: block;
+  }
+  .handling-group-list {
+    display: none;
+  }
+  .handling-mobile-picker {
+    display: block;
+  }
+  .handling-group-picker {
+    padding: 16px 0;
+  }
+  .handling-group-picker label {
+    font-size: 13px;
+  }
+  .handling-group-picker select {
+    font-size: 13px;
+    min-height: 40px;
+  }
+  .handling-group-body {
+    padding: 16px 0 0;
+    border: 0;
+  }
+  .mail-handling .handling-general {
+    grid-template-columns: 1fr;
+  }
+  .tree-address-row,
+  .tree-add {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .tree-tabs {
+    flex-wrap: wrap;
   }
 }
 

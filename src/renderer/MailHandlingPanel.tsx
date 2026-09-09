@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { MailAccountSummary } from "../shared/contracts/accounts";
+import type {
+  MailAccountSummary,
+  AccountIdentitySummary,
+  AccountIdentityUpdateInput,
+} from "../shared/contracts/accounts";
+import { OrganizationTrees } from "./OrganizationTrees";
 import type { MailCategory } from "../shared/contracts/analysis";
 import type {
   HandlingPreferences,
@@ -12,6 +17,7 @@ import { CATEGORY_PRESENTATION as labels } from "../core/classification/mail-cla
 import {
   defaultHandling,
   handlingFor,
+  copyGroupChoices,
 } from "../core/classification/mail-handling";
 import { handlingGroups } from "../core/classification/handling-groups";
 import {
@@ -36,12 +42,17 @@ const number = (n: number) => n.toLocaleString();
 export function MailHandlingPanel({
   account,
   onSaved,
+  identities,
+  onUpdateIdentity,
 }: {
   account: MailAccountSummary;
   onSaved: () => Promise<unknown>;
+  identities: AccountIdentitySummary[];
+  onUpdateIdentity: (input: AccountIdentityUpdateInput) => Promise<void>;
 }) {
   const [scopeValue, setScopeValue] = useState("account");
-  const [aliases, setAliases] = useState<string[]>([]);
+  const [inherited, setInherited] = useState(false),
+    [aliases, setAliases] = useState<string[]>([]);
   const [preferences, setPreferences] = useState<HandlingPreferences>({
     detail: "detailed",
     strictness: "clear",
@@ -122,8 +133,17 @@ export function MailHandlingPanel({
     sender: senderRule?.sender ?? null,
     receivingAddress: senderRule?.address ?? null,
     senderPage,
+    excludeSeparated: scope.level === "account",
   };
-  const previewKey = JSON.stringify({ ...input, refresh });
+  const previewKey = JSON.stringify({
+    ...input,
+    refresh,
+    trees: identities.map((i) => [
+      i.address,
+      i.containerEnabled,
+      i.containerName,
+    ]),
+  });
   const preview =
     previewResult?.key === previewKey ? previewResult.value : null;
   const lastPreview = previewResult?.value;
@@ -154,6 +174,7 @@ export function MailHandlingPanel({
       .then((state) => {
         if (canceled) return;
         setPreferences(state.draft ?? state.preferences);
+        setInherited(state.inherited && !state.draft);
         setAliases(state.aliases);
         setLoaded(true);
         setDraftStatus(state.draft ? "Restored your saved draft." : "");
@@ -195,6 +216,7 @@ export function MailHandlingPanel({
   }, [loaded, previewKey]);
 
   const change = (next: HandlingPreferences) => {
+    setInherited(false);
     setPreferences(next);
     setPage(0);
     setNotice("");
@@ -321,552 +343,728 @@ export function MailHandlingPanel({
   const ruleInvalid = Boolean(
     senderRule && /[\r\n*?]/.test(senderRule.subjectContains ?? ""),
   );
+  const selectedTree = identities.find(
+    (i) => i.address === scope.address && i.containerEnabled,
+  );
+  const visibleGroups = groups
+    .filter(
+      (g) => g.id === group.id || g.id === "other" || counts(g.categories) > 0,
+    )
+    .sort(
+      (a, b) =>
+        counts(b.categories) - counts(a.categories) ||
+        a.label.localeCompare(b.label),
+    );
+  const copyMain = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await draftQueue.current;
+      const main = await window.emailOrganizer.getMailHandling({
+        ...scope,
+        level: "account",
+        address: null,
+      });
+      const source = main.draft ?? main.preferences;
+      change(copyGroupChoices(source, preferences, scope.address!));
+      setNotice(
+        "Main group choices copied into this draft. Sender rules were not copied. Save to use these choices.",
+      );
+    } catch {
+      setError("Could not copy main choices. Your current draft is unchanged.");
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
-    <section
-      className="readiness-panel mail-handling"
-      aria-labelledby={"handling-" + account.id}
-    >
-      <div className="panel-header">
-        <div>
-          <p className="eyebrow">
-            {account.provider} · {account.label}
-          </p>
-          <h2 id={"handling-" + account.id}>
-            Choose what happens to your mail
-          </h2>
-        </div>
-      </div>
-      <div className="handling-content">
-        <p className="handling-note">
-          Preview only. Nothing moves until you approve a plan.
-        </p>
-        <fieldset disabled={!loaded || saving} className="handling-general">
-          <legend>General settings</legend>
-          <label>
-            Apply these choices to
-            <select
-              aria-label="Apply these choices to"
-              value={scopeValue}
-              onChange={(e) => setScopeValue(e.target.value)}
-            >
-              <option value="account">This email account</option>
-              <option value="profile">All accounts — default choices</option>
-              {aliases.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
-          </label>
+    <>
+      <OrganizationTrees
+        account={account}
+        identities={identities}
+        selected={scopeValue}
+        disabled={saving || Boolean(senderRule)}
+        onSelect={setScopeValue}
+        onUpdate={onUpdateIdentity}
+      />
+      <section
+        className="readiness-panel mail-handling"
+        aria-labelledby={"handling-" + account.id}
+      >
+        <div className="panel-header">
           <div>
-            <span className="handling-control-label">Folders and groups</span>
-            <div
-              className="handling-segments"
-              role="group"
-              aria-label="Folder detail"
-            >
-              {(["simple", "detailed"] as const).map((d) => (
+            <p className="eyebrow">
+              {account.provider} · {account.label}
+            </p>
+            <h2 id={"handling-" + account.id}>
+              {scope.level === "profile"
+                ? "Default mail choices for all accounts"
+                : selectedTree
+                  ? `${selectedTree.containerName}: mail rules`
+                  : scope.address
+                    ? `${scope.address}: mail rules`
+                    : "Main folders: mail rules"}
+            </h2>
+          </div>
+        </div>
+        <div className="handling-content">
+          <p className="handling-note">
+            {scope.level === "profile"
+              ? "Saved account and address choices override these defaults."
+              : selectedTree
+                ? `Only mail to ${selectedTree.address}. Main-folder filters exclude this address.`
+                : scope.address
+                  ? `Only mail to ${scope.address}. This address uses the main folders.`
+                  : "Mail for separate trees is excluded from this preview. Address-specific choices take priority."}{" "}
+            Nothing moves until you approve a plan.
+          </p>
+          <fieldset disabled={!loaded || saving} className="handling-general">
+            <legend>Folder detail</legend>
+            <div>
+              <div
+                className="handling-segments"
+                role="group"
+                aria-label="Folder detail"
+              >
+                {(["simple", "detailed"] as const).map((d) => (
+                  <button
+                    type="button"
+                    key={d}
+                    aria-pressed={preferences.detail === d}
+                    onClick={() => {
+                      change({ ...preferences, detail: d });
+                      selectGroup("other");
+                    }}
+                  >
+                    {d === "simple" ? "Fewer" : "More detail"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {scope.level === "alias" ? (
+              <div className="handling-copy">
                 <button
                   type="button"
-                  key={d}
-                  aria-pressed={preferences.detail === d}
-                  onClick={() => {
-                    change({ ...preferences, detail: d });
-                    selectGroup("other");
-                  }}
+                  className="secondary-button"
+                  onClick={() => void copyMain()}
                 >
-                  {d === "simple" ? "Fewer" : "More detail"}
+                  Copy main choices
                 </button>
-              ))}
-            </div>
-          </div>
-        </fieldset>
-        <div className="handling-group-picker">
-          <label>
-            Which group are we editing?
-            <select
-              aria-label="Group to edit"
-              value={group.id}
-              disabled={!loaded || saving}
-              onChange={(e) => selectGroup(e.target.value)}
-            >
-              {groups
-                .filter(
-                  (g) =>
-                    g.id === group.id ||
-                    g.id === "other" ||
-                    counts(g.categories) > 0,
-                )
-                .sort(
-                  (a, b) =>
-                    counts(b.categories) - counts(a.categories) ||
-                    a.label.localeCompare(b.label),
-                )
-                .map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.label} · {number(counts(g.categories))}
-                  </option>
-                ))}
-            </select>
-          </label>
-        </div>
-        {needsSorting && !senderRule ? (
-          <div className="handling-senders">
-            <h3>Sort a sender at a time</h3>
-            <p className="handling-note">
-              Biggest groups first. Choose one to preview a rule for its
-              matching mail.
-            </p>
-            {scope.level === "profile" ? (
-              <p>Choose an email account above to add sender rules.</p>
-            ) : (
-              <>
-                {(lastPreview?.senders ?? []).map((s) => (
-                  <button
-                    className="handling-sender"
-                    type="button"
-                    disabled={!preview || saving}
-                    key={s.sender + s.address}
-                    onClick={() => selectSender(s.sender, s.address)}
-                  >
-                    <span>
-                      <strong>{s.sender}</strong>
-                      <small>To {s.address}</small>
-                      <small>{s.subject}</small>
-                    </span>
-                    <strong>
-                      {number(s.count)} <span aria-hidden="true">→</span>
-                    </strong>
-                  </button>
-                ))}
-                {preview && !preview.senders.length ? (
-                  <p>
-                    No more unclassified sender groups. Mail with an unclear
-                    owner or sender stays unchanged.
-                  </p>
-                ) : null}
-                {(lastPreview?.senderPages ?? 1) > 1 ? (
-                  <div className="handling-pagination">
-                    <button
-                      className="secondary-button"
-                      disabled={senderPage === 0 || !preview}
-                      onClick={() => setSenderPage((n) => n - 1)}
-                    >
-                      Previous senders
-                    </button>
-                    <span>
-                      {senderPage + 1} / {lastPreview?.senderPages}
-                    </span>
-                    <button
-                      className="secondary-button"
-                      disabled={
-                        !preview ||
-                        senderPage + 1 >= (preview?.senderPages ?? 1)
-                      }
-                      onClick={() => setSenderPage((n) => n + 1)}
-                    >
-                      Next senders
-                    </button>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
-        ) : null}
-        {senderRule ? (
-          <div className="handling-sender-editor">
-            <button
-              className="secondary-button"
-              disabled={saving}
-              onClick={() => setSenderRule(null)}
-            >
-              Back to senders
-            </button>
-            <h3>{senderRule.sender}</h3>
-            <p className="handling-note">
-              Only mail to {senderRule.address}. Detected security, payments,
-              account actions and replies are protected.
-            </p>
-            <div className="handling-controls">
-              <label>
-                Put matching mail in this group
-                <select
-                  aria-label="Classify sender as"
-                  value={senderRule.category}
-                  disabled={saving}
-                  onChange={(e) => {
-                    const category = e.target.value as MailCategory;
-                    setSenderRule({
-                      ...senderRule,
-                      category,
-                      handling: defaultHandling(category),
-                    });
-                  }}
-                >
-                  {Object.entries(labels)
-                    .filter(
-                      ([c]) => !["other", "suspicious", "spam"].includes(c),
-                    )
-                    .map(([c, v]) => (
-                      <option key={c} value={c}>
-                        {v.label}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <label>
-                Subject must contain (optional)
-                <input
-                  aria-label="Subject must contain"
-                  maxLength={160}
-                  value={senderRule.subjectContains ?? ""}
-                  disabled={saving}
-                  onChange={(e) => {
-                    setSenderRule({
-                      ...senderRule,
-                      subjectContains: e.target.value || null,
-                    });
-                    setPage(0);
-                  }}
-                  placeholder="Any subject"
-                />
-              </label>
-            </div>
-          </div>
-        ) : null}
-        {!readOnly ? (
-          <fieldset className="handling-category" disabled={!loaded || saving}>
-            <legend>{senderRule ? "Rule for this sender" : group.label}</legend>
-            <div className="handling-segments" role="group" aria-label="Action">
-              {(Object.keys(actions) as Array<keyof typeof actions>).map(
-                (action) => (
-                  <button
-                    type="button"
-                    key={action}
-                    aria-pressed={!mixedAction && policy.destination === action}
-                    disabled={["spam", "trash"].includes(action) && !canDiscard}
-                    onClick={() => setPolicy({ destination: action })}
-                  >
-                    {actions[action]}
-                  </button>
-                ),
-              )}
-            </div>
-            {mixed ? (
-              <p className="handling-note">
-                This group has different choices. Pick an action to use it for
-                the whole group.
-              </p>
+                <small>
+                  {inherited
+                    ? "Using main choices until you save your own."
+                    : "This tree has its own choices."}
+                </small>
+              </div>
             ) : null}
-            <div className="handling-controls">
-              <label className="handling-toggle">
-                <input
-                  type="checkbox"
-                  role="switch"
-                  checked={!mixedRead && policy.markRead}
-                  disabled={policy.destination === "inbox"}
-                  onChange={(e) => setPolicy({ markRead: e.target.checked })}
-                />
-                Mark as read
-              </label>
-              {!senderRule ? (
-                <label>
-                  Match strictness
-                  <input
-                    type="range"
-                    aria-label="Match strictness"
-                    min="0"
-                    max="2"
-                    step="1"
-                    value={matchLevel}
-                    onChange={(e) =>
-                      setPolicy({ matchLevel: Number(e.target.value) })
-                    }
-                  />
-                  <small>{levels[matchLevel]}</small>
-                </label>
-              ) : null}
-            </div>
-            {chosen.some((c) => attentionCategories.has(c)) ? (
-              <p className="handling-warning">
-                These messages may need you. Keep them unread unless you want
-                otherwise. Filing can also affect phone alerts.
-              </p>
-            ) : null}
-            {["spam", "trash"].includes(policy.destination) ? (
-              <p className="handling-warning">
-                Your provider may empty Spam or Trash automatically.{" "}
-                {senderRule
-                  ? "Check the examples, including the excluded mail."
-                  : "Only clear matches are used, at every strictness level."}
-              </p>
-            ) : null}
-            {canDiscard ||
-            chosen.every((c) => ["codes", "accounts"].includes(c)) ? (
-              <details>
-                <summary>Old mail</summary>
-                <label className="handling-toggle">
-                  <input
-                    type="checkbox"
-                    checked={policy.retentionDays !== null}
-                    onChange={(e) =>
-                      setPolicy({ retentionDays: e.target.checked ? 90 : null })
-                    }
-                  />
-                  Offer old mail for Trash review
-                </label>
-                {policy.retentionDays !== null ? (
-                  <label>
-                    Older than {policy.retentionDays} days
-                    <input
-                      type="range"
-                      aria-label="Age in days"
-                      min="7"
-                      max="730"
-                      step="1"
-                      value={policy.retentionDays}
-                      onChange={(e) =>
-                        setPolicy({ retentionDays: Number(e.target.value) })
-                      }
-                    />
-                  </label>
-                ) : null}
-                <p className="handling-note">
-                  Reviewed in Delete. Never deleted in the background by Sift.
-                </p>
-              </details>
-            ) : null}
-            <details className="handling-formula">
-              <summary>Show the rule</summary>
-              <code>
-                IF{" "}
-                {senderRule
-                  ? "sender = " +
-                    senderRule.sender +
-                    " AND to = " +
-                    senderRule.address +
-                    (senderRule.subjectContains
-                      ? " AND subject contains “" +
-                        senderRule.subjectContains +
-                        "”"
-                      : "") +
-                    " AND not a protected message"
-                  : "type is " +
-                    chosen.map((c) => labels[c].label).join(" OR ") +
-                    " AND match is " +
-                    [
-                      "clear",
-                      "clear or similar",
-                      "clear, similar or saved-text",
-                    ][matchLevel]}{" "}
-                THEN{" "}
-                {mixed
-                  ? "use the choices shown on each example"
-                  : actions[policy.destination].toUpperCase() +
-                    " · " +
-                    (policy.markRead && policy.destination !== "inbox"
-                      ? "mark read"
-                      : "keep read status")}
-              </code>
-              {!senderRule ? (
-                <p className="handling-note">
-                  Subject matches:{" "}
-                  {chosen.flatMap((c) => patternsFor(c)).join(" OR ")}. Earlier
-                  protected matches take priority. Similar wording and body-only
-                  matches never become Spam, Trash, or future filters.
-                </p>
-              ) : null}
-            </details>
           </fieldset>
-        ) : !needsSorting ? (
-          <p>
-            These messages stay unchanged. Review them in Spam before creating
-            filters.
-          </p>
-        ) : null}
-        {!needsSorting || senderRule ? (
-          <div className="handling-preview" aria-busy={busy}>
-            <div className="handling-summary" role="status">
-              {busy
-                ? "Updating examples…"
-                : preview
-                  ? number(matchCount) +
-                    " matches · " +
-                    (senderRule
-                      ? "other mail uses its group choices"
-                      : number(counts(chosen) - matchCount) + " need review")
-                  : "No preview available"}
+          <div className="handling-workspace">
+            <div className="handling-group-picker">
+              <nav className="handling-group-list" aria-label="Mail groups">
+                {visibleGroups.map((g) => (
+                  <button
+                    type="button"
+                    key={g.id}
+                    aria-current={g.id === group.id ? "true" : undefined}
+                    disabled={!loaded || saving}
+                    onClick={() => selectGroup(g.id)}
+                  >
+                    <span>{g.label}</span>
+                    <b>{number(counts(g.categories))}</b>
+                  </button>
+                ))}
+              </nav>
+              <div className="handling-mobile-picker">
+                <label>
+                  Mail group
+                  <select
+                    aria-label="Group to edit"
+                    value={group.id}
+                    disabled={!loaded || saving}
+                    onChange={(e) => selectGroup(e.target.value)}
+                  >
+                    {groups
+                      .filter(
+                        (g) =>
+                          g.id === group.id ||
+                          g.id === "other" ||
+                          counts(g.categories) > 0,
+                      )
+                      .sort(
+                        (a, b) =>
+                          counts(b.categories) - counts(a.categories) ||
+                          a.label.localeCompare(b.label),
+                      )
+                      .map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.label} · {number(counts(g.categories))}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </div>
             </div>
-            {preview?.examples.length ? (
-              <>
-                <ul className="handling-examples">
-                  {preview.examples.map((example, i) => (
-                    <li key={i}>
-                      <div className="handling-example-head">
-                        <span
-                          className={
-                            "handling-badge action-" +
-                            example.actionCode?.toLowerCase()
-                          }
+            <div className="handling-group-body">
+              <h3 className="handling-active-group">
+                {senderRule ? "Sender rule" : group.label}
+              </h3>
+              {group.id === "mailing_lists" && !senderRule ? (
+                <p className="handling-note">
+                  These have a mailing-list header, but no clear purpose. File
+                  them unread, or choose a sender below. They are not assumed to
+                  be subscriptions or spam.
+                  {account.provider === "gmail"
+                    ? " Gmail cannot create a header-only future filter; use a sender rule for future mail."
+                    : " Future filters check the mailing-list header too."}
+                </p>
+              ) : null}
+              {needsSorting && !senderRule ? (
+                <div className="handling-senders">
+                  <h3>Sort a sender at a time</h3>
+                  <p className="handling-note">
+                    Biggest groups first. Choose one to preview a rule for its
+                    matching mail.
+                  </p>
+                  {scope.level === "profile" ? (
+                    <p>Choose an email account above to add sender rules.</p>
+                  ) : (
+                    <>
+                      {(lastPreview?.senders ?? []).map((s) => (
+                        <button
+                          className="handling-sender"
+                          type="button"
+                          disabled={!preview || saving}
+                          key={s.sender + s.address}
+                          onClick={() => selectSender(s.sender, s.address)}
                         >
-                          {example.actionCode}
-                        </span>
-                        <strong>{example.subject}</strong>
-                      </div>
-                      <span>
-                        {example.sender} ·{" "}
-                        {example.address ?? "Owner not confirmed"}
-                      </span>
-                      {senderRule && example.ruleId !== senderRule.id ? (
-                        <small>
-                          Not in this sender rule — uses its group choice.
-                        </small>
+                          <span>
+                            <strong>{s.sender}</strong>
+                            <small>To {s.address}</small>
+                            <small>{s.subject}</small>
+                          </span>
+                          <strong>
+                            {number(s.count)} <span aria-hidden="true">→</span>
+                          </strong>
+                        </button>
+                      ))}
+                      {preview && !preview.senders.length ? (
+                        <p>
+                          No more sender groups here. Mail with an unclear owner
+                          or sender stays unchanged.
+                        </p>
                       ) : null}
-                      <span>
-                        {example.source} → {example.target} · {example.action}
-                      </span>
-                      <details>
-                        <summary>Why?</summary>
-                        <small>
-                          {example.reasons
-                            .filter(
-                              (r) =>
-                                !r.startsWith("User-selected sender rule:"),
-                            )
-                            .join(". ")}
-                        </small>
-                      </details>
-                    </li>
-                  ))}
-                </ul>
-                <div className="handling-pagination">
+                      {(lastPreview?.senderPages ?? 1) > 1 ? (
+                        <div className="handling-pagination">
+                          <button
+                            className="secondary-button"
+                            disabled={senderPage === 0 || !preview}
+                            onClick={() => setSenderPage((n) => n - 1)}
+                          >
+                            Previous senders
+                          </button>
+                          <span>
+                            {senderPage + 1} / {lastPreview?.senderPages}
+                          </span>
+                          <button
+                            className="secondary-button"
+                            disabled={
+                              !preview ||
+                              senderPage + 1 >= (preview?.senderPages ?? 1)
+                            }
+                            onClick={() => setSenderPage((n) => n + 1)}
+                          >
+                            Next senders
+                          </button>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ) : null}
+              {senderRule ? (
+                <div className="handling-sender-editor">
                   <button
                     className="secondary-button"
-                    disabled={!preview || page === 0}
-                    onClick={() => setPage((n) => n - 1)}
+                    disabled={saving}
+                    onClick={() => setSenderRule(null)}
                   >
-                    Previous examples
+                    Back to senders
                   </button>
+                  <h3>{senderRule.sender}</h3>
+                  <p className="handling-note">
+                    Only mail to {senderRule.address}. Detected security,
+                    payments, account actions and replies are protected.
+                  </p>
+                  <div className="handling-controls">
+                    <label>
+                      Put matching mail in this group
+                      <select
+                        aria-label="Classify sender as"
+                        value={senderRule.category}
+                        disabled={saving}
+                        onChange={(e) => {
+                          const category = e.target.value as MailCategory;
+                          setSenderRule({
+                            ...senderRule,
+                            category,
+                            handling: defaultHandling(category),
+                          });
+                        }}
+                      >
+                        {Object.entries(labels)
+                          .filter(
+                            ([c]) =>
+                              !["other", "suspicious", "spam"].includes(c),
+                          )
+                          .map(([c, v]) => (
+                            <option key={c} value={c}>
+                              {v.label}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label>
+                      Subject must contain (optional)
+                      <input
+                        aria-label="Subject must contain"
+                        maxLength={160}
+                        value={senderRule.subjectContains ?? ""}
+                        disabled={saving}
+                        onChange={(e) => {
+                          setSenderRule({
+                            ...senderRule,
+                            subjectContains: e.target.value || null,
+                          });
+                          setPage(0);
+                        }}
+                        placeholder="Any subject"
+                      />
+                    </label>
+                  </div>
+                </div>
+              ) : null}
+              {!readOnly ? (
+                <fieldset
+                  className="handling-category"
+                  disabled={!loaded || saving}
+                >
+                  <legend>
+                    {senderRule ? "Rule for this sender" : group.label}
+                  </legend>
+                  <div
+                    className="handling-segments"
+                    role="group"
+                    aria-label="Action"
+                  >
+                    {(Object.keys(actions) as Array<keyof typeof actions>).map(
+                      (action) => (
+                        <button
+                          type="button"
+                          key={action}
+                          aria-pressed={
+                            !mixedAction && policy.destination === action
+                          }
+                          disabled={
+                            ["spam", "trash"].includes(action) && !canDiscard
+                          }
+                          onClick={() => setPolicy({ destination: action })}
+                        >
+                          {actions[action]}
+                        </button>
+                      ),
+                    )}
+                  </div>
+                  {mixed ? (
+                    <p className="handling-note">
+                      This group has different choices. Pick an action to use it
+                      for the whole group.
+                    </p>
+                  ) : null}
+                  <div className="handling-controls">
+                    <label className="handling-toggle">
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        checked={!mixedRead && policy.markRead}
+                        disabled={policy.destination === "inbox"}
+                        onChange={(e) =>
+                          setPolicy({ markRead: e.target.checked })
+                        }
+                      />
+                      Mark as read
+                    </label>
+                    {!senderRule && group.id !== "mailing_lists" ? (
+                      <label>
+                        Match strictness
+                        <input
+                          type="range"
+                          aria-label="Match strictness"
+                          min="0"
+                          max={lastPreview?.withBody ? "2" : "1"}
+                          step="1"
+                          value={
+                            lastPreview?.withBody
+                              ? matchLevel
+                              : Math.min(matchLevel, 1)
+                          }
+                          onChange={(e) =>
+                            setPolicy({ matchLevel: Number(e.target.value) })
+                          }
+                        />
+                        <small>
+                          {
+                            levels[
+                              lastPreview?.withBody
+                                ? matchLevel
+                                : Math.min(matchLevel, 1)
+                            ]
+                          }
+                        </small>
+                        {!lastPreview?.withBody ? (
+                          <small>
+                            No message text was saved. Only subjects and headers
+                            can be checked.
+                          </small>
+                        ) : null}
+                      </label>
+                    ) : null}
+                  </div>
+                  {chosen.some((c) => attentionCategories.has(c)) ? (
+                    <p className="handling-warning">
+                      These messages may need you. Keep them unread unless you
+                      want otherwise. Filing can also affect phone alerts.
+                    </p>
+                  ) : null}
+                  {["spam", "trash"].includes(policy.destination) ? (
+                    <p className="handling-warning">
+                      Your provider may empty Spam or Trash automatically.{" "}
+                      {senderRule
+                        ? "Check the examples, including the excluded mail."
+                        : "Only clear matches are used, at every strictness level."}
+                    </p>
+                  ) : null}
+                  {canDiscard ||
+                  chosen.every((c) => ["codes", "accounts"].includes(c)) ? (
+                    <div className="handling-old-mail">
+                      <strong>Old mail</strong>
+                      <label className="handling-toggle">
+                        <input
+                          type="checkbox"
+                          checked={policy.retentionDays !== null}
+                          onChange={(e) =>
+                            setPolicy({
+                              retentionDays: e.target.checked ? 90 : null,
+                            })
+                          }
+                        />
+                        Offer old mail for Trash review
+                      </label>
+                      {policy.retentionDays !== null ? (
+                        <label>
+                          Older than {policy.retentionDays} days
+                          <input
+                            type="range"
+                            aria-label="Age in days"
+                            min="7"
+                            max="730"
+                            step="1"
+                            value={policy.retentionDays}
+                            onChange={(e) =>
+                              setPolicy({
+                                retentionDays: Number(e.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                      ) : null}
+                      <p className="handling-note">
+                        Reviewed in Delete. Never deleted in the background by
+                        Sift.
+                      </p>
+                    </div>
+                  ) : null}
+                  <details className="handling-formula">
+                    <summary>Show the rule</summary>
+                    <code>
+                      IF{" "}
+                      {senderRule
+                        ? "sender = " +
+                          senderRule.sender +
+                          " AND to = " +
+                          senderRule.address +
+                          (senderRule.subjectContains
+                            ? " AND subject contains “" +
+                              senderRule.subjectContains +
+                              "”"
+                            : "") +
+                          " AND not a protected message"
+                        : "type is " +
+                          chosen.map((c) => labels[c].label).join(" OR ") +
+                          " AND match is " +
+                          [
+                            "clear",
+                            "clear or similar",
+                            "clear, similar or saved-text",
+                          ][matchLevel]}{" "}
+                      THEN{" "}
+                      {mixed
+                        ? "use the choices shown on each example"
+                        : actions[policy.destination].toUpperCase() +
+                          " · " +
+                          (policy.markRead && policy.destination !== "inbox"
+                            ? "mark read"
+                            : "keep read status")}
+                    </code>
+                    {!senderRule ? (
+                      <p className="handling-note">
+                        {group.id === "mailing_lists"
+                          ? "Requires a mailing-list header and no more specific purpose match. "
+                          : "Subject matches: "}
+                        {chosen.flatMap((c) => patternsFor(c)).join(" OR ")}.
+                        Earlier protected matches take priority. Similar wording
+                        and body-only matches never become Spam, Trash, or
+                        future filters.
+                      </p>
+                    ) : null}
+                  </details>
+                </fieldset>
+              ) : !needsSorting ? (
+                <p>
+                  These messages stay unchanged. Review them in Spam before
+                  creating filters.
+                </p>
+              ) : null}
+              {!needsSorting || senderRule ? (
+                <div className="handling-preview" aria-busy={busy}>
+                  <div className="handling-summary" role="status">
+                    {busy
+                      ? "Updating examples…"
+                      : preview
+                        ? number(matchCount) +
+                          " matches · " +
+                          (senderRule
+                            ? "other mail uses its group choices"
+                            : number(counts(chosen) - matchCount) +
+                              " need review")
+                        : "No preview available"}
+                  </div>
+                  {preview?.examples.length ? (
+                    <>
+                      <ul className="handling-examples">
+                        {preview.examples.map((example, i) => (
+                          <li key={i}>
+                            <div className="handling-example-head">
+                              <span
+                                className={
+                                  "handling-badge action-" +
+                                  example.actionCode?.toLowerCase()
+                                }
+                              >
+                                {example.actionCode}
+                              </span>
+                              <strong>{example.subject}</strong>
+                            </div>
+                            <span>
+                              {example.sender} ·{" "}
+                              {example.address ?? "Owner not confirmed"}
+                            </span>
+                            {senderRule && example.ruleId !== senderRule.id ? (
+                              <small>
+                                Not in this sender rule — uses its group choice.
+                              </small>
+                            ) : null}
+                            <span>
+                              {example.source} → {example.target} ·{" "}
+                              {example.action}
+                            </span>
+                            <details>
+                              <summary>Why?</summary>
+                              <small>
+                                {example.reasons
+                                  .filter(
+                                    (r) =>
+                                      !r.startsWith(
+                                        "User-selected sender rule:",
+                                      ),
+                                  )
+                                  .join(". ")}
+                              </small>
+                            </details>
+                            {group.id === "mailing_lists" &&
+                            !senderRule &&
+                            example.address &&
+                            example.sender ? (
+                              <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={() =>
+                                  selectSender(example.sender, example.address!)
+                                }
+                              >
+                                Set a rule for this sender
+                              </button>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="handling-pagination">
+                        <button
+                          className="secondary-button"
+                          disabled={!preview || page === 0}
+                          onClick={() => setPage((n) => n - 1)}
+                        >
+                          Previous examples
+                        </button>
+                        <span>
+                          {page + 1} / {preview.pages}
+                        </span>
+                        <button
+                          className="secondary-button"
+                          disabled={!preview || page + 1 >= preview.pages}
+                          onClick={() => setPage((n) => n + 1)}
+                        >
+                          Next examples
+                        </button>
+                      </div>
+                    </>
+                  ) : preview ? (
+                    <p>No matching examples in this scan.</p>
+                  ) : null}
+                  {senderRule ? (
+                    <button
+                      className="primary-button compact"
+                      disabled={
+                        !preview || !matchCount || saving || ruleInvalid
+                      }
+                      onClick={addSenderRule}
+                    >
+                      Use this rule for {number(matchCount)} messages
+                    </button>
+                  ) : null}
+                  {ruleInvalid ? (
+                    <p className="form-error">
+                      Use plain words, without * or ?.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+          {(preferences.rules?.length ?? 0) > 0 ? (
+            <details className="handling-saved-rules">
+              <summary>Your sender rules ({preferences.rules?.length})</summary>
+              {preferences.rules?.map((r) => (
+                <div key={r.id} className="handling-pagination">
                   <span>
-                    {page + 1} / {preview.pages}
+                    {r.sender} → {actions[r.handling.destination]} ·{" "}
+                    {labels[r.category].label}
+                    <small> · {r.address}</small>
                   </span>
                   <button
                     className="secondary-button"
-                    disabled={!preview || page + 1 >= preview.pages}
-                    onClick={() => setPage((n) => n + 1)}
+                    disabled={saving}
+                    onClick={() => {
+                      setSenderRule(r);
+                      setPage(0);
+                    }}
                   >
-                    Next examples
+                    Edit
+                  </button>
+                  <button
+                    className="secondary-button"
+                    disabled={saving}
+                    onClick={() =>
+                      change({
+                        ...preferences,
+                        rules: preferences.rules?.filter(
+                          (item) => item.id !== r.id,
+                        ),
+                      })
+                    }
+                  >
+                    Remove
                   </button>
                 </div>
-              </>
-            ) : preview ? (
-              <p>No matching examples in this scan.</p>
-            ) : null}
-            {senderRule ? (
+              ))}
+            </details>
+          ) : null}
+          <p className="handling-note">
+            {lastPreview
+              ? number(lastPreview.total) +
+                " scanned · " +
+                number(
+                  lastPreview.groups.find((g) => g.category === "other")
+                    ?.count ?? 0,
+                ) +
+                " need sorting. "
+              : ""}
+            {draftStatus}
+          </p>
+          {error ? (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {notice ? <p role="status">{notice}</p> : null}
+          <div className="handling-actions">
+            <button
+              className="primary-button compact"
+              disabled={!loaded || saving || !preview || Boolean(senderRule)}
+              onClick={() => void save()}
+            >
+              {saving ? "Saving…" : "Save choices and rebuild proposal"}
+            </button>
+            {rebuildFailed ? (
               <button
-                className="primary-button compact"
-                disabled={!preview || !matchCount || saving || ruleInvalid}
-                onClick={addSenderRule}
+                className="secondary-button"
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    await rebuild();
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
               >
-                Use this rule for {number(matchCount)} messages
+                Retry building folders
               </button>
             ) : null}
-            {ruleInvalid ? (
-              <p className="form-error">Use plain words, without * or ?.</p>
+            {error ? (
+              <button
+                className="secondary-button"
+                disabled={saving}
+                onClick={() => setRefresh((n) => n + 1)}
+              >
+                Retry preview
+              </button>
             ) : null}
           </div>
-        ) : null}
-        {(preferences.rules?.length ?? 0) > 0 ? (
-          <details className="handling-saved-rules">
-            <summary>Your sender rules ({preferences.rules?.length})</summary>
-            {preferences.rules?.map((r) => (
-              <div key={r.id} className="handling-pagination">
-                <span>
-                  {r.sender} → {actions[r.handling.destination]} ·{" "}
-                  {labels[r.category].label}
-                  <small> · {r.address}</small>
-                </span>
-                <button
-                  className="secondary-button"
-                  disabled={saving}
-                  onClick={() => {
-                    setSenderRule(r);
-                    setPage(0);
-                  }}
-                >
-                  Edit
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={saving}
-                  onClick={() =>
-                    change({
-                      ...preferences,
-                      rules: preferences.rules?.filter(
-                        (item) => item.id !== r.id,
-                      ),
-                    })
-                  }
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
+          <details className="handling-advanced">
+            <summary>Other account and address settings</summary>
+            <label>
+              Apply choices to
+              <select
+                aria-label="Apply these choices to"
+                value={scopeValue}
+                disabled={saving || Boolean(senderRule)}
+                onChange={(e) => setScopeValue(e.target.value)}
+              >
+                <option value="account">Main folders</option>
+                <option value="profile">All accounts — defaults</option>
+                {aliases.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <small>
+              Use this for an address that shares the main folders, or for
+              defaults across accounts.
+            </small>
           </details>
-        ) : null}
-        <p className="handling-note">
-          {lastPreview
-            ? number(lastPreview.total) +
-              " scanned · " +
-              number(
-                lastPreview.groups.find((g) => g.category === "other")?.count ??
-                  0,
-              ) +
-              " need sorting. "
-            : ""}
-          {draftStatus}
-        </p>
-        {error ? (
-          <p className="form-error" role="alert">
-            {error}
-          </p>
-        ) : null}
-        {notice ? <p role="status">{notice}</p> : null}
-        <div className="handling-actions">
-          <button
-            className="primary-button compact"
-            disabled={!loaded || saving || !preview || Boolean(senderRule)}
-            onClick={() => void save()}
-          >
-            {saving ? "Saving…" : "Save choices and rebuild proposal"}
-          </button>
-          {rebuildFailed ? (
-            <button
-              className="secondary-button"
-              disabled={saving}
-              onClick={async () => {
-                setSaving(true);
-                try {
-                  await rebuild();
-                } finally {
-                  setSaving(false);
-                }
-              }}
-            >
-              Retry building folders
-            </button>
-          ) : null}
-          {error ? (
-            <button
-              className="secondary-button"
-              disabled={saving}
-              onClick={() => setRefresh((n) => n + 1)}
-            >
-              Retry preview
-            </button>
-          ) : null}
         </div>
-      </div>
-    </section>
+      </section>
+    </>
   );
 }

@@ -4,6 +4,34 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-08
+
+### Fixed
+
+- Separate-address controls no longer disappear after every address is confirmed. Main-folder previews exclude split addresses, and each separate-tree preview shows only mail with that single confirmed owner.
+- Broader general subject patterns recognize more statements, transfers, renewals, account access changes, deliveries, and order confirmations without company-specific filters.
+- Policy and service notices no longer share the Accounts folder. Subscription policy notices are distinguished from subscription status.
+- Folder splits cannot change while a mail job is unfinished.
+- Upgrading stops unfinished forward jobs from the previous classifier so they cannot block a fresh review. Successful actions and undo jobs are retained.
+
+### Added
+
+- Visible folder-tree selection, renaming, and a Copy main choices action. Copies include all group decisions and folder detail, not another address's sender rules. Saved copies are independent of later main-tree edits.
+- Other mailing-list mail: messages with a mailing-list or unsubscribe header but no known purpose can be filed separately, preserving read status by default. They are not assumed to be subscriptions, promotions, or spam.
+- Header-specific future filing for this group on Proton and Outlook, with exact sender/address conditions and exclusions for recognized purposes. Gmail does not receive a broader sender-only substitute; use reviewed sender rules there.
+
+### Changed
+
+- Organize uses the app's panel, tab, button, and table styling. Desktop mail groups stay visible beside the controls; smaller windows use a group selector. Folder review is no longer collapsed by default.
+- Service notices have their own detailed destination under Updates. Strictness no longer offers body-text matching when the scan contains no message text.
+- Mail controls live in Organize; Settings links there instead of duplicating the editor. Advanced account defaults and individual-address choices remain available.
+
+### Upgrade notes
+
+- Updating does not move mail or change provider filters. Save choices and rebuild the proposal, review the folders, then review existing-mail actions and future rules.
+- Old folders and installed filters are not silently replaced. Proton still requires importing the reviewed Sieve file in Proton Mail.
+- Some messages remain unclassified. Vague subjects without useful headers or saved message text are not safe to guess; bulk sender review remains available.
+
 ## [1.7.0] - 2026-09-06
 
 ### Fixed

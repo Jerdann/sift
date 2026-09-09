@@ -219,7 +219,11 @@ export const renderManagedProtonSieve = (
     const c = rule.purposeConditions;
     if (!c?.subjectPatterns.length || !c.senderAddresses.length)
       throw new Error("purpose_conditions_required");
-    const key = JSON.stringify([c.subjectPatterns, c.excludeSubjectPatterns]);
+    const key = JSON.stringify([
+      c.subjectPatterns,
+      c.excludeSubjectPatterns,
+      c.mailingList ?? false,
+    ]);
     groups.set(key, [...(groups.get(key) ?? []), rule]);
   }
   const lines = [
@@ -236,6 +240,10 @@ export const renderManagedProtonSieve = (
   for (const group of groups.values()) {
     const c = group[0]!.purposeConditions!;
     const tests = ['header :matches "subject" ' + list(c.subjectPatterns)];
+    if (c.mailingList)
+      tests.push(
+        'anyof (header :matches "list-id" "?*", header :matches "list-unsubscribe" "?*")',
+      );
     if (c.excludeSubjectPatterns.length)
       tests.push(
         'not header :matches "subject" ' + list(c.excludeSubjectPatterns),
