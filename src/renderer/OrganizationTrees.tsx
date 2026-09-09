@@ -1,51 +1,81 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { MailAccountSummary } from "../shared/contracts/accounts";
 import type {
-  AccountIdentitySummary,
-  AccountIdentityUpdateInput,
-  MailAccountSummary,
-} from "../shared/contracts/accounts";
+  AddressGroup,
+  AddressGroupsState,
+} from "../shared/contracts/address-groups";
+import { GROUP_COLORS } from "../core/classification/group-colors";
 
+// Existing panel/tab styling; group membership stays visible beside its name.
+// Colors identify groups only. Saving assignments does not touch provider mail.
 export function OrganizationTrees({
   account,
-  identities,
+  state,
   selected,
   disabled,
   onSelect,
-  onUpdate,
+  onSaved,
+  onDirty,
 }: {
   account: MailAccountSummary;
-  identities: AccountIdentitySummary[];
+  state: AddressGroupsState;
   selected: string;
   disabled: boolean;
-  onSelect: (address: string) => void;
-  onUpdate: (input: AccountIdentityUpdateInput) => Promise<void>;
+  onSelect: (id: string) => void;
+  onSaved: (state: AddressGroupsState) => Promise<void>;
+  onDirty: (dirty: boolean) => void;
 }) {
-  const [busy, setBusy] = useState(false),
+  const [draft, setDraft] = useState(state.groups),
+    [editId, setEditId] = useState(selected),
+    [busy, setBusy] = useState(false),
     [error, setError] = useState("");
-  const [address, setAddress] = useState("");
-  const [names, setNames] = useState<Record<string, string>>({});
-  const confirmed = identities.filter((i) => i.status === "confirmed");
-  const split = confirmed.filter((i) => i.containerEnabled);
-  const available = confirmed.filter((i) => !i.containerEnabled);
-  const change = async (i: AccountIdentitySummary, enabled: boolean) => {
+  useEffect(() => {
+    setDraft(state.groups);
+    setEditId(selected);
+  }, [state.revision, selected]);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(state.groups);
+  useEffect(() => onDirty(dirty), [dirty]);
+  const current = draft.find((g) => g.id === editId) ?? draft[0]!;
+  const addresses = [
+    ...new Set(state.groups.flatMap((g) => g.addresses)),
+  ].sort();
+  const multiple = draft.filter((g) => g.addresses.length).length > 1;
+  const change = (values: Partial<AddressGroup>) =>
+    setDraft(draft.map((g) => (g.id === current.id ? { ...g, ...values } : g)));
+  const assign = (address: string, checked: boolean) =>
+    setDraft(
+      draft.map((g) => ({
+        ...g,
+        addresses: [
+          ...g.addresses.filter((a) => a !== address),
+          ...((checked ? g.id === current.id : g.id === "main")
+            ? [address]
+            : []),
+        ],
+      })),
+    );
+  const save = async () => {
     setBusy(true);
     setError("");
     try {
-      await onUpdate({
+      const saved = await window.emailOrganizer.saveAddressGroups({
         provider: account.provider,
         connectionId: account.id,
-        address: i.address,
-        status: "confirmed",
-        containerEnabled: enabled,
-        containerName: enabled
-          ? (names[i.address] ?? i.containerName ?? i.address.split("@")[0]!)
-          : null,
+        revision: state.revision,
+        groups: draft,
       });
-      onSelect(enabled ? i.address : "account");
-      setAddress("");
-    } catch {
+      setDraft(saved.groups);
+      onSelect(current.id);
+      await onSaved(saved);
+    } catch (e) {
       setError(
-        "Could not save the folder split. Finish any running mail job, then try again.",
+        String(e).includes("mail_job_running")
+          ? "Finish the running mail job, then save. Your group edits are still here."
+          : String(e).includes("address_groups_changed")
+            ? "The address list changed. Reload this page before saving groups."
+            : String(e).includes("group_name_reserved")
+              ? "Choose another name. Inbox, Spam, Trash and other system folder names are reserved."
+              : "Could not save groups. Use different names for each group, then try again.",
       );
     } finally {
       setBusy(false);
@@ -54,130 +84,194 @@ export function OrganizationTrees({
   return (
     <section
       className="readiness-panel organization-trees"
-      aria-label="Folder trees"
+      aria-label="Address groups"
     >
       <div className="panel-header">
         <div>
           <p className="eyebrow">
             {account.provider} · {account.label}
           </p>
-          <h2>Separate email addresses</h2>
+          <h2>Group your email addresses</h2>
         </div>
+        <button
+          className="secondary-button"
+          disabled={disabled || busy}
+          onClick={() => {
+            const id = crypto.randomUUID();
+            setDraft([
+              ...draft,
+              {
+                id,
+                name: `Group ${draft.length + 1}`,
+                color: "blue",
+                addresses: [],
+              },
+            ]);
+            setEditId(id);
+          }}
+        >
+          Add group
+        </button>
       </div>
       <div className="tree-content">
-        <p>Keep house, work, or other shared mail in its own folders.</p>
+        <p>
+          Put addresses together to give them the same folders and mail rules.
+        </p>
         <div
           className="proposal-scope-tabs tree-tabs"
           role="group"
-          aria-label="Edit folder tree"
+          aria-label="Address groups"
         >
-          <button
-            type="button"
-            className={selected === "account" ? "active" : ""}
-            aria-pressed={selected === "account"}
-            disabled={disabled || busy}
-            onClick={() => onSelect("account")}
-          >
-            <strong>Main folders</strong>
-            <small>
-              {split.length
-                ? "Excludes every address listed below"
-                : "All confirmed addresses"}
-            </small>
-          </button>
-          {split.map((i) => (
+          {draft.map((g) => (
             <button
               type="button"
-              key={i.id}
-              className={selected === i.address ? "active" : ""}
-              aria-pressed={selected === i.address}
-              disabled={disabled || busy}
-              onClick={() => onSelect(i.address)}
+              key={g.id}
+              className={current.id === g.id ? "active" : ""}
+              aria-pressed={current.id === g.id}
+              disabled={disabled || busy || dirty}
+              onClick={() => {
+                setEditId(g.id);
+                onSelect(g.id);
+              }}
             >
-              <strong>{i.containerName}</strong>
-              <small>{i.address} only</small>
+              <strong>
+                <span className="group-color-dot" data-color={g.color} />
+                {g.name}
+              </strong>
+              <small>
+                {g.addresses.length} addresses · {GROUP_COLORS[g.color].label}
+              </small>
             </button>
           ))}
         </div>
-        {split.map((i) => (
-          <div className="tree-address-row" key={i.id}>
-            <span>
-              <strong>{i.address}</strong>
-              <small>Separate from main-folder filters</small>
-            </span>
-            <label>
-              Folder name
-              <input
-                aria-label={`Folder name for ${i.address}`}
-                value={names[i.address] ?? i.containerName ?? ""}
-                maxLength={64}
-                disabled={disabled || busy}
-                onChange={(e) =>
-                  setNames({
-                    ...names,
-                    [i.address]: e.target.value.replace(/[\\/]/g, ""),
-                  })
-                }
-              />
-            </label>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={
-                disabled ||
-                busy ||
-                !names[i.address]?.trim() ||
-                names[i.address] === i.containerName
+        <fieldset disabled={disabled || busy} className="address-group-editor">
+          <legend>{current.name}</legend>
+          <label>
+            Group name
+            <input
+              aria-label="Group name"
+              value={current.name}
+              maxLength={64}
+              onChange={(e) =>
+                change({ name: e.target.value.replace(/[\\/\x00-\x1f]/g, "") })
               }
-              onClick={() => void change(i, true)}
-            >
-              Save name
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              disabled={disabled || busy}
-              onClick={() => void change(i, false)}
-            >
-              Use main folders
-              <br />
-              <small>Keep this address's choices</small>
-            </button>
-          </div>
-        ))}
-        {available.length ? (
-          <div className="tree-add">
-            <label>
-              Separate another address
-              <select
-                aria-label="Address to separate"
-                value={address}
-                disabled={disabled || busy}
-                onChange={(e) => setAddress(e.target.value)}
+            />
+          </label>
+          <div
+            className="group-color-picker"
+            role="group"
+            aria-label="Group color"
+          >
+            {Object.entries(GROUP_COLORS).map(([key, c]) => (
+              <button
+                type="button"
+                key={key}
+                aria-pressed={current.color === key}
+                onClick={() => change({ color: key as AddressGroup["color"] })}
               >
-                <option value="">Choose an address</option>
-                {available.map((i) => (
-                  <option key={i.id} value={i.address}>
-                    {i.address}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <span className="group-color-dot" data-color={key} />
+                {c.label}
+              </button>
+            ))}
+          </div>
+          <div
+            className="group-address-list"
+            role="group"
+            aria-label="Addresses in this group"
+          >
+            {addresses.map((a) => {
+              const owner = draft.find((g) => g.addresses.includes(a));
+              return (
+                <label key={a}>
+                  <input
+                    type="checkbox"
+                    checked={current.addresses.includes(a)}
+                    disabled={
+                      current.id === "main" && current.addresses.includes(a)
+                    }
+                    onChange={(e) => assign(a, e.target.checked)}
+                  />
+                  <span>
+                    {a}
+                    <small>
+                      {owner?.id === current.id
+                        ? "In this group"
+                        : `In ${owner?.name ?? "Main"} — selecting moves it here`}
+                    </small>
+                  </span>
+                </label>
+              );
+            })}
+            {!addresses.length ? (
+              <p>
+                No confirmed addresses yet. Confirm your addresses on the
+                Addresses page.
+              </p>
+            ) : null}
+          </div>
+          <p>
+            {multiple
+              ? `Folders for this group go inside “${current.name}”.`
+              : "One group: category folders go directly in your mailbox, without a group parent folder."}
+          </p>
+          <small>
+            {account.provider === "gmail"
+              ? "The folder review will show the label colors Sift can apply in Gmail."
+              : account.provider === "proton"
+                ? "Color is shown in Sift. Proton Bridge cannot set folder colors; set this color and subfolder inheritance in Proton Mail → Settings → Folders and labels."
+                : "Color is shown in Sift. This connection cannot set Outlook folder colors. Outlook's separate color categories can be configured in Outlook."}{" "}
+            Colors do not change notifications or read status.
+          </small>
+          <div className="group-editor-actions">
             <button
               type="button"
-              className="secondary-button"
-              disabled={!address || disabled || busy}
-              onClick={() => {
-                const i = available.find((i) => i.address === address);
-                if (i) void change(i, true);
-              }}
+              className="primary-button"
+              disabled={!dirty || !current.name.trim()}
+              onClick={() => void save()}
             >
-              Create separate tree
+              {busy ? "Saving…" : "Save groups"}
             </button>
+            {dirty ? (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setDraft(state.groups);
+                  setEditId(selected);
+                }}
+              >
+                Cancel edits
+              </button>
+            ) : null}
+            {current.id !== "main" ? (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  setDraft(
+                    draft
+                      .filter((g) => g.id !== current.id)
+                      .map((g) =>
+                        g.id === "main"
+                          ? {
+                              ...g,
+                              addresses: [...g.addresses, ...current.addresses],
+                            }
+                          : g,
+                      ),
+                  );
+                  setEditId("main");
+                }}
+              >
+                Remove group
+              </button>
+            ) : null}
           </div>
-        ) : null}
+        </fieldset>
         <small>
-          No mail or folders change here. Review and create the folders below.
+          Saving groups changes only the plan. Existing folders, messages, and
+          filters stay unchanged. Removing a group returns its addresses to
+          Main.
         </small>
         {error ? (
           <p className="connection-error" role="alert">

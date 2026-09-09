@@ -25,7 +25,7 @@ test("live group controls, bulk sender rules, and drafts survive a failed rebuil
     await open();
     let panel = page.locator(".mail-handling");
     await expect(
-      panel.getByRole("heading", { name: "Main folders: mail rules" }),
+      panel.getByRole("heading", { name: "Main: mail rules" }),
     ).toBeVisible();
     await expect(panel.locator(".handling-sender").first()).toContainText(
       "400",
@@ -122,7 +122,7 @@ test("live group controls, bulk sender rules, and drafts survive a failed rebuil
       });
     });
     await panel
-      .getByRole("button", { name: "Save choices and rebuild proposal" })
+      .getByRole("button", { name: "Save all group choices and rebuild" })
       .click();
     await expect(panel).toContainText(
       "Choices saved. The folder plan could not be rebuilt.",
@@ -137,7 +137,7 @@ test("live group controls, bulk sender rules, and drafts survive a failed rebuil
     panel = page.locator(".mail-handling");
     await expect(panel.locator(".handling-sender").first()).toContainText("80");
     await panel
-      .getByRole("button", { name: "Save choices and rebuild proposal" })
+      .getByRole("button", { name: "Save all group choices and rebuild" })
       .click();
     await expect(panel).toContainText("Choices saved. Folder plan updated.");
     // A preview failure must not present old example actions as current.
@@ -161,7 +161,7 @@ test("live group controls, bulk sender rules, and drafts survive a failed rebuil
     );
     await expect(panel.locator(".handling-examples")).toHaveCount(0);
     await expect(
-      panel.getByRole("button", { name: "Save choices and rebuild proposal" }),
+      panel.getByRole("button", { name: "Save all group choices and rebuild" }),
     ).toBeDisabled();
   } finally {
     await app.close();
@@ -189,9 +189,9 @@ test("separate trees stay visible and copy main choices without sharing future e
     await page.getByRole("button", { name: "Open", exact: true }).click();
     await page.getByRole("button", { name: "Organize", exact: true }).click();
     const panel = page.locator(".mail-handling"),
-      trees = page.getByRole("region", { name: "Folder trees" });
+      trees = page.getByRole("region", { name: "Address groups" });
     await expect(
-      trees.getByText("shared@example.test", { exact: true }),
+      trees.getByRole("checkbox", { name: /^shared@example.test/ }),
     ).toBeVisible();
     await panel.getByRole("button", { name: "Fewer", exact: true }).click();
     const selectGroup = (name: RegExp) =>
@@ -225,17 +225,22 @@ test("separate trees stay visible and copy main choices without sharing future e
       .click();
     await expect(panel.locator(".handling-examples")).toContainText("SPAM");
     await panel
-      .getByRole("button", { name: "Save choices and rebuild proposal" })
+      .getByRole("button", { name: "Save all group choices and rebuild" })
       .click();
     await expect(panel).toContainText("Choices saved. Folder plan updated.");
     await trees.getByRole("button", { name: /^Shared home/ }).click();
     await expect(
       panel.getByRole("heading", { name: "Shared home: mail rules" }),
     ).toBeVisible();
-    await panel.getByRole("button", { name: "Copy main choices" }).click();
-    await expect(panel).toContainText(
-      "Main group choices copied into this draft",
-    );
+    await panel.getByLabel("Copy settings from").selectOption("main");
+    await panel
+      .getByRole("group", { name: "Copy settings to" })
+      .getByLabel("Shared home", { exact: true })
+      .check();
+    await panel
+      .getByRole("button", { name: "Copy to selected groups" })
+      .click();
+    await expect(panel).toContainText("Restored your saved draft.");
     await selectGroup(/^Promotions/);
     await panel
       .getByRole("group", { name: "Action", exact: true })
@@ -248,12 +253,12 @@ test("separate trees stay visible and copy main choices without sharing future e
       "owner@example.test",
     );
     await panel
-      .getByRole("button", { name: "Save choices and rebuild proposal" })
+      .getByRole("button", { name: "Save all group choices and rebuild" })
       .click();
     await expect(panel).toContainText("Choices saved. Folder plan updated.");
     await selectGroup(/^Needs sorting/);
     await expect(panel.locator(".handling-sender").first()).toContainText("30");
-    await trees.getByRole("button", { name: /^Main folders/ }).click();
+    await trees.getByRole("button", { name: /^Main/ }).click();
     await selectGroup(/^Promotions/);
     await expect(panel.locator(".handling-examples")).toContainText("SPAM");
     await expect(panel.locator(".handling-examples")).not.toContainText(
@@ -261,10 +266,10 @@ test("separate trees stay visible and copy main choices without sharing future e
     );
     await trees.getByRole("button", { name: /^Shared home/ }).click();
     await expect(panel.locator(".handling-examples")).toContainText("FILE");
-    await page
-      .getByLabel("Folder name for shared@example.test")
-      .fill("Home mail");
-    await trees.getByRole("button", { name: "Save name", exact: true }).click();
+    await page.getByLabel("Group name").fill("Home mail");
+    await trees
+      .getByRole("button", { name: "Save groups", exact: true })
+      .click();
     await expect(
       panel.getByRole("heading", { name: "Home mail: mail rules" }),
     ).toBeVisible();
@@ -282,6 +287,46 @@ test("separate trees stay visible and copy main choices without sharing future e
         () => document.documentElement.scrollWidth <= innerWidth + 1,
       ),
     ).toBe(true);
+    // Multiple receiving addresses can be assigned together, not just renamed
+    // individual trees. Run this in the isolated test mailbox only.
+    await trees.getByRole("button", { name: "Add group", exact: true }).click();
+    await trees.getByLabel("Group name").fill("Projects");
+    await trees
+      .getByRole("group", { name: "Group color" })
+      .getByRole("button", { name: "Red", exact: true })
+      .click();
+    await trees.getByRole("checkbox", { name: /^owner@example.test/ }).check();
+    await trees.getByRole("checkbox", { name: /^shared@example.test/ }).check();
+    await trees
+      .getByRole("button", { name: "Save groups", exact: true })
+      .click();
+    await expect(
+      panel.getByRole("heading", { name: "Projects: mail rules" }),
+    ).toBeVisible();
+    await expect(panel.locator(".handling-note").first()).toContainText(
+      "2 addresses in this group",
+    );
+    await expect(trees).toContainText(
+      "One group: category folders go directly in your mailbox",
+    );
+    await expect(
+      trees.getByRole("button", { name: "Red", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    const source = panel.getByLabel("Copy settings from");
+    await source.selectOption({ label: "Projects" });
+    await trees
+      .getByRole("button", { name: "Remove group", exact: true })
+      .click();
+    await trees
+      .getByRole("button", { name: "Save groups", exact: true })
+      .click();
+    await expect(
+      panel.getByRole("heading", { name: "Main: mail rules" }),
+    ).toBeVisible();
+    await expect(source).toHaveValue("main");
+    await expect(panel.locator(".handling-note").first()).toContainText(
+      "2 addresses in this group",
+    );
   } finally {
     await app.close();
     rmSync(root, { recursive: true, force: true });

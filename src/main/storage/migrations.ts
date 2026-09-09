@@ -1262,6 +1262,46 @@ export const MIGRATIONS: readonly Migration[] = Object.freeze([
       DROP TABLE sift_pre_18_forward_jobs;
     `,
   },
+  {
+    version: 35,
+    statements: `
+      CREATE TABLE address_groups (
+        profile_id TEXT NOT NULL,
+        provider TEXT NOT NULL, connection_id TEXT NOT NULL, id TEXT NOT NULL,
+        name TEXT NOT NULL, color TEXT NOT NULL DEFAULT 'blue',
+        PRIMARY KEY(profile_id,provider,connection_id,id)
+      );
+      ALTER TABLE account_identities ADD COLUMN group_id TEXT NOT NULL DEFAULT 'main';
+      INSERT INTO address_groups(profile_id,provider,connection_id,id,name)
+        SELECT profile_id,provider,connection_id,MIN(id),container_name FROM account_identities
+        WHERE user_status='confirmed' AND container_enabled=1 AND container_name IS NOT NULL
+        GROUP BY profile_id,provider,connection_id,container_name;
+      UPDATE account_identities SET group_id=COALESCE((
+        SELECT g.id FROM address_groups g WHERE g.profile_id=account_identities.profile_id
+          AND g.provider=account_identities.provider AND g.connection_id=account_identities.connection_id
+          AND g.name=account_identities.container_name
+      ),'main') WHERE user_status='confirmed' AND container_enabled=1;
+      CREATE TRIGGER remove_proton_address_groups AFTER DELETE ON provider_connections BEGIN
+        DELETE FROM address_groups WHERE profile_id=OLD.profile_id AND provider='proton' AND connection_id=OLD.id;
+      END;
+      CREATE TRIGGER remove_gmail_address_groups AFTER DELETE ON gmail_connections BEGIN
+        DELETE FROM address_groups WHERE profile_id=OLD.profile_id AND provider='gmail' AND connection_id=OLD.id;
+      END;
+      CREATE TRIGGER remove_outlook_address_groups AFTER DELETE ON outlook_connections BEGIN
+        DELETE FROM address_groups WHERE profile_id=OLD.profile_id AND provider='outlook' AND connection_id=OLD.id;
+      END;
+      CREATE TEMP TABLE sift_pre_groups_jobs AS
+        SELECT j.id FROM jobs j WHERE j.state IN ('pending','running') AND (
+          j.kind='folder-setup' OR j.id IN (SELECT job_id FROM cleanup_plans UNION SELECT job_id FROM gmail_organization_plans UNION SELECT job_id FROM outlook_history_plans UNION SELECT job_id FROM rule_reconciliation_plans)
+        ) AND NOT EXISTS(SELECT 1 FROM cleanup_plans p WHERE p.undo_job_id=j.id)
+        AND NOT EXISTS(SELECT 1 FROM gmail_organization_plans p WHERE p.undo_job_id=j.id)
+        AND NOT EXISTS(SELECT 1 FROM outlook_history_plans p WHERE p.undo_job_id=j.id)
+        AND NOT EXISTS(SELECT 1 FROM rule_reconciliation_plans p WHERE p.undo_job_id=j.id);
+      UPDATE job_items SET state='skipped',error_code='groups_changed_rebuild_proposal' WHERE state IN ('pending','running') AND job_id IN (SELECT id FROM sift_pre_groups_jobs);
+      UPDATE jobs SET state='failed',error_code='groups_changed_rebuild_proposal',finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id IN (SELECT id FROM sift_pre_groups_jobs);
+      DROP TABLE sift_pre_groups_jobs;
+    `,
+  },
 ]);
 
 export const applyMigrations = (

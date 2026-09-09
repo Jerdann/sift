@@ -125,7 +125,7 @@ describe("per-address organization proposals", () => {
       first.items.every((item) => item.scopeAddress === "owner@example.test"),
     ).toBe(true);
     expect(
-      first.items.every((item) => item.targetPath.startsWith("Primary/")),
+      first.items.every((item) => !item.targetPath.startsWith("Primary/")),
     ).toBe(true);
     expect(
       first.items.find((item) => item.category === "promotions"),

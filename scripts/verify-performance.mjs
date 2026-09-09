@@ -15,16 +15,16 @@ const limits = [
     files: readdirSync(rendererAssets)
       .filter((file) => file.endsWith(".js"))
       .map((file) => path.join(rendererAssets, file)),
-    // Includes address-tree controls and the expanded shared purpose predicates in v1.8.
+    // Includes the address-group editor and shared parent-folder review in v1.9.
     // Runtime validation stays in preload/main, not in the renderer.
-    maxBytes: 432 * 1024,
+    maxBytes: 436 * 1024,
   },
   {
     label: "renderer CSS",
     files: readdirSync(rendererAssets)
       .filter((file) => file.endsWith(".css"))
       .map((file) => path.join(rendererAssets, file)),
-    maxBytes: 68 * 1024,
+    maxBytes: 70 * 1024,
   },
   {
     label: "preload JavaScript",
@@ -34,7 +34,8 @@ const limits = [
   {
     label: "main-process JavaScript",
     files: [path.join(root, ".vite", "build", "main.js")],
-    maxBytes: 550 * 1024,
+    // Group migration, scoped preference copies, and verified label colors.
+    maxBytes: 565 * 1024,
   },
 ];
 

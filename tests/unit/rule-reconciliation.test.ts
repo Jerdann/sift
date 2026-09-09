@@ -183,6 +183,65 @@ const setup = () => {
 };
 
 describe("provider rule inventory and reconciliation", () => {
+  it("colors existing Gmail labels only during approved folder setup and rejects mismatched provider responses", async () => {
+    const { profile, connection, connections, rules } = setup();
+    const changes: unknown[] = [];
+    let mismatch = false;
+    const fetchPort = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        let value: unknown;
+        if (url.includes("oauth2"))
+          value = {
+            access_token: "synthetic-access",
+            expires_in: 3600,
+            token_type: "Bearer",
+          };
+        else if (init?.method === "PATCH") {
+          const payload = JSON.parse(String(init.body));
+          changes.push(payload);
+          value = {
+            id: "label-1",
+            color: mismatch
+              ? { backgroundColor: "#3c78d8", textColor: "#ffffff" }
+              : payload.color,
+          };
+        } else if (url.endsWith("/labels"))
+          value = { labels: [{ id: "label-1", name: "Projects/Receipts" }] };
+        else if (url.endsWith("/settings/filters")) value = { filter: [] };
+        else throw Error("unexpected_provider_request");
+        return new Response(JSON.stringify(value), { status: 200 });
+      },
+    );
+    try {
+      const runner = new GmailRuleReconciliationRunner(
+        connections,
+        rules,
+        new JobRepository(profile.database),
+        fetchPort,
+      );
+      const ensure = await runner.folderPreparer(connection.id);
+      expect(changes).toEqual([]);
+      await ensure("Projects/Receipts");
+      expect(changes).toEqual([]);
+      await ensure("Projects/Receipts", "#e07798");
+      expect(changes).toEqual([
+        { color: { backgroundColor: "#e07798", textColor: "#000000" } },
+      ]);
+      expect(
+        fetchPort.mock.calls.some(
+          ([, init]) =>
+            init?.method === "POST" && typeof init.body === "string",
+        ),
+      ).toBe(false);
+      mismatch = true;
+      await expect(ensure("Projects/Receipts", "#e07798")).rejects.toThrow(
+        "label_color_verification_failed",
+      );
+    } finally {
+      profile.database.close();
+    }
+  });
   it("normalizes Gmail filter ordering into one semantic fingerprint", () => {
     const labelNames = new Map([
       ["Label_2", "Primary/Promotions"],

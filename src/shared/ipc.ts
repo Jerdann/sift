@@ -108,6 +108,9 @@ import type {
   HandlingPreview,
 } from "./contracts/mail-handling";
 export const IPC_CHANNELS = Object.freeze({
+  addressGroupsGet: "address-groups:get",
+  addressGroupsSave: "address-groups:save",
+  addressGroupsCopy: "address-groups:copy",
   mailHandlingGet: "mail-handling:get",
   mailHandlingSave: "mail-handling:save",
   mailHandlingPreview: "mail-handling:preview",
@@ -229,6 +232,9 @@ export const IPC_CHANNELS = Object.freeze({
 
 export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
   "getMailHandling",
+  "getAddressGroups",
+  "saveAddressGroups",
+  "copyAddressGroupChoices",
   "saveMailHandling",
   "saveMailHandlingDraft",
   "previewMailHandling",
@@ -349,6 +355,15 @@ export const EMAIL_ORGANIZER_BRIDGE_METHODS = Object.freeze([
 
 export interface EmailOrganizerBridge {
   getMailHandling(input: HandlingScope): Promise<HandlingState>;
+  getAddressGroups(
+    input: import("./contracts/accounts").AccountSelectionInput,
+  ): Promise<import("./contracts/address-groups").AddressGroupsState>;
+  saveAddressGroups(
+    input: import("./contracts/address-groups").SaveAddressGroups,
+  ): Promise<import("./contracts/address-groups").AddressGroupsState>;
+  copyAddressGroupChoices(
+    input: import("./contracts/address-groups").CopyAddressGroupChoices,
+  ): Promise<void>;
   saveMailHandling(input: HandlingSave): Promise<HandlingState>;
   previewMailHandling(input: HandlingPreviewInput): Promise<HandlingPreview>;
   saveMailHandlingDraft(input: HandlingSave): Promise<void>;

@@ -1,7 +1,7 @@
 {
   "name": "sift",
   "productName": "Sift",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "A local email organization desktop app.",
   "author": "Sift Contributors",
   "private": true,

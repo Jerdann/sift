@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { accountProviderSchema } from "./accounts";
 import { mailCategorySchema } from "./analysis";
+import { addressGroupSchema } from "./address-groups";
 
 export const organizationProposalItemSchema = z.object({
   id: z.uuid(),
@@ -26,6 +27,7 @@ export const organizationProposalSchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
   requiresRebuild: z.boolean().optional(),
+  groups: z.array(addressGroupSchema).optional(),
   items: z.array(organizationProposalItemSchema),
 });
 
@@ -51,6 +53,7 @@ export const editOrganizationProposalSchema = z
     proposalId: z.uuid(),
     revision: z.string().length(64),
     itemId: z.uuid(),
+    itemIds: z.array(z.uuid()).min(1).max(1000).optional(),
     category: mailCategorySchema,
     targetPath: z
       .string()

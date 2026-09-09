@@ -49,6 +49,11 @@ import {
 } from "../../shared/contracts/spam-review";
 import { SpamReviewRepository } from "../spam/spam-review-repository";
 import { MailHandlingRepository } from "../settings/mail-handling-repository";
+import { AddressGroupRepository } from "../identity/address-group-repository";
+import {
+  saveAddressGroupsSchema,
+  copyAddressGroupChoicesSchema,
+} from "../../shared/contracts/address-groups";
 import { analyzeMailbox } from "../analysis/mailbox-analysis-service";
 import { GmailAnalysisService } from "../gmail/gmail-analysis-service";
 import { OutlookAnalysisService } from "../outlook/outlook-analysis-service";
@@ -79,6 +84,27 @@ export const registerAccountHandlers = ({
       handlingSaveSchema.parse(raw),
     );
   });
+  ipcMain.handle(IPC_CHANNELS.addressGroupsGet, (event, raw) => {
+    trust(event);
+    const c = profileSession.requireActiveContext();
+    return new AddressGroupRepository(c.database, c.profile.id).get(
+      accountSelectionInputSchema.parse(raw),
+    );
+  });
+  ipcMain.handle(IPC_CHANNELS.addressGroupsSave, (event, raw) => {
+    trust(event);
+    const c = profileSession.requireActiveContext();
+    return new AddressGroupRepository(c.database, c.profile.id).save(
+      saveAddressGroupsSchema.parse(raw),
+    );
+  });
+  ipcMain.handle(IPC_CHANNELS.addressGroupsCopy, (event, raw) => {
+    trust(event);
+    const c = profileSession.requireActiveContext();
+    return new MailHandlingRepository(c.database, c.profile.id).copyGroups(
+      copyAddressGroupChoicesSchema.parse(raw),
+    );
+  });
   ipcMain.handle(IPC_CHANNELS.mailHandlingGet, (event, raw) => {
     trust(event);
     const c = profileSession.requireActiveContext();
@@ -89,9 +115,11 @@ export const registerAccountHandlers = ({
   ipcMain.handle(IPC_CHANNELS.mailHandlingSave, (event, raw) => {
     trust(event);
     const c = profileSession.requireActiveContext();
-    return new MailHandlingRepository(c.database, c.profile.id).save(
-      handlingSaveSchema.parse(raw),
-    );
+    const input = handlingSaveSchema.parse(raw),
+      repo = new MailHandlingRepository(c.database, c.profile.id);
+    return input.level === "group"
+      ? repo.saveGroupDrafts(input)
+      : repo.save(input);
   });
   ipcMain.handle(IPC_CHANNELS.mailHandlingPreview, (event, raw) => {
     trust(event);
@@ -666,6 +694,9 @@ export const registerAccountHandlers = ({
       IPC_CHANNELS.identitiesUpdate,
       IPC_CHANNELS.organizationProposalGet,
       IPC_CHANNELS.mailHandlingGet,
+      IPC_CHANNELS.addressGroupsGet,
+      IPC_CHANNELS.addressGroupsSave,
+      IPC_CHANNELS.addressGroupsCopy,
       IPC_CHANNELS.mailHandlingSave,
       IPC_CHANNELS.mailHandlingDraft,
       IPC_CHANNELS.mailHandlingPreview,

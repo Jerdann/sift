@@ -161,7 +161,39 @@ import {
   spamReviewScopeSchema,
 } from "../shared/contracts/spam-review";
 
+import {
+  addressGroupsStateSchema,
+  saveAddressGroupsSchema,
+  copyAddressGroupChoicesSchema,
+} from "../shared/contracts/address-groups";
+
 const bridge: Readonly<EmailOrganizerBridge> = Object.freeze({
+  getAddressGroups: async (
+    input: import("../shared/contracts/accounts").AccountSelectionInput,
+  ) =>
+    addressGroupsStateSchema.parse(
+      await ipcRenderer.invoke(
+        IPC_CHANNELS.addressGroupsGet,
+        accountSelectionInputSchema.parse(input),
+      ),
+    ),
+  saveAddressGroups: async (
+    input: import("../shared/contracts/address-groups").SaveAddressGroups,
+  ) =>
+    addressGroupsStateSchema.parse(
+      await ipcRenderer.invoke(
+        IPC_CHANNELS.addressGroupsSave,
+        saveAddressGroupsSchema.parse(input),
+      ),
+    ),
+  copyAddressGroupChoices: async (
+    input: import("../shared/contracts/address-groups").CopyAddressGroupChoices,
+  ) => {
+    await ipcRenderer.invoke(
+      IPC_CHANNELS.addressGroupsCopy,
+      copyAddressGroupChoicesSchema.parse(input),
+    );
+  },
   saveMailHandlingDraft: async (
     input: import("../shared/contracts/mail-handling").HandlingSave,
   ) => {

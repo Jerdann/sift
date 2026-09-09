@@ -24,6 +24,7 @@ import {
 import { type FormEvent, useEffect, useState } from "react";
 import { MailHandlingPanel } from "./MailHandlingPanel";
 import { FolderSetupPanel } from "./FolderSetupPanel";
+import { groupedProposalItems } from "../core/classification/proposal-groups";
 import { CATEGORY_PRESENTATION } from "../core/classification/mail-classifier";
 import type { ProfileSummary } from "../shared/contracts/profiles";
 import type {
@@ -1958,9 +1959,8 @@ const CleanupPanel = ({
       groups.push({
         key: "shared",
         eyebrow: "SHARED FOLDERS",
-        title: "Folders used by unsplit aliases",
-        detail:
-          "Mail for aliases without a separate folder will move into these folders.",
+        title: "Main folders",
+        detail: "Mail in the only address group will move into these folders.",
         impacts: shared,
       });
     }
@@ -1968,15 +1968,15 @@ const CleanupPanel = ({
     for (const impact of plan.impacts.filter(
       (candidate) => candidate.containerName,
     )) {
-      const key = `${impact.scopeAddress ?? "unknown"}:${impact.containerName}`;
+      const key = impact.containerName!;
       byContainer.set(key, [...(byContainer.get(key) ?? []), impact]);
     }
     for (const [key, impacts] of byContainer) {
       groups.push({
         key,
-        eyebrow: "SEPARATE ALIAS FOLDER",
+        eyebrow: "ADDRESS GROUP",
         title: impacts[0]?.containerName ?? "Dedicated alias",
-        detail: `Mail sent to ${impacts[0]?.scopeAddress ?? "this alias"} will move into this separate folder.`,
+        detail: `Mail for this group's addresses will move into these folders.`,
         impacts,
       });
     }
@@ -4149,35 +4149,7 @@ const IdentityReview = ({
                 </button>
               </div>
               {identity.status === "confirmed" ? (
-                <label className="identity-container">
-                  <input
-                    type="checkbox"
-                    checked={identity.containerEnabled}
-                    onChange={(event) =>
-                      void save(identity, "confirmed", event.target.checked)
-                    }
-                  />
-                  <span>Create a separate folder for this address</span>
-                  {identity.containerEnabled ? (
-                    <input
-                      aria-label={`Folder name for ${identity.address}`}
-                      value={
-                        draftNames[identity.address] ??
-                        identity.containerName ??
-                        ""
-                      }
-                      onChange={(event) =>
-                        setDraftNames((current) => ({
-                          ...current,
-                          [identity.address]: event.target.value
-                            .replace(/[\\/]/g, "")
-                            .slice(0, 64),
-                        }))
-                      }
-                      onBlur={() => void save(identity, "confirmed", true)}
-                    />
-                  ) : null}
-                </label>
+                <small>Assign this address to a group in Organize.</small>
               ) : null}
             </div>
           ))}
@@ -4217,16 +4189,12 @@ const OrganizationProposalEditor = ({
   const [draftPaths, setDraftPaths] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState("");
   const [error, setError] = useState("");
-  const scopes = proposal
-    ? [...new Set(proposal.items.map((item) => item.scopeAddress ?? ""))]
-    : [];
+  const groupedItems = groupedProposalItems(proposal);
+  const scopes = [...new Set(groupedItems.map((item) => item.groupId))];
   const currentScope = scopes.includes(selectedScope)
     ? selectedScope
     : (scopes[0] ?? "");
-  const items =
-    proposal?.items.filter(
-      (item) => (item.scopeAddress ?? "") === currentScope,
-    ) ?? [];
+  const items = groupedItems.filter((item) => item.groupId === currentScope);
   const activeItems = items.filter((item) => item.enabled);
   const activeAssignments =
     proposal?.items.filter((item) => item.enabled).length ?? 0;
@@ -4248,6 +4216,7 @@ const OrganizationProposalEditor = ({
         proposalId: proposal.id,
         revision: proposal.revision,
         itemId: item.id,
+        itemIds: groupedItems.find((row) => row.id === item.id)?.itemIds,
         category: changes.category ?? item.category,
         targetPath:
           changes.targetPath ?? draftPaths[item.id] ?? item.targetPath,
@@ -4316,7 +4285,7 @@ const OrganizationProposalEditor = ({
         <>
           <div className="proposal-revision">
             <span>
-              <b>{items.length}</b> categories shown for this address
+              <b>{items.length}</b> categories shown for this group
             </span>
             <span>
               <b>{activeItems.length}</b> included ·{" "}
@@ -4324,17 +4293,17 @@ const OrganizationProposalEditor = ({
             </span>
             <small>
               {activeAssignments} folder assignments across {scopes.length}{" "}
-              address{scopes.length === 1 ? "" : "es"}
+              group{scopes.length === 1 ? "" : "s"}
             </small>
           </div>
           <div
             className="proposal-scope-tabs"
             role="tablist"
-            aria-label={`Folder choices by address for ${account.label}`}
+            aria-label={`Folder choices by group for ${account.label}`}
           >
             {scopes.map((scope) => {
-              const scopeItems = proposal.items.filter(
-                (item) => (item.scopeAddress ?? "") === scope,
+              const scopeItems = groupedItems.filter(
+                (item) => item.groupId === scope,
               );
               const container = scopeItems.find(
                 (item) => item.containerName,
@@ -4348,12 +4317,18 @@ const OrganizationProposalEditor = ({
                   type="button"
                   onClick={() => setSelectedScope(scope)}
                 >
-                  <strong>{scope || "Shared mail"}</strong>
+                  <strong>
+                    <span
+                      className="group-color-dot"
+                      data-color={scopeItems[0]?.color ?? "blue"}
+                    />
+                    {scopeItems[0]?.groupName}
+                  </strong>
                   <small>
                     {container
                       ? `${container} folder`
                       : scope
-                        ? "Uses shared folders"
+                        ? "No group parent folder"
                         : "No confirmed address match"}{" "}
                     ·{" "}
                     {scopeItems
@@ -6598,7 +6573,7 @@ const AppShell = ({
                 "Organize mail",
                 "Choose what to keep, file, or remove. Create folders after reviewing the plan. No messages move here.",
                 [
-                  "Separate any address that needs its own folders. Copy main choices or set different ones.",
+                  "Group your addresses. Each group gets its own folders and mail rules. Copy settings or choose different ones.",
                   "Pick a mail group, check the examples, and save. Review the folders below; then continue to Spam and Rules.",
                 ],
               )}
@@ -6614,9 +6589,7 @@ const AppShell = ({
                   <section className="workflow-inline-intro">
                     <span>1</span>
                     <div>
-                      <strong>
-                        Confirm aliases and choose separate folders
-                      </strong>
+                      <strong>Confirm which addresses are yours</strong>
                       <small>
                         Choose which confirmed addresses need their own folder.
                         Recipients and copied addresses are not treated as
@@ -6644,7 +6617,6 @@ const AppShell = ({
                       <MailHandlingPanel
                         account={account}
                         identities={identities[account.id] ?? []}
-                        onUpdateIdentity={onUpdateIdentity}
                         onSaved={() => onGenerateProposal(account)}
                       />
                       <OrganizationProposalEditor

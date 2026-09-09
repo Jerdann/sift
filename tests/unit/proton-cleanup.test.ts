@@ -250,6 +250,20 @@ const setup = () => {
     '{"delivered-to":"owner@pm.test","list-id":"store.example"}',
   );
   analyzeMailbox(profile.database, profileId, connection.id);
+  new AccountIdentityRepository(profile.database, profileId).sync(
+    "proton",
+    connection.id,
+    [
+      {
+        address: "second@pm.test",
+        providerEvidence: true,
+        evidence: ["provider_alias"],
+        sentFromCount: 0,
+        deliveredToCount: 0,
+        lastSeenAt: null,
+      },
+    ],
+  );
   new AccountIdentityRepository(profile.database, profileId).update({
     provider: "proton",
     connectionId: connection.id,
@@ -524,7 +538,13 @@ describe("approved Proton cleanup", () => {
       await expect.poll(() => service.get(input)?.state).toBe("failed");
       service.start(input, prepare);
       await expect.poll(() => service.get(input)?.state).toBe("succeeded");
-      expect(created.size).toBe(2);
+      expect([...created].sort()).toEqual([
+        "Primary",
+        "Primary/Money",
+        "Primary/Money/Receipts",
+        "Primary/Security",
+        "Primary/Security/Account changes",
+      ]);
       expect([...created]).toContain("Primary/Security/Account changes");
       expect(
         db.prepare("SELECT COUNT(*) n FROM cleanup_actions").get(),
@@ -536,8 +556,8 @@ describe("approved Proton cleanup", () => {
   });
   it("places portable organization paths beneath the Proton Folders namespace", () => {
     expect(protonFolderPath("Games")).toBe("Folders/Games");
-    expect(protonFolderPath("Joint House Things/Money/Receipts")).toBe(
-      "Folders/Joint House Things/Money/Receipts",
+    expect(protonFolderPath("Shared mail/Money/Receipts")).toBe(
+      "Folders/Shared mail/Money/Receipts",
     );
     expect(protonFolderPath("Folders/Travel")).toBe("Folders/Travel");
   });

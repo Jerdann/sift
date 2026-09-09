@@ -41,7 +41,7 @@ export const handlingFor = (
 export const copyGroupChoices = (
   source: HandlingPreferences,
   target: HandlingPreferences,
-  address: string,
+  address: string | string[],
 ): HandlingPreferences => ({
   ...source,
   categories: Object.fromEntries(
@@ -51,8 +51,10 @@ export const copyGroupChoices = (
     ]),
   ),
   rules:
-    target.rules?.filter(
-      (r) => r.address.toLowerCase() === address.toLowerCase(),
+    target.rules?.filter((r) =>
+      (Array.isArray(address) ? address : [address]).some(
+        (a) => r.address.toLowerCase() === a.toLowerCase(),
+      ),
     ) ?? [],
 });
 export const handlingTarget = (

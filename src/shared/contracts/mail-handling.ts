@@ -35,7 +35,8 @@ export const handlingScopeSchema = z
     provider: accountProviderSchema,
     connectionId: z.uuid(),
     address: z.email().nullable().default(null),
-    level: z.enum(["profile", "account", "alias"]).default("account"),
+    level: z.enum(["profile", "account", "alias", "group"]).default("account"),
+    groupId: z.string().min(1).max(64).optional(),
   })
   .strict();
 export const handlingSaveSchema = handlingScopeSchema.extend({

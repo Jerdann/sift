@@ -77,8 +77,7 @@ const scalar = (
   Number(
     (
       database.prepare(sql).get(...parameters) as
-        | Record<string, unknown>
-        | undefined
+        Record<string, unknown> | undefined
     )?.[key] ?? 0,
   );
 
@@ -465,7 +464,9 @@ export const rebuildLocalIndex = (
       .prepare("DELETE FROM rule_inventories WHERE profile_id = ?")
       .run(context.profile.id);
     context.database
-      .prepare("DELETE FROM account_identities WHERE profile_id = ?")
+      .prepare(
+        "DELETE FROM account_identities WHERE profile_id = ? AND user_status='unreviewed'",
+      )
       .run(context.profile.id);
     context.database.exec(`
       DELETE FROM mailbox_analyses;

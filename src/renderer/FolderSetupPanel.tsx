@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { MailAccountSummary } from "../shared/contracts/accounts";
 import type { OrganizationProposal } from "../shared/contracts/organization";
 import type { JobProgress } from "../core/jobs/job-types";
+import { withParentFolders } from "../core/classification/folder-paths";
 
 export function FolderSetupPanel({
   account,
@@ -33,10 +34,15 @@ export function FolderSetupPanel({
       item.scopeAddress &&
       !["INBOX", "SPAM", "TRASH"].includes(item.targetPath.toUpperCase()),
   )) {
-    const key = item.containerName
-      ? `${item.containerName} · ${item.scopeAddress}`
-      : "Shared folders";
-    groups.set(key, new Set([...(groups.get(key) ?? []), item.targetPath]));
+    const key =
+      proposal.groups?.find((g) => g.addresses.includes(item.scopeAddress!))
+        ?.name ??
+      item.containerName ??
+      "Main";
+    groups.set(
+      key,
+      new Set(withParentFolders([...(groups.get(key) ?? []), item.targetPath])),
+    );
   }
   const paths = [
     ...new Set([...groups.values()].flatMap((group) => [...group])),
@@ -104,7 +110,15 @@ export function FolderSetupPanel({
         </p>
         {[...groups].map(([name, targets]) => (
           <section className="folder-setup-group" key={name}>
-            <h3>{name}</h3>
+            <h3>
+              <span
+                className="group-color-dot"
+                data-color={
+                  proposal.groups?.find((g) => g.name === name)?.color ?? "blue"
+                }
+              />
+              {name}
+            </h3>
             <ul>
               {[...targets].sort().map((path) => (
                 <li key={path}>{path}</li>
@@ -115,6 +129,13 @@ export function FolderSetupPanel({
         {!paths.length ? (
           <p>No custom folders are needed for these choices.</p>
         ) : null}
+        <p>
+          {account.provider === "gmail"
+            ? "Apply each group's color to these Gmail labels and their parent labels, including matching labels that already exist."
+            : account.provider === "proton"
+              ? "Colors shown here are the planned group colors. Set folder colors in Proton Mail; Bridge cannot apply them."
+              : "Group colors are shown in Sift only. Set any Outlook color categories in Outlook; folder colors are not changed by this step."}
+        </p>
         <label className="handling-consent">
           <input
             type="checkbox"
@@ -128,8 +149,11 @@ export function FolderSetupPanel({
             }
           />
           <span>
-            Create or reuse these {paths.length} folders. Do not move or delete
-            any mail.
+            Create or reuse these {paths.length} folders
+            {account.provider === "gmail"
+              ? " and apply the selected group colors"
+              : ""}
+            . Do not move or delete any mail.
           </span>
         </label>
         <div className="handling-actions">

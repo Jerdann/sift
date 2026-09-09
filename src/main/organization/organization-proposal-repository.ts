@@ -6,6 +6,7 @@ import {
   CLASSIFIER_VERSION,
 } from "../../core/classification/mail-classifier";
 import { MailHandlingRepository } from "../settings/mail-handling-repository";
+import { AddressGroupRepository } from "../identity/address-group-repository";
 import {
   handlingTarget,
   handlingFor,
@@ -119,6 +120,10 @@ export class OrganizationProposalRepository {
     const owned = new Map(
       identities.map((identity) => [identity.normalized_address, identity]),
     );
+    const routing = new AddressGroupRepository(
+      this.#database,
+      this.#profileId,
+    ).routing({ provider, connectionId });
     const aggregates = new Map<string, Aggregate>();
     const handling = new MailHandlingRepository(
       this.#database,
@@ -144,8 +149,8 @@ export class OrganizationProposalRepository {
         new Set(matched).size === 1 ? [matched[0]!] : [null];
       for (const address of scopes) {
         const identity = address ? owned.get(address) : undefined;
-        const containerName = identity?.container_enabled
-          ? identity.container_name
+        const containerName = address
+          ? (routing.get(address)?.parent ?? null)
           : null;
         const handlingRuleId = ruleIdFromEvidence(row.evidence_json);
         const key = `${address ?? ""}\0${row.category}\0${handlingRuleId ?? ""}`;
@@ -222,13 +227,14 @@ export class OrganizationProposalRepository {
     // Preserve deliberate corrections, not the prior classifier's guesses.
     const priorEdits = this.#database
       .prepare(
-        `SELECT i.handling_rule_id,i.scope_address,i.source_category,i.category,i.target_path,i.enabled FROM organization_proposal_items i JOIN organization_proposals p ON p.id=i.proposal_id WHERE p.profile_id=? AND p.provider=? AND p.connection_id=? AND p.classifier_version=? AND EXISTS(SELECT 1 FROM organization_corrections c WHERE c.item_id=i.id) ORDER BY p.rowid DESC`,
+        `SELECT i.handling_rule_id,i.scope_address,i.source_category,i.category,i.target_path,i.enabled FROM organization_proposal_items i JOIN organization_proposals p ON p.id=i.proposal_id WHERE p.profile_id=? AND p.provider=? AND p.connection_id=? AND p.classifier_version=? AND p.handling_revision=? AND EXISTS(SELECT 1 FROM organization_corrections c WHERE c.item_id=i.id) ORDER BY p.rowid DESC`,
       )
       .all(
         this.#profileId,
         provider,
         connectionId,
         CLASSIFIER_VERSION,
+        handling.revision(provider, connectionId),
       ) as Array<{
       scope_address: string | null;
       handling_rule_id: string | null;
@@ -333,6 +339,10 @@ export class OrganizationProposalRepository {
       state: proposal.state,
       createdAt: proposal.created_at,
       updatedAt: proposal.updated_at,
+      groups: new AddressGroupRepository(this.#database, this.#profileId).list({
+        provider,
+        connectionId,
+      }),
       requiresRebuild:
         proposal.classifier_version !== CLASSIFIER_VERSION ||
         proposal.handling_revision !==
@@ -359,6 +369,22 @@ export class OrganizationProposalRepository {
 
   edit(rawInput: EditOrganizationProposal): OrganizationProposal {
     const input = editOrganizationProposalSchema.parse(rawInput);
+    if (input.itemIds?.length) {
+      return this.#database.transaction(() => {
+        let revision = input.revision;
+        let result: OrganizationProposal | null = null;
+        for (const id of new Set([input.itemId, ...input.itemIds!])) {
+          result = this.edit({
+            ...input,
+            itemId: id,
+            itemIds: undefined,
+            revision,
+          });
+          revision = result.revision;
+        }
+        return result!;
+      })();
+    }
     const proposal = this.#database
       .prepare(
         "SELECT * FROM organization_proposals WHERE id=? AND profile_id=?",
@@ -368,7 +394,12 @@ export class OrganizationProposalRepository {
     if (
       !proposal ||
       proposal.state !== "draft" ||
-      proposal.revision !== input.revision
+      proposal.revision !== input.revision ||
+      proposal.handling_revision !==
+        new MailHandlingRepository(this.#database, this.#profileId).revision(
+          proposal.provider as AccountProvider,
+          String(proposal.connection_id),
+        )
     )
       throw new Error("organization_proposal_changed");
     const item = this.#database
@@ -378,6 +409,18 @@ export class OrganizationProposalRepository {
       .get(input.itemId, input.proposalId) as
       Record<string, unknown> | undefined;
     if (!item) throw new Error("organization_proposal_item_not_found");
+    const parent = new AddressGroupRepository(this.#database, this.#profileId)
+      .routing({
+        provider: proposal.provider as AccountProvider,
+        connectionId: String(proposal.connection_id),
+      })
+      .get(String(item.scope_address))?.parent;
+    if (
+      parent &&
+      !["INBOX", "SPAM", "TRASH"].includes(input.targetPath.toUpperCase()) &&
+      !input.targetPath.startsWith(parent + "/")
+    )
+      throw new Error("group_destination_required");
     const now = this.#now();
     this.#database.transaction(() => {
       this.#database

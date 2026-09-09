@@ -63,11 +63,34 @@ export class GmailRuleReconciliationRunner {
       this.#fetchPort,
     );
     const state = await this.#state(token);
-    return async (targetPath: string) => {
-      await this.#ensureLabel(token, state, {
+    return async (targetPath: string, color?: string) => {
+      const labelId = await this.#ensureLabel(token, state, {
         targetPath,
         spam: false,
       } as DesiredManagedRule);
+      if (color) {
+        const updated = await api<{
+          id: string;
+          color?: { backgroundColor: string; textColor: string };
+        }>(
+          this.#fetchPort,
+          token,
+          `https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(labelId)}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({
+              color: {
+                backgroundColor: color,
+                textColor: ["#e07798", "#149e60", "#f2c960"].includes(color)
+                  ? "#000000"
+                  : "#ffffff",
+              },
+            }),
+          },
+        );
+        if (updated.id !== labelId || updated.color?.backgroundColor !== color)
+          throw new Error("label_color_verification_failed");
+      }
       const verified = await this.#state(token);
       if (!verified.labelIdsByName.has(targetPath))
         throw new Error("folder_verification_failed");

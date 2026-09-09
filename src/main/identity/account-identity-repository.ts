@@ -8,6 +8,7 @@ import {
   accountIdentityUpdateInputSchema,
 } from "../../shared/contracts/accounts";
 import type { OwnedIdentityEvidence } from "./ownership-evidence";
+import { AddressGroupRepository } from "./address-group-repository";
 
 interface IdentityRow {
   id: string;
@@ -111,6 +112,14 @@ export class AccountIdentityRepository {
   update(rawInput: AccountIdentityUpdateInput): AccountIdentitySummary {
     const input = accountIdentityUpdateInputSchema.parse(rawInput);
     this.#assertConnection(input.provider, input.connectionId);
+    if (
+      this.#database
+        .prepare(
+          "SELECT 1 FROM jobs WHERE profile_id=? AND state IN ('pending','running') LIMIT 1",
+        )
+        .get(this.#profileId)
+    )
+      throw new Error("mail_job_running");
     const address = input.address.toLowerCase();
     const row = this.#database
       .prepare(
@@ -120,32 +129,57 @@ export class AccountIdentityRepository {
     `,
       )
       .get(this.#profileId, input.provider, input.connectionId, address) as
-      | { id: string }
-      | undefined;
+      { id: string } | undefined;
     if (!row) throw new Error("account_identity_not_found");
-    const containerEnabled =
-      input.status === "confirmed" && input.containerEnabled;
-    this.#database
-      .prepare(
-        `
+    return this.#database.transaction(() => {
+      const containerEnabled =
+        input.status === "confirmed" && input.containerEnabled;
+      this.#database
+        .prepare(
+          `
       UPDATE account_identities SET user_status=?,container_enabled=?,container_name=?,updated_at=?
       WHERE id=? AND profile_id=? AND provider=? AND connection_id=?
     `,
-      )
-      .run(
-        input.status,
-        containerEnabled ? 1 : 0,
-        containerEnabled ? input.containerName : null,
-        this.#now(),
-        row.id,
+        )
+        .run(
+          input.status,
+          containerEnabled ? 1 : 0,
+          containerEnabled ? input.containerName : null,
+          this.#now(),
+          row.id,
+          this.#profileId,
+          input.provider,
+          input.connectionId,
+        );
+      const groups = new AddressGroupRepository(
+        this.#database,
         this.#profileId,
-        input.provider,
-        input.connectionId,
       );
-    const updated = this.#database
-      .prepare("SELECT * FROM account_identities WHERE id=?")
-      .get(row.id) as IdentityRow;
-    return this.#summary(updated);
+      const state = groups.get(input);
+      const target = containerEnabled
+        ? (state.groups.find((g) => g.name === input.containerName) ?? {
+            id: this.#createId(),
+            name: input.containerName!,
+            color: "blue" as const,
+            addresses: [],
+          })
+        : state.groups.find((g) => g.id === "main")!;
+      if (!state.groups.some((g) => g.id === target.id))
+        state.groups.push(target);
+      for (const g of state.groups)
+        g.addresses = g.addresses.filter((a) => a !== address);
+      if (input.status === "confirmed") target.addresses.push(address);
+      groups.save({
+        revision: state.revision,
+        groups: state.groups,
+        provider: input.provider,
+        connectionId: input.connectionId,
+      });
+      const updated = this.#database
+        .prepare("SELECT * FROM account_identities WHERE id=?")
+        .get(row.id) as IdentityRow;
+      return this.#summary(updated);
+    })();
   }
 
   #assertConnection(provider: AccountProvider, connectionId: string): void {

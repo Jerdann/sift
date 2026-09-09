@@ -5,6 +5,8 @@ import { OrganizationProposalRepository } from "./organization-proposal-reposito
 import { MailHandlingRepository } from "../settings/mail-handling-repository";
 import { handlingFor } from "../../core/classification/mail-handling";
 import { JobRepository } from "../jobs/job-repository";
+import { GROUP_COLORS } from "../../shared/contracts/address-groups";
+import { withParentFolders } from "../../core/classification/folder-paths";
 
 const active = new Set<string>();
 export class FolderSetup {
@@ -58,8 +60,28 @@ export class FolderSetup {
       )
     )
       throw new Error("folder_path_invalid");
+    const colors = new Map<string, string>();
+    for (const item of proposal.items.filter(
+      (i) => i.enabled && paths.includes(i.targetPath),
+    )) {
+      const group = proposal.groups?.find((g) =>
+        g.addresses.includes(item.scopeAddress!),
+      );
+      if (group) {
+        const parts = item.targetPath.split("/");
+        for (let n = 1; n <= parts.length; n++) {
+          const path = parts.slice(0, n).join("/");
+          if (
+            colors.has(path) &&
+            colors.get(path) !== GROUP_COLORS[group.color].hex
+          )
+            throw new Error("group_color_conflict");
+          colors.set(path, GROUP_COLORS[group.color].hex);
+        }
+      }
+    }
     const key = `folder-setup:${proposal.id}:${proposal.revision}:${handling.revision(input.provider, input.connectionId)}`;
-    return { paths, key };
+    return { paths: withParentFolders(paths), key, colors };
   }
   get(input: CreateOrganizationFolders) {
     const { key } = this.plan(input);
@@ -71,11 +93,11 @@ export class FolderSetup {
   start(
     input: CreateOrganizationFolders,
     prepare: () => Promise<{
-      ensure(path: string): Promise<void>;
+      ensure(path: string, color?: string): Promise<void>;
       close(): Promise<void>;
     }>,
   ) {
-    const { paths, key } = this.plan(input);
+    const { paths, key, colors } = this.plan(input);
     if (active.has(key)) return this.get(input)!;
     if (
       this.db
@@ -124,7 +146,11 @@ export class FolderSetup {
           const item = this.jobs.claimNextPending(job.id);
           if (!item) break;
           try {
-            await client.ensure(byKey.get(item.itemKey)!);
+            const path = byKey.get(item.itemKey)!;
+            await client.ensure(
+              path,
+              input.provider === "gmail" ? colors.get(path) : undefined,
+            );
             this.jobs.transitionItem(item.id, "succeeded", {
               result: { operation: "provider-rule-action", verified: true },
             });

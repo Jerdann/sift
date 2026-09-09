@@ -4,15 +4,17 @@ Sift proposes actions using the message's purpose, not just the company that sen
 
 ## Controls
 
-In Organize, first choose Main folders or a separate address. Then choose a mail group and review examples from the saved scan. Main-folder previews exclude separate addresses. Account choices override profile defaults; individual-address choices override the account. Advanced defaults and individual-address settings are available below the editor.
+In Organize, first group your confirmed receiving addresses. Select a group, then choose a message type and review examples from the saved scan. Each group's preview excludes the others. Group choices override account defaults. Account defaults override profile defaults. Existing individual-address choices are retained during upgrade until group choices are saved.
 
-## Separate folder trees
+## Address groups
 
-**Separate email addresses** stays visible after addresses are confirmed. Choose an address, then **Create separate tree**. Name its parent folder and select its tab to edit only that address's mail. Main and separate-tree future rules exclude the other confirmed addresses; mail with multiple possible owners stays out of automatic routing.
+**Group your email addresses** stays visible after addresses are confirmed. Add a group, name it, choose its color, and check the addresses that belong in it. Checking an address moves it from its previous group. Each confirmed address belongs to one group within that connected mailbox. Groups do not combine separate provider accounts.
 
-**Copy main choices** copies the current main draft or saved group choices and folder detail into the selected address's draft. It preserves that address's sender rules and never copies a sender rule for a different recipient. Saving makes this an independent copy; later changes to the main tree do not overwrite it. An address with no saved choices inherits the main choices until it is customized.
+With multiple populated groups, each gets its own named parent folder. With one populated group, category folders go directly in the mailbox without a group parent. Empty groups create no folders. Group colors identify addresses, not notification levels. Gmail applies colors to the approved parent and child labels, including reused labels. Proton Bridge cannot set folder colors; set the color and subfolder inheritance in Proton Mail. The Outlook connection does not set folder colors or automatically apply color categories.
 
-**Use main folders** changes the proposed destinations but keeps the address's handling choices. Those choices remain editable under **Other account and address settings**. No existing folder is renamed or removed by these controls; review and approve the resulting plan separately.
+**Copy settings from** uses the source group's draft, or its saved choices if it has no draft. Select one or more target groups and click **Copy to selected groups**. Mail actions and folder detail are copied; names, colors, membership, and sender-specific rules are not. **Save all group choices and rebuild** saves the group drafts together. Later changes to the source never overwrite the copies.
+
+Removing a group returns its addresses to the main group. Address-specific sender rules follow those addresses. No existing folder is renamed or removed and no mail moves when groups are saved. Review and approve the resulting plan separately. Future filters continue to use exact receiving addresses; mail with several possible owners remains held for review, even when those addresses share a group.
 
 ## Group controls
 
@@ -36,7 +38,7 @@ After saving, existing-message actions still require approval in Rules. Future s
 
 ## Saving and retrying
 
-Control changes are saved as local drafts, without changing mail. Drafts survive navigation and restarting. **Use this rule** must be clicked to add a sender rule to the draft. **Save choices and rebuild proposal** saves the choices first, then rebuilds the local folder plan. If rebuilding fails, retry without entering choices again. Real unfinished mail jobs still block applying new choices, but not saving a draft. Old orphaned mutation jobs with no action plan are stopped on upgrade while successful results are retained.
+Mail-handling control changes are saved as local drafts, without changing mail. Those drafts survive navigation and restarting. **Use this rule** must be clicked to add a sender rule to the draft. **Save all group choices and rebuild** saves the handling drafts together, then rebuilds the local folder plan. If rebuilding fails, retry without entering choices again. Group names, colors, and membership require **Save groups** before leaving the page. Real unfinished mail jobs block applying new choices or group assignments, but not saving a handling draft. Old incompatible forward plans stop on upgrade while successful results and undo work are retained.
 
 ## Matching logic
 

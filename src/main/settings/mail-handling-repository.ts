@@ -1,5 +1,11 @@
 import type BetterSqlite3 from "better-sqlite3";
 import { createHash } from "node:crypto";
+import { AddressGroupRepository } from "../identity/address-group-repository";
+import {
+  copyAddressGroupChoicesSchema,
+  type CopyAddressGroupChoices,
+} from "../../shared/contracts/address-groups";
+import { copyGroupChoices } from "../../core/classification/mail-handling";
 import type { AccountProvider } from "../../shared/contracts/accounts";
 import {
   handlingPreferencesSchema,
@@ -18,7 +24,27 @@ export class MailHandlingRepository {
   private key(scope: HandlingScope): string {
     return scope.level === "profile"
       ? "*"
-      : `${scope.provider}:${scope.connectionId}:${scope.level === "alias" ? (scope.address?.toLowerCase() ?? "") : "*"}`;
+      : `${scope.provider}:${scope.connectionId}:${scope.level === "group" ? `group:${scope.groupId}` : scope.level === "alias" ? (scope.address?.toLowerCase() ?? "") : "*"}`;
+  }
+  private groupId(
+    provider: AccountProvider,
+    connectionId: string,
+    address: string | null,
+  ) {
+    return address
+      ? ((
+          this.db
+            .prepare(
+              "SELECT group_id FROM account_identities WHERE profile_id=? AND provider=? AND connection_id=? AND normalized_address=? AND user_status='confirmed'",
+            )
+            .get(
+              this.profileId,
+              provider,
+              connectionId,
+              address.toLowerCase(),
+            ) as { group_id: string } | undefined
+        )?.group_id ?? "main")
+      : "main";
   }
   private read(key: string): HandlingPreferences | null {
     const row = this.db
@@ -41,7 +67,12 @@ export class MailHandlingRepository {
     const alias = address
       ? this.read(`${provider}:${connectionId}:${address.toLowerCase()}`)
       : null;
-    const resolved = [account, alias].reduce<HandlingPreferences>(
+    const group = address
+      ? this.read(
+          `${provider}:${connectionId}:group:${this.groupId(provider, connectionId, address)}`,
+        )
+      : null;
+    const resolved = [account, alias, group].reduce<HandlingPreferences>(
       (current, next) =>
         next
           ? {
@@ -77,6 +108,15 @@ export class MailHandlingRepository {
         : address
           ? this.read(`${input.provider}:${input.connectionId}:${address}`)
           : null,
+      input.level === "group" &&
+      input.groupId ===
+        this.groupId(input.provider, input.connectionId, address)
+        ? input.preferences
+        : address
+          ? this.read(
+              `${input.provider}:${input.connectionId}:group:${this.groupId(input.provider, input.connectionId, address)}`,
+            )
+          : null,
     ];
     return layers.reduce<HandlingPreferences>(
       (current, next) =>
@@ -96,7 +136,13 @@ export class MailHandlingRepository {
         "SELECT scope_key,revision FROM mail_handling_preferences WHERE profile_id=? AND (scope_key='*' OR scope_key LIKE ?) ORDER BY scope_key",
       )
       .all(this.profileId, `${provider}:${connectionId}:%`);
-    return createHash("sha256").update(JSON.stringify(rows)).digest("hex");
+    const groups = new AddressGroupRepository(this.db, this.profileId).get({
+      provider,
+      connectionId,
+    });
+    return createHash("sha256")
+      .update(JSON.stringify([rows, groups.revision]))
+      .digest("hex");
   }
   stampPlan(
     table:
@@ -148,6 +194,13 @@ export class MailHandlingRepository {
         !this.aliases(scope).includes(scope.address.toLowerCase()))
     )
       throw new Error("confirmed_alias_required");
+    if (
+      scope.level === "group" &&
+      !new AddressGroupRepository(this.db, this.profileId)
+        .list(scope)
+        .some((g) => g.id === scope.groupId)
+    )
+      throw new Error("address_group_required");
   }
   aliases(scope: Pick<HandlingScope, "provider" | "connectionId">): string[] {
     return (
@@ -162,15 +215,36 @@ export class MailHandlingRepository {
   }
   get(scope: HandlingScope): HandlingState {
     this.assertScope(scope);
+    const group =
+      scope.level === "group"
+        ? new AddressGroupRepository(this.db, this.profileId)
+            .list(scope)
+            .find((g) => g.id === scope.groupId)!
+        : null;
+    const groupPrefs = group
+      ? (this.read(this.key(scope)) ??
+        this.resolve(
+          scope.provider,
+          scope.connectionId,
+          group.addresses[0] ?? null,
+        ))
+      : null;
     return {
       preferences:
-        scope.level === "profile"
-          ? (this.read("*") ?? handlingPreferencesSchema.parse({}))
-          : this.resolve(
-              scope.provider,
-              scope.connectionId,
-              scope.level === "alias" ? scope.address : null,
-            ),
+        groupPrefs && group
+          ? {
+              ...groupPrefs,
+              rules: groupPrefs.rules?.filter((r) =>
+                group.addresses.includes(r.address),
+              ),
+            }
+          : scope.level === "profile"
+            ? (this.read("*") ?? handlingPreferencesSchema.parse({}))
+            : this.resolve(
+                scope.provider,
+                scope.connectionId,
+                scope.level === "alias" ? scope.address : null,
+              ),
       inherited: this.read(this.key(scope)) === null,
       revision: this.revision(scope.provider, scope.connectionId),
       aliases: this.aliases(scope),
@@ -187,6 +261,60 @@ export class MailHandlingRepository {
     return row
       ? handlingPreferencesSchema.parse(JSON.parse(row.preferences_json))
       : null;
+  }
+  copyGroups(raw: CopyAddressGroupChoices): void {
+    const input = copyAddressGroupChoicesSchema.parse(raw);
+    const state = new AddressGroupRepository(this.db, this.profileId).get(
+      input,
+    );
+    if (state.revision !== input.revision)
+      throw new Error("address_groups_changed");
+    const scope = (id: string): HandlingScope => ({
+      provider: input.provider,
+      connectionId: input.connectionId,
+      level: "group",
+      groupId: id,
+      address: null,
+    });
+    const source = this.get(scope(input.sourceId));
+    this.db.transaction(() => {
+      for (const id of new Set(input.targetIds)) {
+        if (id === input.sourceId) continue;
+        const targetGroup = state.groups.find((g) => g.id === id);
+        if (!targetGroup) throw new Error("address_group_required");
+        const target = this.get(scope(id));
+        this.saveDraft({
+          ...scope(id),
+          preferences: copyGroupChoices(
+            source.draft ?? source.preferences,
+            target.draft ?? target.preferences,
+            targetGroup.addresses,
+          ),
+        });
+      }
+    })();
+  }
+  saveGroupDrafts(raw: HandlingSave): HandlingState {
+    const input = handlingSaveSchema.parse(raw);
+    this.assertScope(input);
+    return this.db.transaction(() => {
+      this.saveDraft(input);
+      for (const group of new AddressGroupRepository(
+        this.db,
+        this.profileId,
+      ).list(input)) {
+        const scope: HandlingScope = {
+          provider: input.provider,
+          connectionId: input.connectionId,
+          level: "group",
+          groupId: group.id,
+          address: null,
+        };
+        const draft = this.readDraft(scope);
+        if (draft) this.save({ ...scope, preferences: draft });
+      }
+      return this.get(input);
+    })();
   }
   saveDraft(raw: HandlingSave): void {
     const input = handlingSaveSchema.parse(raw);
@@ -225,6 +353,14 @@ export class MailHandlingRepository {
       )
         throw new Error("sender_rule_invalid");
       seen.add(key);
+      if (
+        input.level === "group" &&
+        !new AddressGroupRepository(this.db, this.profileId)
+          .list(input)
+          .find((g) => g.id === input.groupId)
+          ?.addresses.includes(rule.address)
+      )
+        throw new Error("sender_rule_outside_group");
     }
   }
   save(raw: HandlingSave): HandlingState {

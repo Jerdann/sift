@@ -17,6 +17,7 @@ import {
 } from "../../shared/contracts/mail-handling";
 import type { MailCategory } from "../../shared/contracts/analysis";
 import { MailHandlingRepository } from "./mail-handling-repository";
+import { AddressGroupRepository } from "../identity/address-group-repository";
 import {
   applySenderHandling,
   preferencesForEvidence,
@@ -84,6 +85,7 @@ export const previewMailHandling = (
     container_name: string | null;
   }>;
   const owned = new Map(identities.map((i) => [i.normalized_address, i]));
+  const routing = new AddressGroupRepository(db, profileId).routing(input);
   const inventory = db
     .prepare(
       "SELECT container_names_json FROM rule_inventories WHERE profile_id=? AND provider=? AND connection_id=? ORDER BY captured_at DESC,rowid DESC LIMIT 1",
@@ -146,12 +148,17 @@ export const previewMailHandling = (
       .map((a) => a.toLowerCase())
       .filter((a) => owned.has(a));
     const address = new Set(addresses).size === 1 ? addresses[0]! : null;
+    if (
+      input.level === "group" &&
+      (!address || routing.get(address)?.id !== input.groupId)
+    )
+      continue;
     if (input.level === "alias" && address !== input.address!.toLowerCase())
       continue;
     if (
       input.excludeSeparated &&
       input.level === "account" &&
-      addresses.some((a) => owned.get(a)?.container_enabled)
+      addresses.some((a) => routing.get(a)?.id !== "main")
     )
       continue;
     const identity = address ? owned.get(address) : null;
@@ -212,7 +219,7 @@ export const previewMailHandling = (
         ? handlingTarget(
             prefs,
             c.category,
-            identity?.container_enabled ? identity.container_name : null,
+            address ? (routing.get(address)?.parent ?? null) : null,
           )
         : sourceName(row.source);
     const expired =

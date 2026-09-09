@@ -73,14 +73,14 @@ describe("Proton mutation folder namespace", () => {
     const client = new ImapFlowMutationClient(imap);
 
     await expect(
-      client.prepareTarget("Joint House Things/Money/Receipts", false),
-    ).resolves.toBe("Folders/Joint House Things/Money/Receipts");
+      client.prepareTarget("Shared mail/Money/Receipts", false),
+    ).resolves.toBe("Folders/Shared mail/Money/Receipts");
     expect(
       mailboxCreate.mock.calls.map(([providerPath]) => providerPath),
     ).toEqual([
-      "Folders/Joint House Things",
-      "Folders/Joint House Things/Money",
-      "Folders/Joint House Things/Money/Receipts",
+      "Folders/Shared mail",
+      "Folders/Shared mail/Money",
+      "Folders/Shared mail/Money/Receipts",
     ]);
   });
 

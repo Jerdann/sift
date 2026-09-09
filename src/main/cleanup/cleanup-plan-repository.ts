@@ -572,11 +572,10 @@ export class CleanupPlanRepository {
       .prepare(
         `
       SELECT
-        CASE WHEN container_name IS NULL THEN NULL ELSE scope_address END AS scope_address,
+        CASE WHEN container_name IS NULL OR COUNT(DISTINCT scope_address)>1 THEN NULL ELSE MIN(scope_address) END AS scope_address,
         container_name,category,target_path,action_kind,mark_read,COUNT(*) AS message_count
       FROM cleanup_actions WHERE plan_id = ?
       GROUP BY
-        CASE WHEN container_name IS NULL THEN NULL ELSE scope_address END,
         container_name,category,target_path,action_kind,mark_read
       ORDER BY CASE WHEN container_name IS NULL THEN 0 ELSE 1 END,container_name,message_count DESC
     `,

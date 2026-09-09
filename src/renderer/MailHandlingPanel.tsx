@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type {
   MailAccountSummary,
   AccountIdentitySummary,
-  AccountIdentityUpdateInput,
 } from "../shared/contracts/accounts";
 import { OrganizationTrees } from "./OrganizationTrees";
+import type { AddressGroupsState } from "../shared/contracts/address-groups";
 import type { MailCategory } from "../shared/contracts/analysis";
 import type {
   HandlingPreferences,
@@ -17,7 +17,6 @@ import { CATEGORY_PRESENTATION as labels } from "../core/classification/mail-cla
 import {
   defaultHandling,
   handlingFor,
-  copyGroupChoices,
 } from "../core/classification/mail-handling";
 import { handlingGroups } from "../core/classification/handling-groups";
 import {
@@ -43,14 +42,45 @@ export function MailHandlingPanel({
   account,
   onSaved,
   identities,
-  onUpdateIdentity,
 }: {
   account: MailAccountSummary;
   onSaved: () => Promise<unknown>;
   identities: AccountIdentitySummary[];
-  onUpdateIdentity: (input: AccountIdentityUpdateInput) => Promise<void>;
 }) {
-  const [scopeValue, setScopeValue] = useState("account");
+  const [scopeValue, setScopeValue] = useState("group:main");
+  const [addressGroups, setAddressGroups] = useState<AddressGroupsState | null>(
+      null,
+    ),
+    [groupsDirty, setGroupsDirty] = useState(false);
+  const [copySource, setCopySource] = useState("main"),
+    [copyTargets, setCopyTargets] = useState<string[]>([]);
+  useEffect(() => {
+    if (!addressGroups) return;
+    const ids = new Set(addressGroups.groups.map((g) => g.id));
+    setCopySource((id) => (ids.has(id) ? id : "main"));
+    setCopyTargets((targets) => targets.filter((id) => ids.has(id)));
+  }, [addressGroups?.revision]);
+  const [scopeReload, setScopeReload] = useState(0);
+  useEffect(() => {
+    let canceled = false;
+    void window.emailOrganizer
+      .getAddressGroups({
+        provider: account.provider,
+        connectionId: account.id,
+      })
+      .then((s) => {
+        if (!canceled) setAddressGroups(s);
+      })
+      .catch(() => {
+        if (!canceled)
+          setError(
+            "Could not load address groups. Reopen this page to try again.",
+          );
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [account.id, JSON.stringify(identities)]);
   const [inherited, setInherited] = useState(false),
     [aliases, setAliases] = useState<string[]>([]);
   const [preferences, setPreferences] = useState<HandlingPreferences>({
@@ -84,12 +114,20 @@ export function MailHandlingPanel({
   const scope: HandlingScope = {
     provider: account.provider,
     connectionId: account.id,
-    level:
-      scopeValue === "profile" || scopeValue === "account"
+    level: scopeValue.startsWith("group:")
+      ? "group"
+      : scopeValue === "profile" || scopeValue === "account"
         ? scopeValue
         : "alias",
     address:
-      scopeValue === "profile" || scopeValue === "account" ? null : scopeValue,
+      scopeValue.startsWith("group:") ||
+      scopeValue === "profile" ||
+      scopeValue === "account"
+        ? null
+        : scopeValue,
+    ...(scopeValue.startsWith("group:")
+      ? { groupId: scopeValue.slice(6) }
+      : {}),
   };
   const scopeKey = JSON.stringify(scope),
     activeScope = useRef(scopeKey);
@@ -138,6 +176,7 @@ export function MailHandlingPanel({
   const previewKey = JSON.stringify({
     ...input,
     refresh,
+    groupRevision: addressGroups?.revision,
     trees: identities.map((i) => [
       i.address,
       i.containerEnabled,
@@ -165,7 +204,6 @@ export function MailHandlingPanel({
     setLoaded(false);
     setPreviewResult(null);
     setError("");
-    setNotice("");
     setSenderRule(null);
     setPage(0);
     setSenderPage(0);
@@ -188,7 +226,7 @@ export function MailHandlingPanel({
     return () => {
       canceled = true;
     };
-  }, [scopeKey]);
+  }, [scopeKey, scopeReload]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -343,8 +381,8 @@ export function MailHandlingPanel({
   const ruleInvalid = Boolean(
     senderRule && /[\r\n*?]/.test(senderRule.subjectContains ?? ""),
   );
-  const selectedTree = identities.find(
-    (i) => i.address === scope.address && i.containerEnabled,
+  const selectedTree = addressGroups?.groups.find(
+    (g) => g.id === scope.groupId,
   );
   const visibleGroups = groups
     .filter(
@@ -355,37 +393,51 @@ export function MailHandlingPanel({
         counts(b.categories) - counts(a.categories) ||
         a.label.localeCompare(b.label),
     );
-  const copyMain = async () => {
+  const copySelected = async () => {
     setSaving(true);
     setError("");
     try {
       await draftQueue.current;
-      const main = await window.emailOrganizer.getMailHandling({
-        ...scope,
-        level: "account",
-        address: null,
+      if (!addressGroups) return;
+      await window.emailOrganizer.copyAddressGroupChoices({
+        provider: account.provider,
+        connectionId: account.id,
+        revision: addressGroups.revision,
+        sourceId: copySource,
+        targetIds: copyTargets,
       });
-      const source = main.draft ?? main.preferences;
-      change(copyGroupChoices(source, preferences, scope.address!));
+      setScopeReload((n) => n + 1);
+      setCopyTargets([]);
       setNotice(
-        "Main group choices copied into this draft. Sender rules were not copied. Save to use these choices.",
+        "Choices copied into the selected groups' drafts. Save all group choices to rebuild the proposal. Sender rules were not copied.",
       );
     } catch {
-      setError("Could not copy main choices. Your current draft is unchanged.");
+      setError(
+        "Could not copy choices. Your existing drafts are unchanged. Reload the group list and try again.",
+      );
     } finally {
       setSaving(false);
     }
   };
   return (
     <>
-      <OrganizationTrees
-        account={account}
-        identities={identities}
-        selected={scopeValue}
-        disabled={saving || Boolean(senderRule)}
-        onSelect={setScopeValue}
-        onUpdate={onUpdateIdentity}
-      />
+      {addressGroups ? (
+        <OrganizationTrees
+          account={account}
+          state={addressGroups}
+          selected={scope.groupId ?? "main"}
+          disabled={saving || Boolean(senderRule)}
+          onSelect={(id) => setScopeValue(`group:${id}`)}
+          onDirty={setGroupsDirty}
+          onSaved={async (state) => {
+            setAddressGroups(state);
+            setGroupsDirty(false);
+            setScopeReload((n) => n + 1);
+            setRefresh((n) => n + 1);
+            await rebuild();
+          }}
+        />
+      ) : null}
       <section
         className="readiness-panel mail-handling"
         aria-labelledby={"handling-" + account.id}
@@ -399,7 +451,7 @@ export function MailHandlingPanel({
               {scope.level === "profile"
                 ? "Default mail choices for all accounts"
                 : selectedTree
-                  ? `${selectedTree.containerName}: mail rules`
+                  ? `${selectedTree.name}: mail rules`
                   : scope.address
                     ? `${scope.address}: mail rules`
                     : "Main folders: mail rules"}
@@ -411,13 +463,21 @@ export function MailHandlingPanel({
             {scope.level === "profile"
               ? "Saved account and address choices override these defaults."
               : selectedTree
-                ? `Only mail to ${selectedTree.address}. Main-folder filters exclude this address.`
+                ? `${selectedTree.addresses.length} addresses in this group. Other groups are excluded.`
                 : scope.address
                   ? `Only mail to ${scope.address}. This address uses the main folders.`
                   : "Mail for separate trees is excluded from this preview. Address-specific choices take priority."}{" "}
             Nothing moves until you approve a plan.
           </p>
-          <fieldset disabled={!loaded || saving} className="handling-general">
+          {groupsDirty ? (
+            <p role="status">
+              Save or cancel your group edits before changing mail rules.
+            </p>
+          ) : null}
+          <fieldset
+            disabled={!loaded || saving || groupsDirty}
+            className="handling-general"
+          >
             <legend>Folder detail</legend>
             <div>
               <div
@@ -440,24 +500,68 @@ export function MailHandlingPanel({
                 ))}
               </div>
             </div>
-            {scope.level === "alias" ? (
-              <div className="handling-copy">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => void copyMain()}
-                >
-                  Copy main choices
-                </button>
-                <small>
-                  {inherited
-                    ? "Using main choices until you save your own."
-                    : "This tree has its own choices."}
-                </small>
-              </div>
-            ) : null}
           </fieldset>
-          <div className="handling-workspace">
+          {scope.level === "group" &&
+          addressGroups &&
+          addressGroups.groups.length > 1 ? (
+            <fieldset
+              className="group-copy-choices"
+              disabled={!loaded || saving || groupsDirty || Boolean(senderRule)}
+            >
+              <legend>Copy settings between groups</legend>
+              <label>
+                Copy settings from
+                <select
+                  aria-label="Copy settings from"
+                  value={copySource}
+                  onChange={(e) => {
+                    setCopySource(e.target.value);
+                    setCopyTargets([]);
+                  }}
+                >
+                  {addressGroups.groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div role="group" aria-label="Copy settings to">
+                <span>Apply to</span>
+                {addressGroups.groups
+                  .filter((g) => g.id !== copySource)
+                  .map((g) => (
+                    <label key={g.id}>
+                      <input
+                        type="checkbox"
+                        checked={copyTargets.includes(g.id)}
+                        onChange={(e) =>
+                          setCopyTargets(
+                            e.target.checked
+                              ? [...copyTargets, g.id]
+                              : copyTargets.filter((id) => id !== g.id),
+                          )
+                        }
+                      />
+                      {g.name}
+                    </label>
+                  ))}
+              </div>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={!copyTargets.length}
+                onClick={() => void copySelected()}
+              >
+                Copy to selected groups
+              </button>
+              <small>
+                Copies mail actions and folder detail. Names, colors, addresses,
+                and sender-specific rules stay separate.
+              </small>
+            </fieldset>
+          ) : null}
+          <div className="handling-workspace" inert={groupsDirty}>
             <div className="handling-group-picker">
               <nav className="handling-group-list" aria-label="Mail groups">
                 {visibleGroups.map((g) => (
@@ -1008,10 +1112,20 @@ export function MailHandlingPanel({
           <div className="handling-actions">
             <button
               className="primary-button compact"
-              disabled={!loaded || saving || !preview || Boolean(senderRule)}
+              disabled={
+                !loaded ||
+                saving ||
+                groupsDirty ||
+                !preview ||
+                Boolean(senderRule)
+              }
               onClick={() => void save()}
             >
-              {saving ? "Saving…" : "Save choices and rebuild proposal"}
+              {saving
+                ? "Saving…"
+                : scope.level === "group"
+                  ? "Save all group choices and rebuild"
+                  : "Save choices and rebuild proposal"}
             </button>
             {rebuildFailed ? (
               <button
@@ -1039,8 +1153,8 @@ export function MailHandlingPanel({
               </button>
             ) : null}
           </div>
-          <details className="handling-advanced">
-            <summary>Other account and address settings</summary>
+          <details className="handling-advanced" inert={groupsDirty}>
+            <summary>Account defaults</summary>
             <label>
               Apply choices to
               <select
@@ -1049,18 +1163,18 @@ export function MailHandlingPanel({
                 disabled={saving || Boolean(senderRule)}
                 onChange={(e) => setScopeValue(e.target.value)}
               >
-                <option value="account">Main folders</option>
-                <option value="profile">All accounts — defaults</option>
-                {aliases.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
+                {addressGroups?.groups.map((g) => (
+                  <option key={g.id} value={`group:${g.id}`}>
+                    {g.name}
                   </option>
                 ))}
+                <option value="account">Defaults for this account</option>
+                <option value="profile">All accounts — defaults</option>
               </select>
             </label>
             <small>
-              Use this for an address that shares the main folders, or for
-              defaults across accounts.
+              Saved group choices override defaults. Edit a group's choices
+              above.
             </small>
           </details>
         </div>

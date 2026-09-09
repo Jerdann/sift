@@ -4,6 +4,28 @@ All notable changes to Sift are documented here. Releases follow [Semantic Versi
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-09
+
+### Added
+
+- Address groups within each connected Proton, Gmail, or Outlook mailbox. Select any confirmed addresses, give the group a name and color, and edit its folder and mail-handling choices.
+- Copy settings from any group to several others at once. Copies stay independent; group names, colors, addresses, and sender-specific rules are not copied.
+- Group colors in folder reviews. Gmail can apply these colors to approved labels and parents. Proton Bridge and the Outlook connection cannot set folder colors; the app explains the manual options.
+
+### Fixed
+
+- Folder reviews combine identical destinations within a group instead of repeating a row for each address. Editing a combined row updates its underlying items together.
+- Sender-specific choices stay with their receiving address when it moves between groups. Local handling drafts survive failed saves and group changes.
+- Group changes invalidate old proposals and cannot occur during an unfinished mail job. Clearing the saved scan preserves confirmed addresses and group assignments.
+- Folder approval lists and counts both parent folders and message destinations.
+
+### Upgrade notes
+
+- Existing address splits become groups. Two or more populated groups receive named parent folders; one populated group uses category folders directly.
+- Updating does not move messages, rename or remove existing folders, or install filters. Review the rebuilt folder plan and then the existing-mail and future-filter plans before applying them.
+- Unfinished forward plans from the previous grouping model stop on upgrade. Successful actions and undo work are retained.
+- Future rules still match exact receiving addresses. Messages with several possible owners remain held for review. Proton future rules still require importing the reviewed Sieve file in Proton Mail.
+
 ## [1.8.0] - 2026-09-08
 
 ### Fixed
